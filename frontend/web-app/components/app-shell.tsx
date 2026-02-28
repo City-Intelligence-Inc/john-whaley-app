@@ -5,9 +5,10 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
   Upload,
-  PlayCircle,
+  Brain,
   Users,
   Settings,
+  ListChecks,
 } from "lucide-react";
 import {
   Sidebar,
@@ -27,9 +28,10 @@ import { Separator } from "@/components/ui/separator";
 
 const navItems = [
   { title: "Dashboard", href: "/", icon: LayoutDashboard },
-  { title: "Upload CSV", href: "/upload", icon: Upload },
-  { title: "Review", href: "/review", icon: PlayCircle },
-  { title: "Applicants", href: "/applicants", icon: Users },
+  { title: "Upload Applicants", href: "/upload", icon: Upload },
+  { title: "AI Analysis", href: "/analyze", icon: Brain },
+  { title: "Results", href: "/results", icon: ListChecks },
+  { title: "All Applicants", href: "/applicants", icon: Users },
   { title: "Settings", href: "/settings", icon: Settings },
 ];
 
@@ -44,12 +46,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <div className="flex size-8 items-center justify-center rounded-md bg-primary text-primary-foreground text-sm font-bold">
               AR
             </div>
-            <span className="text-sm font-semibold">Applicant Reviewer</span>
+            <div className="flex flex-col">
+              <span className="text-sm font-semibold leading-none">Applicant Reviewer</span>
+              <span className="text-[10px] text-muted-foreground">Event Organizer Tool</span>
+            </div>
           </div>
         </SidebarHeader>
         <SidebarContent>
           <SidebarGroup>
-            <SidebarGroupLabel>Navigation</SidebarGroupLabel>
+            <SidebarGroupLabel>Menu</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 {navItems.map((item) => (

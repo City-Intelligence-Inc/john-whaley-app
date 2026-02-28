@@ -1,5 +1,6 @@
 import csv
 import io
+import json
 import uuid
 from typing import Optional
 
@@ -55,6 +56,15 @@ class ReviewRequest(BaseModel):
 class PromptSettings(BaseModel):
     default_prompt: str = "You are reviewing an event applicant. Based on the applicant's information below, provide a brief assessment of their fit for the event. Consider their professional background, relevance, and potential contribution."
     criteria: list[str] = ["relevance", "experience", "potential_contribution"]
+
+
+class BulkAnalyzeRequest(BaseModel):
+    api_key: str
+    model: str = "claude-sonnet-4-20250514"
+    provider: str = "anthropic"
+    prompt: str
+    criteria: list[str] = []
+    criteria_weights: Optional[list[str]] = None
 
 
 @app.post("/applicants/upload-csv", status_code=201)
@@ -249,6 +259,120 @@ def review_applicant(applicant_id: str, body: ReviewRequest):
 
     updated = table.get_item(Key={"applicant_id": applicant_id})
     return updated["Item"]
+
+
+@app.delete("/applicants/all")
+def delete_all_applicants():
+    response = table.scan(ProjectionExpression="applicant_id")
+    items = response.get("Items", [])
+    count = 0
+    with table.batch_writer() as batch:
+        for item in items:
+            batch.delete_item(Key={"applicant_id": item["applicant_id"]})
+            count += 1
+    return {"deleted": count}
+
+
+@app.post("/applicants/analyze-all")
+def analyze_all_applicants(body: BulkAnalyzeRequest):
+    response = table.scan()
+    applicants = response.get("Items", [])
+
+    if not applicants:
+        raise HTTPException(status_code=400, detail="No applicants to analyze")
+
+    # Build all applicant summaries
+    applicant_summaries = []
+    for a in applicants:
+        info = ", ".join(
+            f"{k}: {v}" for k, v in a.items()
+            if k not in ("applicant_id", "ai_review", "ai_score", "ai_reasoning")
+        )
+        applicant_summaries.append(f"[ID: {a['applicant_id']}] {info}")
+
+    criteria_text = ""
+    if body.criteria:
+        criteria_text = f"\n\nEvaluation criteria (in order of importance): {', '.join(body.criteria)}"
+        if body.criteria_weights:
+            criteria_text = f"\n\nEvaluation criteria with weights: " + ", ".join(
+                f"{c} ({w})" for c, w in zip(body.criteria, body.criteria_weights)
+            )
+
+    full_prompt = f"""{body.prompt}{criteria_text}
+
+Here are all the applicants:
+
+{chr(10).join(applicant_summaries)}
+
+For each applicant, provide a JSON response with this exact format:
+{{
+  "candidates": [
+    {{
+      "id": "applicant_id",
+      "score": 1-100,
+      "status": "accepted" or "waitlisted" or "rejected",
+      "reasoning": "brief 1-2 sentence explanation"
+    }}
+  ]
+}}
+
+Rank them by score (highest first). The top candidates should be "accepted", borderline ones "waitlisted", and poor fits "rejected". Return ONLY the JSON, no other text."""
+
+    try:
+        if body.provider == "anthropic":
+            import anthropic
+            client = anthropic.Anthropic(api_key=body.api_key)
+            message = client.messages.create(
+                model=body.model,
+                max_tokens=4096,
+                messages=[{"role": "user", "content": full_prompt}],
+            )
+            raw = message.content[0].text
+        elif body.provider == "openai":
+            import openai
+            client = openai.OpenAI(api_key=body.api_key)
+            completion = client.chat.completions.create(
+                model=body.model,
+                messages=[{"role": "user", "content": full_prompt}],
+                max_tokens=4096,
+            )
+            raw = completion.choices[0].message.content
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported provider: {body.provider}")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"AI provider error: {str(e)}")
+
+    # Parse JSON from response
+    try:
+        # Strip markdown code fences if present
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("\n", 1)[1]
+            cleaned = cleaned.rsplit("```", 1)[0]
+        result = json.loads(cleaned)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=502, detail=f"AI returned invalid JSON: {raw[:500]}")
+
+    # Update each applicant with their score, status, and reasoning
+    for candidate in result.get("candidates", []):
+        cid = candidate.get("id")
+        if not cid:
+            continue
+        table.update_item(
+            Key={"applicant_id": cid},
+            UpdateExpression="SET #s = :s, ai_score = :sc, ai_reasoning = :r",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={
+                ":s": candidate.get("status", "pending"),
+                ":sc": str(candidate.get("score", 0)),
+                ":r": candidate.get("reasoning", ""),
+            },
+        )
+
+    return result
 
 
 @app.get("/settings/prompts")

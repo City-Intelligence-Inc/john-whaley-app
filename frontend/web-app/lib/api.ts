@@ -10,6 +10,8 @@ export interface Applicant {
   location?: string;
   status: string;
   ai_review?: string;
+  ai_score?: string;
+  ai_reasoning?: string;
   [key: string]: unknown;
 }
 
@@ -34,16 +36,36 @@ export interface ReviewRequest {
   criteria?: string[];
 }
 
+export interface BulkAnalyzeRequest {
+  api_key: string;
+  model: string;
+  provider: string;
+  prompt: string;
+  criteria: string[];
+  criteria_weights?: string[];
+}
+
+export interface AnalysisResult {
+  candidates: {
+    id: string;
+    score: number;
+    status: string;
+    reasoning: string;
+  }[];
+}
+
 async function fetchAPI<T>(
   path: string,
   options?: RequestInit
 ): Promise<T> {
+  const headers: Record<string, string> = { ...options?.headers as Record<string, string> };
+  if (!(options?.body instanceof FormData)) {
+    headers["Content-Type"] = "application/json";
+  }
+
   const res = await fetch(`${API_URL}${path}`, {
     ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers,
-    },
+    headers,
   });
 
   if (!res.ok) {
@@ -77,6 +99,11 @@ export const api = {
       method: "DELETE",
     }),
 
+  deleteAllApplicants: () =>
+    fetchAPI<{ deleted: number }>("/applicants/all", {
+      method: "DELETE",
+    }),
+
   // CSV Upload
   uploadCSV: async (file: File) => {
     const formData = new FormData();
@@ -102,9 +129,16 @@ export const api = {
       body: JSON.stringify({ applicant_ids: applicantIds, status }),
     }),
 
-  // AI Review
+  // AI Review (single)
   reviewApplicant: (id: string, data: ReviewRequest) =>
     fetchAPI<Applicant>(`/applicants/${id}/review`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  // Bulk AI Analysis
+  analyzeAll: (data: BulkAnalyzeRequest) =>
+    fetchAPI<AnalysisResult>("/applicants/analyze-all", {
       method: "POST",
       body: JSON.stringify(data),
     }),
