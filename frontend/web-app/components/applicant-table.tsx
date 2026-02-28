@@ -32,6 +32,7 @@ export function ApplicantTable({ applicants, onRefresh }: ApplicantTableProps) {
   const [updating, setUpdating] = useState<string | null>(null);
 
   const handleStatusChange = async (id: string, status: string) => {
+    console.log("[ApplicantTable] Status change clicked:", id, "->", status);
     setUpdating(id);
     try {
       await api.updateApplicant(id, { status });
@@ -45,6 +46,7 @@ export function ApplicantTable({ applicants, onRefresh }: ApplicantTableProps) {
   };
 
   const handleDelete = async (id: string) => {
+    console.log("[ApplicantTable] Delete clicked:", id);
     try {
       await api.deleteApplicant(id);
       toast.success("Applicant deleted");

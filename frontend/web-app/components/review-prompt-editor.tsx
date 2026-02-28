@@ -23,6 +23,7 @@ export function ReviewPromptEditor({ settings, onSave }: ReviewPromptEditorProps
   const [saving, setSaving] = useState(false);
 
   const addCriterion = () => {
+    console.log("[PromptEditor] Add criterion clicked:", newCriterion.trim());
     const value = newCriterion.trim();
     if (value && !criteria.includes(value)) {
       setCriteria([...criteria, value]);
@@ -31,10 +32,12 @@ export function ReviewPromptEditor({ settings, onSave }: ReviewPromptEditorProps
   };
 
   const removeCriterion = (c: string) => {
+    console.log("[PromptEditor] Remove criterion clicked:", c);
     setCriteria(criteria.filter((x) => x !== c));
   };
 
   const handleSave = async () => {
+    console.log("[PromptEditor] Save clicked, criteria:", criteria);
     setSaving(true);
     try {
       await api.updatePromptSettings({ default_prompt: prompt, criteria });

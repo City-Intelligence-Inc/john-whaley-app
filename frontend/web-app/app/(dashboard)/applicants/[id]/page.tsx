@@ -54,6 +54,7 @@ export default function ApplicantDetailPage({
   const [reviewing, setReviewing] = useState(false);
 
   const handleStatusChange = async (status: string) => {
+    console.log("[ApplicantDetail] Status change clicked:", status, "for", id);
     try {
       await api.updateApplicant(id, { status });
       toast.success(`Status updated to ${status}`);
@@ -64,6 +65,7 @@ export default function ApplicantDetailPage({
   };
 
   const handleDelete = async () => {
+    console.log("[ApplicantDetail] Delete clicked for:", id);
     setDeleting(true);
     try {
       await api.deleteApplicant(id);
@@ -76,6 +78,7 @@ export default function ApplicantDetailPage({
   };
 
   const handleReview = async () => {
+    console.log("[ApplicantDetail] Run AI Review clicked for:", id);
     const apiKey = localStorage.getItem("ai_api_key");
     const provider = localStorage.getItem("ai_provider") || "anthropic";
     const model = localStorage.getItem("ai_model") || "claude-sonnet-4-20250514";
@@ -137,7 +140,7 @@ export default function ApplicantDetailPage({
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
-        <Button variant="ghost" onClick={() => router.back()}>
+        <Button variant="ghost" onClick={() => { console.log("[ApplicantDetail] Back clicked"); router.back(); }}>
           <ArrowLeft className="size-4 mr-2" />
           Back
         </Button>

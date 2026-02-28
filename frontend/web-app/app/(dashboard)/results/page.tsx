@@ -59,7 +59,7 @@ function ApplicantRow({
     <div className="border rounded-lg">
       <div
         className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-muted/50 transition-colors"
-        onClick={() => setExpanded(!expanded)}
+        onClick={() => { console.log("[Results] Applicant row clicked:", applicant.name, "expanded:", !expanded); setExpanded(!expanded); }}
       >
         <span className="text-sm font-mono text-muted-foreground w-6 text-right shrink-0">
           {rank}.
@@ -87,15 +87,15 @@ function ApplicantRow({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => onStatusChange(applicant.applicant_id, "accepted")}>
+            <DropdownMenuItem onClick={() => { console.log("[Results] Move to accepted:", applicant.name); onStatusChange(applicant.applicant_id, "accepted"); }}>
               <CheckCircle2 className="size-4 mr-2 text-green-500" />
               Should Attend
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onStatusChange(applicant.applicant_id, "waitlisted")}>
+            <DropdownMenuItem onClick={() => { console.log("[Results] Move to waitlisted:", applicant.name); onStatusChange(applicant.applicant_id, "waitlisted"); }}>
               <Clock className="size-4 mr-2 text-yellow-500" />
               Move to Waitlist
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onStatusChange(applicant.applicant_id, "rejected")}>
+            <DropdownMenuItem onClick={() => { console.log("[Results] Move to rejected:", applicant.name); onStatusChange(applicant.applicant_id, "rejected"); }}>
               <XCircle className="size-4 mr-2 text-red-500" />
               Reject
             </DropdownMenuItem>
@@ -253,6 +253,7 @@ export default function ResultsPage() {
   );
 
   const handleStatusChange = async (id: string, status: string) => {
+    console.log("[Results] Status change:", id, "->", status);
     try {
       await api.updateApplicant(id, { status });
       toast.success(`Moved to ${status}`);

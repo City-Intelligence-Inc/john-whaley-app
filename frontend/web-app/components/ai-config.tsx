@@ -43,6 +43,7 @@ export function AIConfig() {
   }, []);
 
   const handleSave = () => {
+    console.log("[AIConfig] Save clicked, provider:", provider, "model:", model);
     localStorage.setItem("ai_api_key", apiKey);
     localStorage.setItem("ai_provider", provider);
     localStorage.setItem("ai_model", model);
@@ -50,6 +51,7 @@ export function AIConfig() {
   };
 
   const handleProviderChange = (value: string) => {
+    console.log("[AIConfig] Provider changed:", value);
     setProvider(value);
     const firstModel = models[value]?.[0]?.value;
     if (firstModel) setModel(firstModel);

@@ -29,6 +29,7 @@ export default function UploadPage() {
   const [adding, setAdding] = useState(false);
 
   const handleAddManual = async () => {
+    console.log("[Upload] Add Participant clicked:", { name, email, platform, profileLink, company, title, location });
     if (!name.trim()) {
       toast.error("Name is required");
       return;
@@ -111,7 +112,7 @@ export default function UploadPage() {
               <Label>
                 Social Platform <span className="text-destructive">*</span>
               </Label>
-              <Select value={platform} onValueChange={setPlatform}>
+              <Select value={platform} onValueChange={(v) => { console.log("[Upload] Platform changed:", v); setPlatform(v); }}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>

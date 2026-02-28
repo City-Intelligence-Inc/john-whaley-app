@@ -45,6 +45,7 @@ export default function AnalyzePage() {
   }, []);
 
   const addCriterion = () => {
+    console.log("[Analyze] Add criterion clicked:", newCriterion.trim());
     const value = newCriterion.trim();
     if (value && !criteria.includes(value)) {
       setCriteria([...criteria, value]);
@@ -53,10 +54,12 @@ export default function AnalyzePage() {
   };
 
   const removeCriterion = (c: string) => {
+    console.log("[Analyze] Remove criterion clicked:", c);
     setCriteria(criteria.filter((x) => x !== c));
   };
 
   const handleAnalyze = async () => {
+    console.log("[Analyze] Analyze All clicked, criteria:", criteria);
     const apiKey = localStorage.getItem("ai_api_key");
     const provider = localStorage.getItem("ai_provider") || "anthropic";
     const model = localStorage.getItem("ai_model") || "claude-sonnet-4-20250514";
@@ -131,10 +134,10 @@ export default function AnalyzePage() {
           </p>
         </div>
         <div className="flex gap-3">
-          <Button onClick={() => router.push("/results")} size="lg">
+          <Button onClick={() => { console.log("[Analyze] View Results clicked"); router.push("/results"); }} size="lg">
             View Results
           </Button>
-          <Button onClick={() => setStep("criteria")} variant="outline" size="lg">
+          <Button onClick={() => { console.log("[Analyze] Re-analyze clicked"); setStep("criteria"); }} variant="outline" size="lg">
             Re-analyze
           </Button>
         </div>

@@ -63,6 +63,7 @@ export function CSVUploader() {
 
   const handleFile = useCallback(
     (f: File) => {
+      console.log("[CSVUploader] File selected:", f.name, f.size, "bytes");
       if (!f.name.endsWith(".csv")) {
         toast.error("Please select a CSV file");
         return;
@@ -80,6 +81,7 @@ export function CSVUploader() {
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
+      console.log("[CSVUploader] File dropped");
       e.preventDefault();
       setDragOver(false);
       const f = e.dataTransfer.files[0];
@@ -89,6 +91,7 @@ export function CSVUploader() {
   );
 
   const handleUpload = async () => {
+    console.log("[CSVUploader] Upload CSV clicked:", file?.name);
     if (!file) return;
     setUploading(true);
     try {
@@ -113,7 +116,7 @@ export function CSVUploader() {
       >
         <CardContent
           className="flex flex-col items-center justify-center py-12 cursor-pointer"
-          onClick={() => inputRef.current?.click()}
+          onClick={() => { console.log("[CSVUploader] Drop zone clicked, opening file picker"); inputRef.current?.click(); }}
           onDragOver={(e) => {
             e.preventDefault();
             setDragOver(true);
@@ -156,6 +159,7 @@ export function CSVUploader() {
                 variant="ghost"
                 size="icon"
                 onClick={() => {
+                  console.log("[CSVUploader] Clear file clicked");
                   setFile(null);
                   setPreview([]);
                   setHeaders([]);

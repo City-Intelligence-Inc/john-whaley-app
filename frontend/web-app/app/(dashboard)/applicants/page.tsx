@@ -45,11 +45,11 @@ export default function ApplicantsPage() {
           <Input
             placeholder="Search by name, email, or company..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => { console.log("[Applicants] Search input:", e.target.value); setSearch(e.target.value); }}
             className="pl-9"
           />
         </div>
-        <Tabs value={statusFilter} onValueChange={setStatusFilter}>
+        <Tabs value={statusFilter} onValueChange={(v) => { console.log("[Applicants] Filter tab clicked:", v); setStatusFilter(v); }}>
           <TabsList>
             {statusFilters.map((s) => (
               <TabsTrigger key={s} value={s} className="capitalize">

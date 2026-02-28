@@ -37,6 +37,7 @@ export default function DashboardPage() {
   const [clearing, setClearing] = useState(false);
 
   const handleClearAll = async () => {
+    console.log("[Dashboard] Clear Database clicked");
     setClearing(true);
     try {
       const result = await api.deleteAllApplicants();
