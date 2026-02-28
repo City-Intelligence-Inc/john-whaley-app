@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/table";
 import { api } from "@/lib/api";
 
-export function CSVUploader() {
+export function CSVUploader({ onUploadSuccess }: { onUploadSuccess?: (count: number) => void } = {}) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<Record<string, string>[]>([]);
   const [headers, setHeaders] = useState<string[]>([]);
@@ -97,6 +97,7 @@ export function CSVUploader() {
     try {
       const result = await api.uploadCSV(file);
       toast.success(`Uploaded ${result.count} applicants`);
+      onUploadSuccess?.(result.count);
       setFile(null);
       setPreview([]);
       setHeaders([]);
