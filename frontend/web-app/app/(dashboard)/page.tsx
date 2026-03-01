@@ -53,6 +53,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { Progress } from "@/components/ui/progress";
 import { api, type Applicant } from "@/lib/api";
 import { useApplicants, useStats } from "@/hooks/use-applicants";
 import { CSVUploader } from "@/components/csv-uploader";
@@ -278,7 +279,7 @@ function ConsoleLog({
   logs,
   logRef,
 }: {
-  logs: { time: string; message: string }[];
+  logs: { time: string; message: string; color?: string }[];
   logRef: React.RefObject<HTMLDivElement | null>;
 }) {
   return (
@@ -290,7 +291,7 @@ function ConsoleLog({
         <span className="text-zinc-600">Waiting for activity...</span>
       )}
       {logs.map((log, i) => (
-        <div key={i} className="leading-relaxed">
+        <div key={i} className="leading-relaxed" style={log.color ? { color: log.color } : undefined}>
           <span className="text-zinc-500">[{log.time}]</span> {log.message}
         </div>
       ))}
@@ -320,8 +321,16 @@ export default function Page() {
   ]);
   const [newCriterion, setNewCriterion] = useState("");
 
+  // Analysis progress state
+  const [analysisProgress, setAnalysisProgress] = useState<{
+    completed: number;
+    total: number;
+    errors: number;
+  } | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+
   // Console log state
-  const [logs, setLogs] = useState<{ time: string; message: string }[]>([]);
+  const [logs, setLogs] = useState<{ time: string; message: string; color?: string }[]>([]);
   const logRef = useRef<HTMLDivElement>(null);
 
   // Data hooks
@@ -400,59 +409,71 @@ export default function Page() {
   const handleAnalyze = async () => {
     setStep("analyze");
     setLogs([]);
+    setAnalysisProgress(null);
+    setAnalyzing(true);
 
     const modelLabel = models.find((m) => m.value === model)?.label || model;
 
-    // Stagger logs slightly for visual effect
-    const log = (msg: string) => {
+    const log = (msg: string, color?: string) => {
       const now = new Date();
       const time = now.toLocaleTimeString("en-US", { hour12: false });
-      setLogs((prev) => [...prev, { time, message: msg }]);
+      setLogs((prev) => [...prev, { time, message: msg, color }]);
     };
 
-    log(`Starting analysis of ${stats?.total || 0} applicants...`);
+    log(`Starting per-applicant analysis...`);
     log(`Provider: ${provider === "anthropic" ? "Anthropic" : "OpenAI"} | Model: ${modelLabel}`);
-    log(`Sending ${stats?.total || 0} applicants to ${modelLabel}...`);
-
-    await new Promise((r) => setTimeout(r, 300));
-
     log(`Prompt: "${prompt.substring(0, 80)}${prompt.length > 80 ? "..." : ""}"`);
     log(`Criteria: ${criteria.join(", ")}`);
+
+    let acceptedCount = 0;
+    let waitlistedCount = 0;
+    let rejectedCount = 0;
 
     try {
       await api.updatePromptSettings({ default_prompt: prompt, criteria });
       log("Saved prompt settings.");
-      log("Waiting for AI response...");
+      log("Streaming analysis — each applicant analyzed individually...");
 
-      const result = await api.analyzeAll({
-        api_key: apiKey,
-        model,
-        provider,
-        prompt,
-        criteria,
-      });
-
-      const accepted = result.candidates.filter((c) => c.status === "accepted").length;
-      const waitlisted = result.candidates.filter((c) => c.status === "waitlisted").length;
-      const rejected = result.candidates.filter((c) => c.status === "rejected").length;
-      const approxTokens = Math.round(JSON.stringify(result).length / 4);
-
-      log(`Response received (~${approxTokens.toLocaleString()} tokens)`);
-      log("Parsing AI response...");
-      log(`Results: ${accepted} accepted, ${waitlisted} waitlisted, ${rejected} rejected`);
-      log("Analysis complete!");
+      await api.analyzeAllStream(
+        { api_key: apiKey, model, provider, prompt, criteria },
+        {
+          onStart: (data) => {
+            setAnalysisProgress({ completed: 0, total: data.total, errors: 0 });
+            log(`Analyzing ${data.total} applicants (concurrency: 10)...`);
+          },
+          onProgress: (data) => {
+            setAnalysisProgress({ completed: data.completed, total: data.total, errors: data.errors });
+            const statusLabel = data.status.toUpperCase();
+            log(`[${data.completed}/${data.total}] ${data.name} — Score: ${data.score} — ${statusLabel}`);
+            if (data.status === "accepted") acceptedCount++;
+            else if (data.status === "waitlisted") waitlistedCount++;
+            else if (data.status === "rejected") rejectedCount++;
+          },
+          onError: (data) => {
+            setAnalysisProgress({ completed: data.completed, total: data.total, errors: data.errors });
+            log(`[${data.completed}/${data.total}] ${data.name} — ERROR: ${data.error}`, "red");
+          },
+          onComplete: (data) => {
+            setAnalysisProgress({ completed: data.completed, total: data.total, errors: data.errors });
+            log(`Analysis complete: ${acceptedCount} accepted, ${waitlistedCount} waitlisted, ${rejectedCount} rejected` +
+              (data.errors > 0 ? ` (${data.errors} errors)` : ""));
+          },
+        }
+      );
 
       toast.success(
-        `Analysis complete: ${accepted} accepted, ${waitlisted} waitlisted, ${rejected} rejected`
+        `Analysis complete: ${acceptedCount} accepted, ${waitlistedCount} waitlisted, ${rejectedCount} rejected`
       );
 
       await refreshApplicants();
+      setAnalyzing(false);
       await new Promise((r) => setTimeout(r, 1000));
       setStep("results");
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Analysis failed";
-      log(`ERROR: ${msg}`);
+      log(`ERROR: ${msg}`, "red");
       toast.error(msg);
+      setAnalyzing(false);
     }
   };
 
@@ -722,14 +743,41 @@ export default function Page() {
       {step === "analyze" && (
         <div className="space-y-6">
           <div className="flex items-center gap-3">
-            <Loader2 className="size-5 animate-spin text-primary" />
+            {analyzing ? (
+              <Loader2 className="size-5 animate-spin text-primary" />
+            ) : (
+              <CheckCircle2 className="size-5 text-green-500" />
+            )}
             <div>
-              <h2 className="text-2xl font-bold tracking-tight">Analyzing</h2>
+              <h2 className="text-2xl font-bold tracking-tight">
+                {analyzing ? "Analyzing" : "Analysis Complete"}
+              </h2>
               <p className="text-muted-foreground">
-                AI is reviewing all applicants against your criteria...
+                {analyzing
+                  ? "AI is reviewing each applicant individually..."
+                  : "All applicants have been analyzed."}
               </p>
             </div>
           </div>
+
+          {analysisProgress && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">
+                  {analysisProgress.completed} of {analysisProgress.total} applicants processed
+                </span>
+                <span className="font-mono text-muted-foreground">
+                  {Math.round((analysisProgress.completed / analysisProgress.total) * 100)}%
+                  {analysisProgress.errors > 0 && (
+                    <span className="text-red-500 ml-2">
+                      ({analysisProgress.errors} {analysisProgress.errors === 1 ? "error" : "errors"})
+                    </span>
+                  )}
+                </span>
+              </div>
+              <Progress value={(analysisProgress.completed / analysisProgress.total) * 100} />
+            </div>
+          )}
 
           <ConsoleLog logs={logs} logRef={logRef} />
         </div>

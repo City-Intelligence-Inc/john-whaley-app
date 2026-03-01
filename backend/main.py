@@ -1,3 +1,4 @@
+import asyncio
 import csv
 import io
 import json
@@ -7,6 +8,7 @@ from typing import Optional
 import boto3
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 app = FastAPI(title="John Whaley Applicant Reviewer")
@@ -373,6 +375,135 @@ Rank them by score (highest first). The top candidates should be "accepted", bor
         )
 
     return result
+
+
+async def analyze_single_applicant(applicant: dict, body: BulkAnalyzeRequest, semaphore: asyncio.Semaphore) -> dict:
+    applicant_id = applicant["applicant_id"]
+    name = applicant.get("name", "Unknown")
+
+    async with semaphore:
+        # Build per-applicant info
+        info = "\n".join(
+            f"- {k}: {v}" for k, v in applicant.items()
+            if k not in ("applicant_id", "ai_review", "ai_score", "ai_reasoning")
+        )
+
+        criteria_text = ""
+        if body.criteria:
+            criteria_text = f"\n\nEvaluation criteria (in order of importance): {', '.join(body.criteria)}"
+            if body.criteria_weights:
+                criteria_text = f"\n\nEvaluation criteria with weights: " + ", ".join(
+                    f"{c} ({w})" for c, w in zip(body.criteria, body.criteria_weights)
+                )
+
+        full_prompt = f"""{body.prompt}{criteria_text}
+
+Here is the applicant's information:
+
+{info}
+
+Evaluate this applicant and return ONLY a JSON object with this exact format:
+{{"score": <number 1-100>, "status": "accepted" or "waitlisted" or "rejected", "reasoning": "brief 1-2 sentence explanation"}}
+
+Return ONLY the JSON, no other text."""
+
+        try:
+            if body.provider == "anthropic":
+                import anthropic
+                client = anthropic.AsyncAnthropic(api_key=body.api_key)
+                message = await client.messages.create(
+                    model=body.model,
+                    max_tokens=512,
+                    messages=[{"role": "user", "content": full_prompt}],
+                )
+                raw = message.content[0].text
+            elif body.provider == "openai":
+                import openai
+                client = openai.AsyncOpenAI(api_key=body.api_key)
+                completion = await client.chat.completions.create(
+                    model=body.model,
+                    messages=[{"role": "user", "content": full_prompt}],
+                    max_tokens=512,
+                )
+                raw = completion.choices[0].message.content
+            else:
+                return {"applicant_id": applicant_id, "name": name, "error": f"Unsupported provider: {body.provider}"}
+
+            # Parse JSON
+            cleaned = raw.strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.split("\n", 1)[1]
+                cleaned = cleaned.rsplit("```", 1)[0]
+            result = json.loads(cleaned)
+
+            score = str(result.get("score", 0))
+            status = result.get("status", "pending")
+            reasoning = result.get("reasoning", "")
+
+            # Write to DynamoDB
+            table.update_item(
+                Key={"applicant_id": applicant_id},
+                UpdateExpression="SET #s = :s, ai_score = :sc, ai_reasoning = :r",
+                ExpressionAttributeNames={"#s": "status"},
+                ExpressionAttributeValues={
+                    ":s": status,
+                    ":sc": score,
+                    ":r": reasoning,
+                },
+            )
+
+            return {
+                "applicant_id": applicant_id,
+                "name": name,
+                "score": int(result.get("score", 0)),
+                "status": status,
+                "reasoning": reasoning,
+            }
+
+        except json.JSONDecodeError:
+            return {"applicant_id": applicant_id, "name": name, "error": f"Invalid JSON from AI: {raw[:200]}"}
+        except Exception as e:
+            return {"applicant_id": applicant_id, "name": name, "error": str(e)}
+
+
+@app.post("/applicants/analyze-all-stream")
+async def analyze_all_stream(body: BulkAnalyzeRequest):
+    response = table.scan()
+    applicants = response.get("Items", [])
+
+    if not applicants:
+        raise HTTPException(status_code=400, detail="No applicants to analyze")
+
+    async def event_generator():
+        total = len(applicants)
+        semaphore = asyncio.Semaphore(10)
+
+        # Send start event
+        yield f"event: start\ndata: {json.dumps({'total': total})}\n\n"
+
+        completed = 0
+        errors = 0
+
+        # Create all tasks
+        tasks = {
+            asyncio.ensure_future(analyze_single_applicant(a, body, semaphore)): a
+            for a in applicants
+        }
+
+        for coro in asyncio.as_completed(tasks.keys()):
+            result = await coro
+            completed += 1
+
+            if "error" in result:
+                errors += 1
+                yield f"event: error\ndata: {json.dumps({'completed': completed, 'total': total, 'errors': errors, 'applicant_id': result['applicant_id'], 'name': result['name'], 'error': result['error']})}\n\n"
+            else:
+                yield f"event: progress\ndata: {json.dumps({'completed': completed, 'total': total, 'errors': errors, 'applicant_id': result['applicant_id'], 'name': result['name'], 'score': result['score'], 'status': result['status'], 'reasoning': result['reasoning']})}\n\n"
+
+        # Send complete event
+        yield f"event: complete\ndata: {json.dumps({'completed': completed, 'total': total, 'errors': errors})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @app.get("/settings/prompts")

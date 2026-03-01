@@ -110,6 +110,7 @@ resource "aws_iam_policy" "dynamodb_access" {
         "dynamodb:PutItem",
         "dynamodb:UpdateItem",
         "dynamodb:DeleteItem",
+        "dynamodb:BatchWriteItem",
         "dynamodb:Scan",
         "dynamodb:Query"
       ]

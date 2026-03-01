@@ -54,6 +54,43 @@ export interface AnalysisResult {
   }[];
 }
 
+export interface SSEStartEvent {
+  total: number;
+}
+
+export interface SSEProgressEvent {
+  completed: number;
+  total: number;
+  errors: number;
+  applicant_id: string;
+  name: string;
+  score: number;
+  status: string;
+  reasoning: string;
+}
+
+export interface SSEErrorEvent {
+  completed: number;
+  total: number;
+  errors: number;
+  applicant_id: string;
+  name: string;
+  error: string;
+}
+
+export interface SSECompleteEvent {
+  completed: number;
+  total: number;
+  errors: number;
+}
+
+export interface AnalyzeStreamCallbacks {
+  onStart?: (data: SSEStartEvent) => void;
+  onProgress?: (data: SSEProgressEvent) => void;
+  onError?: (data: SSEErrorEvent) => void;
+  onComplete?: (data: SSECompleteEvent) => void;
+}
+
 async function fetchAPI<T>(
   path: string,
   options?: RequestInit
@@ -142,6 +179,47 @@ export const api = {
       method: "POST",
       body: JSON.stringify(data),
     }),
+
+  // Streaming Bulk AI Analysis (SSE)
+  analyzeAllStream: async (data: BulkAnalyzeRequest, callbacks: AnalyzeStreamCallbacks) => {
+    const res = await fetch(`${API_URL}/applicants/analyze-all-stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(error.detail || "Stream request failed");
+    }
+
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      let eventType = "";
+      for (const line of lines) {
+        if (line.startsWith("event: ")) {
+          eventType = line.slice(7).trim();
+        } else if (line.startsWith("data: ") && eventType) {
+          const data = JSON.parse(line.slice(6));
+          if (eventType === "start") callbacks.onStart?.(data);
+          else if (eventType === "progress") callbacks.onProgress?.(data);
+          else if (eventType === "error") callbacks.onError?.(data);
+          else if (eventType === "complete") callbacks.onComplete?.(data);
+          eventType = "";
+        }
+      }
+    }
+  },
 
   // Settings
   getPromptSettings: () => fetchAPI<PromptSettings>("/settings/prompts"),
