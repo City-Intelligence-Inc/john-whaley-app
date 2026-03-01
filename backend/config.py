@@ -12,4 +12,4 @@ settings_table = dynamodb.Table("john-whaley-settings")
 
 VALID_STATUSES = {"pending", "accepted", "rejected", "waitlisted"}
 
-AI_FIELDS = {"ai_review", "ai_score", "ai_reasoning", "attendee_type"}
+AI_FIELDS = {"ai_review", "ai_score", "ai_reasoning", "attendee_type", "attendee_type_detail"}

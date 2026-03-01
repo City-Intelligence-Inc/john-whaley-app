@@ -135,7 +135,7 @@ CS 224G is Stanford's course on building LLM-powered applications. The event sho
 projects to VCs, entrepreneurs, faculty, alumni, press, and other students.
 
 Evaluate this applicant and return ONLY a JSON object with this exact format:
-{{"score": <number 1-100>, "status": "accepted" or "waitlisted" or "rejected", "attendee_type": "vc" or "entrepreneur" or "faculty" or "alumni" or "press" or "student" or "other", "reasoning": "brief 1-2 sentence explanation"}}
+{{"score": <number 1-100>, "status": "accepted" or "waitlisted" or "rejected", "attendee_type": "vc" or "entrepreneur" or "faculty" or "alumni" or "press" or "student" or "other", "attendee_type_detail": "<specific role>", "reasoning": "<2-3 sentence explanation>"}}
 
 For attendee_type, classify the applicant into ONE of these categories based on their background:
 - "vc" = VC partner, angel investor, fund manager, investing professional, anyone whose primary role is investing
@@ -146,6 +146,10 @@ For attendee_type, classify the applicant into ONE of these categories based on 
 - "student" = Currently enrolled student at any university
 - "other" = Industry professional, engineer, or anyone who does not clearly fit the above categories
 
+For attendee_type_detail: provide a SHORT specific label (1-3 words) describing what the person actually does.
+- For "other": this is REQUIRED — e.g. "Engineer", "Product Manager", "Designer", "Data Scientist", "Consultant", "Lawyer", "Government"
+- For known types: also provide a more specific label — e.g. "GP at Sequoia", "Stanford CS Prof", "TechCrunch Reporter", "PhD Student", "YC Founder"
+
 PRIORITY RULES for ambiguous cases — classify by their CURRENT primary role:
 - A Stanford alum who is now a VC partner → "vc" (current role takes priority)
 - A Stanford alum who is now a startup founder → "entrepreneur"
@@ -153,6 +157,8 @@ PRIORITY RULES for ambiguous cases — classify by their CURRENT primary role:
 - A Stanford alum with no other distinguishing role → "alumni"
 - A student who is also a founder → "entrepreneur" (if that is their primary identity)
 - When in doubt, pick the role most relevant to why they would attend a demo day for LLM projects
+
+For reasoning: Write 2-3 descriptive sentences that explain WHO this person is, WHY you classified them this way, and how relevant they are to a CS 224G Demo Day. Mention their specific role, company/affiliation, and what makes them a good or poor fit.
 
 Return ONLY the JSON, no other text.
 """.strip()
@@ -179,6 +185,7 @@ async def _analyze_one(applicant: dict, body: BulkAnalyzeRequest, semaphore: asy
                 "ai_score": str(result.get("score", 0)),
                 "ai_reasoning": result.get("reasoning", ""),
                 "attendee_type": result.get("attendee_type", "other"),
+                "attendee_type_detail": result.get("attendee_type_detail", ""),
             }
             db.update_applicant_fields(applicant_id, fields)
 
@@ -189,6 +196,7 @@ async def _analyze_one(applicant: dict, body: BulkAnalyzeRequest, semaphore: asy
                 "status": fields["status"],
                 "reasoning": fields["ai_reasoning"],
                 "attendee_type": fields["attendee_type"],
+                "attendee_type_detail": fields["attendee_type_detail"],
             }
 
         except json.JSONDecodeError:

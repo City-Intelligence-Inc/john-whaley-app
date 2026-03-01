@@ -121,6 +121,9 @@ const ATTENDEE_TYPES: { key: string; label: string; color: string }[] = [
   { key: "other", label: "Other", color: "#6b7280" },
 ];
 
+// Palette for "other" sub-types so each gets a distinct color
+const OTHER_COLORS = ["#6b7280", "#9ca3af", "#4b5563", "#78716c", "#a1a1aa", "#737373", "#94a3b8", "#64748b"];
+
 function AttendeeTypeCharts({ applicants }: { applicants: Applicant[] }) {
   const hasData = applicants.length > 0;
   const hasTypes = applicants.some((a) => a.attendee_type);
@@ -137,6 +140,38 @@ function AttendeeTypeCharts({ applicants }: { applicants: Applicant[] }) {
   }, [applicants]);
 
   const typeCountsNonZero = typeCounts.filter((t) => t.count > 0);
+
+  // Detailed breakdown — splits "other" into specific sub-types using attendee_type_detail
+  const detailedBreakdown = useMemo(() => {
+    const counts: Record<string, number> = {};
+    const colorMap: Record<string, string> = {};
+    for (const t of ATTENDEE_TYPES) {
+      if (t.key !== "other") colorMap[t.label] = t.color;
+    }
+    for (const a of applicants) {
+      const t = (a.attendee_type as string) || "other";
+      if (t === "other" && a.attendee_type_detail) {
+        const detail = a.attendee_type_detail as string;
+        counts[detail] = (counts[detail] || 0) + 1;
+      } else {
+        const typeInfo = ATTENDEE_TYPES.find((at) => at.key === t);
+        const label = typeInfo?.label || "Other";
+        counts[label] = (counts[label] || 0) + 1;
+      }
+    }
+    // Assign colors to "other" sub-types
+    let otherIdx = 0;
+    return Object.entries(counts)
+      .map(([label, count]) => ({
+        key: label,
+        label,
+        count,
+        color: colorMap[label] || OTHER_COLORS[otherIdx++ % OTHER_COLORS.length],
+      }))
+      .sort((a, b) => b.count - a.count);
+  }, [applicants]);
+
+  const detailedNonZero = detailedBreakdown.filter((t) => t.count > 0);
 
   // Decisions by type — always all types
   const typeStatusData = useMemo(() => {
@@ -240,27 +275,27 @@ function AttendeeTypeCharts({ applicants }: { applicants: Applicant[] }) {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {/* 1. Attendee Breakdown Pie */}
+        {/* 1. Detailed Attendee Breakdown Pie — splits "other" into specific roles */}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Attendee Breakdown</CardTitle>
-            <CardDescription className="text-xs">Distribution by attendee type</CardDescription>
+            <CardDescription className="text-xs">Distribution by role (Others shown by specific role)</CardDescription>
           </CardHeader>
           <CardContent className="relative">
             <ResponsiveContainer width="100%" height={240}>
               <PieChart>
                 <Pie
-                  data={typeCountsNonZero.length > 0 ? typeCountsNonZero : [{ label: "No data", count: 1, color: "#e5e7eb", key: "empty" }]}
+                  data={detailedNonZero.length > 0 ? detailedNonZero : [{ label: "No data", count: 1, color: "#e5e7eb", key: "empty" }]}
                   dataKey="count"
                   nameKey="label"
                   cx="50%"
                   cy="50%"
                   innerRadius={45}
                   outerRadius={80}
-                  label={typeCountsNonZero.length > 0 ? ({ label, count }: { label: string; count: number }) => `${label} (${count})` : false}
-                  labelLine={typeCountsNonZero.length > 0}
+                  label={detailedNonZero.length > 0 ? ({ label, count }: { label: string; count: number }) => `${label} (${count})` : false}
+                  labelLine={detailedNonZero.length > 0}
                 >
-                  {(typeCountsNonZero.length > 0 ? typeCountsNonZero : [{ key: "empty", color: "#e5e7eb" }]).map((entry) => (
+                  {(detailedNonZero.length > 0 ? detailedNonZero : [{ key: "empty", color: "#e5e7eb" }]).map((entry) => (
                     <Cell key={entry.key} fill={entry.color} />
                   ))}
                 </Pie>
@@ -546,7 +581,7 @@ function ApplicantCardScanner({
           )}
 
           {Object.entries(current)
-            .filter(([k]) => !["applicant_id", "session_id", "name", "email", "status", "ai_score", "ai_reasoning", "ai_review", "company", "title", "location", "linkedin_url", "attendee_type"].includes(k))
+            .filter(([k]) => !["applicant_id", "session_id", "name", "email", "status", "ai_score", "ai_reasoning", "ai_review", "company", "title", "location", "linkedin_url", "attendee_type", "attendee_type_detail"].includes(k))
             .filter(([, v]) => v && String(v).trim())
             .length > 0 && (
             <Collapsible>
@@ -559,7 +594,7 @@ function ApplicantCardScanner({
               <CollapsibleContent className="mt-2">
                 <div className="grid gap-1.5 text-sm">
                   {Object.entries(current)
-                    .filter(([k]) => !["applicant_id", "session_id", "name", "email", "status", "ai_score", "ai_reasoning", "ai_review", "company", "title", "location", "linkedin_url", "attendee_type"].includes(k))
+                    .filter(([k]) => !["applicant_id", "session_id", "name", "email", "status", "ai_score", "ai_reasoning", "ai_review", "company", "title", "location", "linkedin_url", "attendee_type", "attendee_type_detail"].includes(k))
                     .filter(([, v]) => v && String(v).trim())
                     .map(([k, v]) => (
                       <div key={k} className="flex gap-2">
@@ -679,7 +714,7 @@ function ApplicantDetailPanel({
 
   const skipKeys = new Set([
     "applicant_id", "session_id", "name", "email", "status", "ai_score",
-    "ai_reasoning", "ai_review", "company", "title", "location", "linkedin_url", "attendee_type",
+    "ai_reasoning", "ai_review", "company", "title", "location", "linkedin_url", "attendee_type", "attendee_type_detail",
   ]);
 
   return (
@@ -711,7 +746,7 @@ function ApplicantDetailPanel({
             </Badge>
             {applicant.attendee_type && (
               <Badge variant="outline" className="text-sm">
-                {applicant.attendee_type}
+                {applicant.attendee_type_detail || applicant.attendee_type}
               </Badge>
             )}
           </div>
@@ -1515,7 +1550,7 @@ export default function Page() {
                     <TableCell>
                       {a.attendee_type ? (
                         <Badge variant="outline" className="text-xs font-normal">
-                          {a.attendee_type}
+                          {a.attendee_type_detail || a.attendee_type}
                         </Badge>
                       ) : (
                         <span className="text-muted-foreground text-xs">—</span>

@@ -24,6 +24,7 @@ export interface Applicant {
   ai_score?: string;
   ai_reasoning?: string;
   attendee_type?: string;
+  attendee_type_detail?: string;
   [key: string]: unknown;
 }
 
