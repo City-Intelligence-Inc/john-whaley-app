@@ -2188,7 +2188,7 @@ export default function Page() {
         onOpenChange={setShowWizard}
         preferences={selectionPreferences}
         panelConfig={panelConfig}
-        onSave={(savedPrefs, savedPanelConfig) => {
+        onSave={(savedPrefs, savedPanelConfig, savedPersonaEdits) => {
           setSelectionPreferences(savedPrefs);
           setWizardCompleted(true);
           localStorage.setItem("selection_preferences", JSON.stringify(savedPrefs));
@@ -2198,6 +2198,11 @@ export default function Page() {
           } else {
             setPanelConfig(undefined);
             localStorage.removeItem("panel_config");
+          }
+          if (savedPersonaEdits && Object.keys(savedPersonaEdits).length > 0) {
+            localStorage.setItem("persona_edits", JSON.stringify(savedPersonaEdits));
+          } else {
+            localStorage.removeItem("persona_edits");
           }
           api.updateSelectionPreferences(savedPrefs).catch(() => {});
           // Auto-start analysis after wizard — pass prefs directly to avoid stale closure

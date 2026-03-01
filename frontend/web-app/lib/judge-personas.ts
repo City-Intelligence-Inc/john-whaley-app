@@ -5,6 +5,8 @@ export interface JudgePersona {
   specialty: string;
   description: string;
   preferred_types: string[];
+  shape: "circle" | "square" | "diamond" | "hexagon" | "rounded" | "pill";
+  color: string; // tailwind bg color class
 }
 
 export const JUDGE_PERSONAS: JudgePersona[] = [
@@ -15,6 +17,8 @@ export const JUDGE_PERSONAS: JudgePersona[] = [
     specialty: "Deep AI/ML expertise",
     description: "Laser-focused on technical depth. Wants people who can talk shop about transformers, fine-tuning, and inference optimization.",
     preferred_types: ["faculty", "student", "entrepreneur"],
+    shape: "circle",
+    color: "bg-blue-100 dark:bg-blue-900/40",
   },
   {
     id: "venture_eye",
@@ -23,6 +27,8 @@ export const JUDGE_PERSONAS: JudgePersona[] = [
     specialty: "Commercial potential & investment",
     description: "Sees everything through an investment lens. Values market opportunity, traction, and the ability to turn research into revenue.",
     preferred_types: ["vc", "entrepreneur"],
+    shape: "diamond",
+    color: "bg-amber-100 dark:bg-amber-900/40",
   },
   {
     id: "academic",
@@ -31,6 +37,8 @@ export const JUDGE_PERSONAS: JudgePersona[] = [
     specialty: "Research & scholarly work",
     description: "Champions rigorous research and academic excellence. Values publications, teaching, and intellectual curiosity.",
     preferred_types: ["faculty", "student"],
+    shape: "square",
+    color: "bg-green-100 dark:bg-green-900/40",
   },
   {
     id: "diversity_champion",
@@ -39,6 +47,8 @@ export const JUDGE_PERSONAS: JudgePersona[] = [
     specialty: "Diverse backgrounds & inclusion",
     description: "Fights for a diverse attendee mix. Values underrepresented perspectives and non-traditional paths into AI.",
     preferred_types: ["student", "other"],
+    shape: "hexagon",
+    color: "bg-emerald-100 dark:bg-emerald-900/40",
   },
   {
     id: "networker",
@@ -47,6 +57,8 @@ export const JUDGE_PERSONAS: JudgePersona[] = [
     specialty: "Connections & influence",
     description: "Values who you know. Wants attendees who will create valuable introductions and make the event a networking goldmine.",
     preferred_types: ["vc", "entrepreneur", "press"],
+    shape: "rounded",
+    color: "bg-purple-100 dark:bg-purple-900/40",
   },
   {
     id: "industry_insider",
@@ -55,6 +67,8 @@ export const JUDGE_PERSONAS: JudgePersona[] = [
     specialty: "Practical deployment experience",
     description: "Cares about real-world AI deployment at scale. Wants people who have shipped AI products to millions of users.",
     preferred_types: ["entrepreneur", "other"],
+    shape: "pill",
+    color: "bg-slate-100 dark:bg-slate-900/40",
   },
   {
     id: "student_advocate",
@@ -63,6 +77,8 @@ export const JUDGE_PERSONAS: JudgePersona[] = [
     specialty: "Learning potential & fresh ideas",
     description: "Champions students and early-career professionals. Fresh perspectives and enthusiasm matter more than experience.",
     preferred_types: ["student", "alumni"],
+    shape: "circle",
+    color: "bg-violet-100 dark:bg-violet-900/40",
   },
   {
     id: "press_secretary",
@@ -71,6 +87,8 @@ export const JUDGE_PERSONAS: JudgePersona[] = [
     specialty: "Media potential & coverage",
     description: "Wants the event to get coverage. Values journalists, content creators, and anyone who generates buzz.",
     preferred_types: ["press", "entrepreneur"],
+    shape: "diamond",
+    color: "bg-pink-100 dark:bg-pink-900/40",
   },
   {
     id: "innovator",
@@ -79,6 +97,8 @@ export const JUDGE_PERSONAS: JudgePersona[] = [
     specialty: "Novel ideas & creative approaches",
     description: "Obsessed with what's new and different. Wants attendees working on cutting-edge applications.",
     preferred_types: ["entrepreneur", "student", "faculty"],
+    shape: "hexagon",
+    color: "bg-yellow-100 dark:bg-yellow-900/40",
   },
   {
     id: "pragmatist",
@@ -87,6 +107,8 @@ export const JUDGE_PERSONAS: JudgePersona[] = [
     specialty: "Proven track record & results",
     description: "All about receipts. Wants attendees with measurable accomplishments \u2014 revenue, users, citations, companies built.",
     preferred_types: ["entrepreneur", "vc", "faculty"],
+    shape: "square",
+    color: "bg-orange-100 dark:bg-orange-900/40",
   },
   {
     id: "visionary",
@@ -95,6 +117,8 @@ export const JUDGE_PERSONAS: JudgePersona[] = [
     specialty: "Big-picture & future potential",
     description: "Thinks long-term. Wants attendees building the future, not optimizing the present. Potential over pedigree.",
     preferred_types: ["entrepreneur", "faculty", "student"],
+    shape: "rounded",
+    color: "bg-indigo-100 dark:bg-indigo-900/40",
   },
   {
     id: "community_builder",
@@ -103,5 +127,7 @@ export const JUDGE_PERSONAS: JudgePersona[] = [
     specialty: "Event engagement & energy",
     description: "Wants great event energy. Values people who will ask questions, give feedback, and make it memorable.",
     preferred_types: ["alumni", "other", "student"],
+    shape: "pill",
+    color: "bg-rose-100 dark:bg-rose-900/40",
   },
 ];

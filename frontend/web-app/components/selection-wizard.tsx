@@ -17,10 +17,15 @@ import { Slider } from "@/components/ui/slider";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { ChevronLeft, ChevronRight, Plus, Sparkles, X, Users, User } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Sparkles, X, Users, User, MoreHorizontal } from "lucide-react";
+import {
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+} from "@/components/ui/popover";
 import type { SelectionPreferences, PanelConfig } from "@/lib/api";
 import { DEFAULT_PANEL_CONFIG } from "@/lib/api";
-import { JUDGE_PERSONAS } from "@/lib/judge-personas";
+import { JUDGE_PERSONAS, type JudgePersona } from "@/lib/judge-personas";
 
 const ATTENDEE_TYPES = [
   { key: "vc", label: "VCs / Investors" },
@@ -57,12 +62,58 @@ const RELEVANCE_OPTIONS = [
 
 const PANEL_SIZES = [3, 6, 9, 12] as const;
 
+function ShapedEmoji({ persona, size = "lg" }: { persona: JudgePersona; size?: "sm" | "lg" }) {
+  const dim = size === "lg" ? "size-9" : "size-7";
+  const textSize = size === "lg" ? "text-xl" : "text-base";
+
+  const shapeClasses: Record<string, string> = {
+    circle: "rounded-full",
+    square: "rounded-sm",
+    rounded: "rounded-xl",
+    pill: "rounded-full px-3",
+    diamond: "",
+    hexagon: "",
+  };
+
+  if (persona.shape === "diamond") {
+    const innerDim = size === "lg" ? "size-9" : "size-7";
+    return (
+      <div className={`${dim} flex items-center justify-center`}>
+        <div
+          className={`${innerDim} ${persona.color} flex items-center justify-center rotate-45 rounded-sm`}
+        >
+          <span className={`${textSize} -rotate-45 leading-none`}>{persona.emoji}</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (persona.shape === "hexagon") {
+    return (
+      <div
+        className={`${dim} ${persona.color} flex items-center justify-center`}
+        style={{ clipPath: "polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)" }}
+      >
+        <span className={`${textSize} leading-none`}>{persona.emoji}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`${dim} ${persona.color} ${shapeClasses[persona.shape] || "rounded-full"} flex items-center justify-center`}
+    >
+      <span className={`${textSize} leading-none`}>{persona.emoji}</span>
+    </div>
+  );
+}
+
 interface SelectionWizardProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   preferences: SelectionPreferences;
   panelConfig?: PanelConfig;
-  onSave: (prefs: SelectionPreferences, panelConfig?: PanelConfig) => void;
+  onSave: (prefs: SelectionPreferences, panelConfig?: PanelConfig, personaEdits?: Record<string, string>) => void;
 }
 
 export function SelectionWizard({
@@ -77,6 +128,7 @@ export function SelectionWizard({
   const [noLimit, setNoLimit] = useState(preferences.venue_capacity === null);
   const [newCategory, setNewCategory] = useState("");
   const [panel, setPanel] = useState<PanelConfig>(initialPanelConfig || { ...DEFAULT_PANEL_CONFIG });
+  const [personaEdits, setPersonaEdits] = useState<Record<string, string>>({});
 
   const isPanelMode = panel.enabled;
 
@@ -121,6 +173,7 @@ export function SelectionWizard({
       setNoLimit(preferences.venue_capacity === null);
       setNewCategory("");
       setPanel(initialPanelConfig || { ...DEFAULT_PANEL_CONFIG });
+      setPersonaEdits({});
     }
     onOpenChange(isOpen);
   };
@@ -150,7 +203,8 @@ export function SelectionWizard({
   };
 
   const handleSave = () => {
-    onSave(prefs, panel.enabled ? panel : undefined);
+    const edits = Object.keys(personaEdits).length > 0 ? personaEdits : undefined;
+    onSave(prefs, panel.enabled ? panel : undefined, edits);
     onOpenChange(false);
   };
 
@@ -340,27 +394,85 @@ export function SelectionWizard({
                   const isSelected = panel.judge_ids.includes(persona.id);
                   const isFull = panel.judge_ids.length >= panel.panel_size;
                   const isDisabled = !isSelected && isFull;
+                  const editedDesc = personaEdits[persona.id];
+                  const displayDesc = editedDesc !== undefined ? editedDesc : persona.description;
                   return (
-                    <button
+                    <div
                       key={persona.id}
-                      onClick={() => toggleJudge(persona.id)}
-                      disabled={isDisabled}
-                      className={`flex flex-col items-start gap-1 rounded-lg border-2 p-2.5 text-left transition-all ${
+                      className={`relative flex flex-col items-start gap-1 rounded-lg border-2 p-2.5 text-left transition-all ${
                         isSelected
                           ? "border-primary bg-primary/5"
                           : isDisabled
-                            ? "border-muted opacity-40 cursor-not-allowed"
+                            ? "border-muted opacity-40"
                             : "border-muted hover:bg-muted/50"
                       }`}
                     >
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-lg">{persona.emoji}</span>
-                        <span className="text-xs font-medium leading-tight">{persona.name}</span>
-                      </div>
-                      <span className="text-[10px] text-muted-foreground leading-snug line-clamp-2">
-                        {persona.description}
-                      </span>
-                    </button>
+                      {/* Main clickable area */}
+                      <button
+                        onClick={() => toggleJudge(persona.id)}
+                        disabled={isDisabled}
+                        className={`flex flex-col items-start gap-1 w-full text-left ${isDisabled ? "cursor-not-allowed" : ""}`}
+                      >
+                        <div className="flex items-center gap-2 w-full">
+                          <ShapedEmoji persona={persona} size="sm" />
+                          <span className="text-xs font-medium leading-tight flex-1">{persona.name}</span>
+                        </div>
+                        <span className="text-[10px] text-muted-foreground leading-snug line-clamp-2 pl-9">
+                          {displayDesc}
+                        </span>
+                      </button>
+                      {/* Three-dot edit menu */}
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <button
+                            onClick={(e) => e.stopPropagation()}
+                            className="absolute top-1.5 right-1.5 p-0.5 rounded hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            <MoreHorizontal className="size-3.5" />
+                          </button>
+                        </PopoverTrigger>
+                        <PopoverContent
+                          side="right"
+                          align="start"
+                          className="w-72 p-3"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-2">
+                              <ShapedEmoji persona={persona} size="lg" />
+                              <div>
+                                <h4 className="text-sm font-semibold">{persona.name}</h4>
+                                <p className="text-[10px] text-muted-foreground">{persona.specialty}</p>
+                              </div>
+                            </div>
+                            <Label className="text-xs text-muted-foreground">Persona prompt</Label>
+                            <Textarea
+                              value={editedDesc !== undefined ? editedDesc : persona.description}
+                              onChange={(e) =>
+                                setPersonaEdits((prev) => ({ ...prev, [persona.id]: e.target.value }))
+                              }
+                              rows={3}
+                              className="text-xs resize-none"
+                              placeholder="Describe this judge's evaluation focus..."
+                            />
+                            {editedDesc !== undefined && editedDesc !== persona.description && (
+                              <button
+                                onClick={() =>
+                                  setPersonaEdits((prev) => {
+                                    const next = { ...prev };
+                                    delete next[persona.id];
+                                    return next;
+                                  })
+                                }
+                                className="text-[10px] text-muted-foreground hover:text-foreground underline"
+                              >
+                                Reset to default
+                              </button>
+                            )}
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                    </div>
                   );
                 })}
               </div>
