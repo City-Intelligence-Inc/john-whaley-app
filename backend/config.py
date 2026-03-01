@@ -1,0 +1,14 @@
+"""
+Shared configuration: DynamoDB tables, constants.
+"""
+
+import boto3
+
+dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+
+applicants_table = dynamodb.Table("john-whaley-applicants")
+settings_table = dynamodb.Table("john-whaley-settings")
+
+VALID_STATUSES = {"pending", "accepted", "rejected", "waitlisted"}
+
+AI_FIELDS = {"ai_review", "ai_score", "ai_reasoning", "attendee_type"}
