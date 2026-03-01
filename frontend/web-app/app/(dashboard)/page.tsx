@@ -1093,11 +1093,14 @@ export default function Page() {
     let acceptedCount = 0;
     let waitlistedCount = 0;
     let rejectedCount = 0;
+    const typeTally: Record<string, number> = {};
+    const typeNames: Record<string, string[]> = {};
 
     try {
       await api.updatePromptSettings({ default_prompt: prompt, criteria });
       log("Saved prompt settings.");
       log("Streaming analysis — each applicant analyzed individually...");
+      log("─".repeat(60));
 
       await api.analyzeAllStream(
         { api_key: apiKey, model, provider, prompt, criteria, session_id: activeSessionId },
@@ -1108,20 +1111,79 @@ export default function Page() {
           },
           onProgress: (data) => {
             setAnalysisProgress({ completed: data.completed, total: data.total, errors: data.errors });
+
+            // Track type counts
+            const type = data.attendee_type || "other";
+            const typeLabel = ATTENDEE_TYPES.find((t) => t.key === type)?.label || type;
+            const detail = data.attendee_type_detail || typeLabel;
+            typeTally[type] = (typeTally[type] || 0) + 1;
+            if (!typeNames[type]) typeNames[type] = [];
+            typeNames[type].push(data.name);
+
+            // Status color
+            const statusColor = data.status === "accepted" ? "#22c55e" : data.status === "rejected" ? "#ef4444" : data.status === "waitlisted" ? "#eab308" : undefined;
             const statusLabel = data.status.toUpperCase();
-            log(`[${data.completed}/${data.total}] ${data.name} — Score: ${data.score} — ${statusLabel}`);
+
+            // Rich log line
+            log(`[${data.completed}/${data.total}] ${data.name}  ·  ${detail}  ·  Score: ${data.score}  ·  ${statusLabel}`, statusColor);
+            if (data.reasoning) {
+              log(`   └─ ${data.reasoning}`, "#9ca3af");
+            }
+
             if (data.status === "accepted") acceptedCount++;
             else if (data.status === "waitlisted") waitlistedCount++;
             else if (data.status === "rejected") rejectedCount++;
           },
           onError: (data) => {
             setAnalysisProgress({ completed: data.completed, total: data.total, errors: data.errors });
-            log(`[${data.completed}/${data.total}] ${data.name} — ERROR: ${data.error}`, "red");
+            log(`[${data.completed}/${data.total}] ${data.name} — ERROR: ${data.error}`, "#ef4444");
           },
           onComplete: (data) => {
             setAnalysisProgress({ completed: data.completed, total: data.total, errors: data.errors });
+            log("─".repeat(60));
             log(`Analysis complete: ${acceptedCount} accepted, ${waitlistedCount} waitlisted, ${rejectedCount} rejected` +
               (data.errors > 0 ? ` (${data.errors} errors)` : ""));
+
+            // Category summary
+            log("");
+            log("CATEGORY BREAKDOWN:", "#6366f1");
+            for (const t of ATTENDEE_TYPES) {
+              const count = typeTally[t.key] || 0;
+              const pct = data.completed > 0 ? Math.round((count / data.completed) * 100) : 0;
+              const bar = "█".repeat(Math.max(1, Math.round(pct / 3))) + (count === 0 ? "░" : "");
+              const names = typeNames[t.key]?.slice(0, 3).join(", ") || "—";
+              const moreCount = (typeNames[t.key]?.length || 0) - 3;
+              log(`  ${t.label.padEnd(24)} ${String(count).padStart(3)} (${String(pct).padStart(2)}%) ${bar}`, t.color);
+              if (count > 0) {
+                log(`     └─ ${names}${moreCount > 0 ? `, +${moreCount} more` : ""}`, "#9ca3af");
+              }
+            }
+
+            // Balance check
+            log("");
+            log("BALANCE CHECK:", "#6366f1");
+            const total = data.completed;
+            const alerts: string[] = [];
+            for (const t of ATTENDEE_TYPES) {
+              const count = typeTally[t.key] || 0;
+              if (t.key === "other") continue;
+              if (count === 0) {
+                alerts.push(`⚠ No ${t.label} found — consider sourcing more`);
+              } else if (count < Math.ceil(total * 0.03)) {
+                alerts.push(`⚠ Only ${count} ${t.label} (${Math.round((count / total) * 100)}%) — may want more representation`);
+              }
+            }
+            const otherCount = typeTally["other"] || 0;
+            if (otherCount > total * 0.4) {
+              alerts.push(`⚠ ${otherCount} "Other" (${Math.round((otherCount / total) * 100)}%) — high proportion of uncategorized attendees`);
+            }
+            if (alerts.length === 0) {
+              log("  ✓ Good mix across all categories", "#22c55e");
+            } else {
+              for (const a of alerts) {
+                log(`  ${a}`, "#eab308");
+              }
+            }
           },
         }
       );

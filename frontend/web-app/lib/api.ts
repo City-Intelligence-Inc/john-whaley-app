@@ -96,6 +96,7 @@ export interface SSEProgressEvent {
   status: string;
   reasoning: string;
   attendee_type: string;
+  attendee_type_detail: string;
 }
 
 export interface SSEErrorEvent {
