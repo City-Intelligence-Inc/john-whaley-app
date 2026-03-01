@@ -1276,6 +1276,16 @@ export default function Page() {
               log("");
               log(`⚠ WARNING: ${acceptedCount} accepted exceeds venue capacity of ${prefs.venue_capacity}!`, "#eab308");
             }
+            log("");
+            log("Generating overall summary...", "#9ca3af");
+          },
+          onSummary: (data) => {
+            log("");
+            log("═".repeat(60), "#6366f1");
+            log("OVERALL ANALYSIS SUMMARY", "#6366f1");
+            log("═".repeat(60), "#6366f1");
+            log(data.summary, "#e2e8f0");
+            log("═".repeat(60), "#6366f1");
           },
         }
       );

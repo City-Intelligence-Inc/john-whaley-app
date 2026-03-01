@@ -181,13 +181,41 @@ Score this applicant relative to the FULL POOL. Consider:
 Return ONLY a JSON object:
 {{"score": <1-100>, "status": "accepted" or "waitlisted" or "rejected", "reasoning": "<2-3 sentences: who they are, why this score, and how they compare to others in the pool>"}}
 
-Scoring guidelines:
-- 80-100: Highly relevant — would significantly benefit from or contribute to the event
-- 60-79: Moderately relevant — reasonable fit, put on waitlist unless category is underrepresented
-- 40-59: Low relevance — tangential connection to LLM/AI, likely reject unless we need diversity
-- 1-39: Not relevant — no clear connection to the event's purpose
+Scoring guidelines — be generous, this is a networking event and most interested professionals add value:
+- 80-100: Strong fit — directly relevant expertise (AI/ML/NLP) or high-value role (VC, founder, press, faculty). ACCEPT.
+- 60-79: Good fit — technical professional who would benefit from and contribute to the event. ACCEPT unless pool is full.
+- 40-59: Moderate fit — tangential relevance but genuine interest. WAITLIST — may accept if space allows.
+- 20-39: Weak fit — minimal connection to event theme. REJECT.
+- 1-19: No fit — clearly irrelevant. REJECT.
+
+IMPORTANT: Default toward acceptance. Most tech professionals who apply to an AI event are interested and will contribute.
+Only reject applicants who truly have no connection to the event. When in doubt, waitlist rather than reject.
 
 Return ONLY the JSON, no other text.
+""".strip()
+
+# Pass 3: Overall summary prompt
+_SUMMARY_PROMPT = """
+You just finished reviewing {total} applicants for CS 224G Demo Day at Stanford.
+
+Here are the results:
+- {accepted} accepted{auto_accepted_note}
+- {waitlisted} waitlisted
+- {rejected} rejected
+- {errors} errors
+
+Pool breakdown:
+{pool_summary}
+
+{selection_context}
+
+Write a brief overall summary (3-5 sentences) explaining:
+1. The overall quality and composition of the applicant pool
+2. Key patterns in who was accepted vs rejected
+3. Any recommendations for the organizer (e.g. gaps to fill, waitlist candidates to promote)
+
+Return ONLY a JSON object:
+{{"summary": "<your 3-5 sentence summary>"}}
 """.strip()
 
 
@@ -197,7 +225,7 @@ def _selection_context(prefs: SelectionPreferences | None) -> str:
         return ""
     parts: list[str] = []
     if prefs.venue_capacity:
-        parts.append(f"VENUE CAPACITY: The venue can hold {prefs.venue_capacity} attendees. Be more selective to stay within this limit.")
+        parts.append(f"VENUE CAPACITY: The venue can hold {prefs.venue_capacity} attendees. Aim to accept roughly this many people. Only reject truly poor fits.")
     if prefs.attendee_mix:
         type_labels = {
             "vc": "VCs / Investors", "entrepreneur": "Founders / Entrepreneurs",
@@ -389,6 +417,7 @@ async def analyze_all_stream(body: BulkAnalyzeRequest):
         scoring_total = len(applicants_refreshed)
 
         completed, errors = 0, 0
+        result_counts = {"accepted": 0, "waitlisted": 0, "rejected": 0}
         tasks = {asyncio.ensure_future(_score_one(a, body, pool_summary, total, semaphore)): a for a in applicants_refreshed}
 
         for coro in asyncio.as_completed(tasks.keys()):
@@ -399,8 +428,34 @@ async def analyze_all_stream(body: BulkAnalyzeRequest):
                 errors += 1
                 yield f"event: error\ndata: {json.dumps({**result, 'completed': completed, 'total': total, 'errors': errors})}\n\n"
             else:
+                status = result.get("status", "pending")
+                if status in result_counts:
+                    result_counts[status] += 1
                 yield f"event: progress\ndata: {json.dumps({**result, 'completed': completed, 'total': total, 'errors': errors})}\n\n"
 
+        auto_accepted_count = len(auto_accepted_ids)
+
         yield f"event: complete\ndata: {json.dumps({'completed': completed, 'total': total, 'errors': errors})}\n\n"
+
+        # ── PASS 3: Overall Summary ──
+        try:
+            auto_note = f" ({auto_accepted_count} auto-accepted)" if auto_accepted_count > 0 else ""
+            summary_prompt = _SUMMARY_PROMPT.format(
+                total=total,
+                accepted=result_counts["accepted"] + auto_accepted_count,
+                auto_accepted_note=auto_note,
+                waitlisted=result_counts["waitlisted"],
+                rejected=result_counts["rejected"],
+                errors=errors,
+                pool_summary=pool_summary,
+                selection_context=_selection_context(body.selection_preferences),
+            )
+            raw_summary = await call_ai_async(body.provider, body.api_key, body.model, summary_prompt)
+            summary_result = parse_json_response(raw_summary)
+            summary_text = summary_result.get("summary", "")
+            if summary_text:
+                yield f"event: summary\ndata: {json.dumps({'summary': summary_text})}\n\n"
+        except Exception:
+            pass  # Summary is best-effort, don't fail the stream
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

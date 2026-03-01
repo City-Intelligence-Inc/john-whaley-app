@@ -158,6 +158,10 @@ export interface SSEAutoAcceptEvent {
   attendee_type_detail: string;
 }
 
+export interface SSESummaryEvent {
+  summary: string;
+}
+
 export interface AnalyzeStreamCallbacks {
   onStart?: (data: SSEStartEvent) => void;
   onPhase?: (data: SSEPhaseEvent) => void;
@@ -167,6 +171,7 @@ export interface AnalyzeStreamCallbacks {
   onProgress?: (data: SSEProgressEvent) => void;
   onError?: (data: SSEErrorEvent) => void;
   onComplete?: (data: SSECompleteEvent) => void;
+  onSummary?: (data: SSESummaryEvent) => void;
 }
 
 async function fetchAPI<T>(
@@ -329,6 +334,7 @@ export const api = {
           else if (eventType === "progress") callbacks.onProgress?.(data);
           else if (eventType === "error") callbacks.onError?.(data);
           else if (eventType === "complete") callbacks.onComplete?.(data);
+          else if (eventType === "summary") callbacks.onSummary?.(data);
           eventType = "";
         }
       }
