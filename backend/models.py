@@ -2,7 +2,7 @@
 Pydantic request/response schemas for every endpoint.
 """
 
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel
 
 
@@ -44,6 +44,15 @@ class SelectionPreferences(BaseModel):
     custom_categories: list[str] = []             # user-added attendee types
 
 
+# ── Judge Panel ──
+
+class PanelConfig(BaseModel):
+    enabled: bool = False
+    panel_size: Literal[3, 6, 9, 12] = 3
+    judge_ids: list[str] = []
+    adjudication_mode: str = "union"  # "union" | "majority"
+
+
 # ── AI Analysis ──
 
 class ReviewRequest(BaseModel):
@@ -63,6 +72,7 @@ class BulkAnalyzeRequest(BaseModel):
     criteria_weights: Optional[list[str]] = None
     session_id: Optional[str] = None
     selection_preferences: Optional[SelectionPreferences] = None
+    panel_config: Optional[PanelConfig] = None
 
 
 # ── Settings ──

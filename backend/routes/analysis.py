@@ -14,6 +14,7 @@ from fastapi.responses import StreamingResponse
 from config import AI_FIELDS
 from models import ReviewRequest, BulkAnalyzeRequest, SelectionPreferences
 from ai import call_ai, call_ai_async, parse_json_response
+from judge_personas import JUDGE_PERSONAS_BY_ID
 import db
 
 router = APIRouter(prefix="/applicants", tags=["analysis"])
@@ -219,6 +220,132 @@ Return ONLY a JSON object:
 """.strip()
 
 
+# ── Judge Panel Prompt ──
+_JUDGE_SCORE_PROMPT = """
+You are {judge_name} ({judge_emoji}), a judge on an admissions panel for an event.
+Your specialty: {judge_specialty}
+
+YOUR PERSPECTIVE AND BIAS:
+{judge_bias}
+
+SCORING ADJUSTMENTS:
+{judge_scoring_modifiers}
+
+You have been allocated {seats_allocated} seats to fill from this pool. Choose wisely — pick the applicants who best match YOUR perspective.
+
+{base_prompt}{criteria}
+
+EVENT CONTEXT: CS 224G Demo Day & Poster Session at Stanford (March 19, 2026).
+CS 224G is Stanford's course on building LLM-powered applications.
+{selection_context}
+APPLICANT POOL CONTEXT — {total} applicants total:
+{pool_summary}
+
+You are now evaluating this specific applicant:
+
+{info}
+
+This person was classified as: {attendee_type} ({attendee_type_detail})
+
+Score this applicant through YOUR unique lens. Return ONLY a JSON object:
+{{"score": <1-100>, "decision": "accept" or "pass", "reasoning": "<1-2 sentences from YOUR perspective explaining your decision>"}}
+
+Scoring guidelines — apply YOUR bias aggressively:
+- 80-100: Perfect fit for YOUR priorities. You WANT this person in YOUR seats.
+- 60-79: Good fit for YOUR priorities. You'd accept them if you have room.
+- 40-59: Neutral — doesn't excite you but doesn't offend you either.
+- 20-39: Poor fit for YOUR lens. You'd rather save seats for better matches.
+- 1-19: Completely outside YOUR interests.
+
+Your "decision" should be "accept" if you want to use one of your {seats_allocated} seats on this person, or "pass" if not. Be selective — you have limited seats!
+
+Return ONLY the JSON, no other text.
+""".strip()
+
+
+async def _judge_score_one(
+    applicant: dict,
+    body: BulkAnalyzeRequest,
+    judge: dict,
+    seats_allocated: int,
+    pool_summary: str,
+    total: int,
+    semaphore: asyncio.Semaphore,
+) -> dict:
+    """Score a single applicant through a judge's lens."""
+    applicant_id = applicant["applicant_id"]
+    name = applicant.get("name", "Unknown")
+    attendee_type = applicant.get("attendee_type", "other")
+    attendee_type_detail = applicant.get("attendee_type_detail", "")
+
+    async with semaphore:
+        prompt = _JUDGE_SCORE_PROMPT.format(
+            judge_name=judge["name"],
+            judge_emoji=judge["emoji"],
+            judge_specialty=judge["specialty"],
+            judge_bias=judge["bias"],
+            judge_scoring_modifiers=judge["scoring_modifiers"],
+            seats_allocated=seats_allocated,
+            base_prompt=body.prompt,
+            criteria=_criteria_text(body.criteria, body.criteria_weights),
+            selection_context=_selection_context(body.selection_preferences),
+            total=total,
+            pool_summary=pool_summary,
+            info=_applicant_info_text(applicant),
+            attendee_type=attendee_type,
+            attendee_type_detail=attendee_type_detail,
+        )
+
+        try:
+            raw = await call_ai_async(body.provider, body.api_key, body.model, prompt)
+            result = parse_json_response(raw)
+            return {
+                "applicant_id": applicant_id,
+                "name": name,
+                "score": int(result.get("score", 0)),
+                "decision": result.get("decision", "pass"),
+                "reasoning": result.get("reasoning", ""),
+                "attendee_type": attendee_type,
+                "attendee_type_detail": attendee_type_detail,
+            }
+        except Exception as e:
+            return {
+                "applicant_id": applicant_id,
+                "name": name,
+                "score": 0,
+                "decision": "pass",
+                "reasoning": "",
+                "error": str(e),
+            }
+
+
+def _allocate_seats(
+    judges: list[dict],
+    total_applicants: int,
+    venue_capacity: int | None,
+    attendee_mix: dict[str, int] | None,
+) -> dict[str, int]:
+    """Allocate seats to each judge based on venue capacity and attendee mix weights."""
+    total_seats = venue_capacity or total_applicants
+
+    if attendee_mix:
+        # Weight judges by the sum of mix % for their preferred types
+        weights = {}
+        for j in judges:
+            w = sum(attendee_mix.get(t, 0) for t in j.get("preferred_types", []))
+            weights[j["id"]] = max(w, 1)  # minimum weight of 1
+        total_weight = sum(weights.values())
+        allocation = {}
+        for j in judges:
+            raw = (weights[j["id"]] / total_weight) * total_seats
+            allocation[j["id"]] = max(1, round(raw))
+        return allocation
+    else:
+        # Equal distribution
+        per_judge = max(1, round(total_seats / len(judges)))
+        return {j["id"]: per_judge for j in judges}
+
+
 def _selection_context(prefs: SelectionPreferences | None) -> str:
     """Build prompt text from selection preferences."""
     if not prefs:
@@ -406,56 +533,200 @@ async def analyze_all_stream(body: BulkAnalyzeRequest):
                     })
                     yield f"event: auto_accept\ndata: {json.dumps({'applicant_id': aid, 'name': info.get('name', 'Unknown'), 'attendee_type': info.get('attendee_type', ''), 'attendee_type_detail': info.get('attendee_type_detail', '')})}\n\n"
 
-        # ── PASS 2: Scoring & Decisions ──
-        yield f"event: phase\ndata: {json.dumps({'phase': 'score', 'message': 'Pass 2: Scoring and making decisions with full pool context...'})}\n\n"
-
         # Re-fetch applicants to get updated type fields, exclude auto-accepted
         applicants_refreshed = [
             a for a in db.scan_all_applicants(session_id=body.session_id)
             if a["applicant_id"] not in auto_accepted_ids
         ]
         scoring_total = len(applicants_refreshed)
-
-        completed, errors = 0, 0
-        result_counts = {"accepted": 0, "waitlisted": 0, "rejected": 0}
-        tasks = {asyncio.ensure_future(_score_one(a, body, pool_summary, total, semaphore)): a for a in applicants_refreshed}
-
-        for coro in asyncio.as_completed(tasks.keys()):
-            result = await coro
-            completed += 1
-
-            if "error" in result:
-                errors += 1
-                yield f"event: error\ndata: {json.dumps({**result, 'completed': completed, 'total': total, 'errors': errors})}\n\n"
-            else:
-                status = result.get("status", "pending")
-                if status in result_counts:
-                    result_counts[status] += 1
-                yield f"event: progress\ndata: {json.dumps({**result, 'completed': completed, 'total': total, 'errors': errors})}\n\n"
-
         auto_accepted_count = len(auto_accepted_ids)
 
-        yield f"event: complete\ndata: {json.dumps({'completed': completed, 'total': total, 'errors': errors})}\n\n"
+        # ── Branch: Panel mode vs Single reviewer ──
+        panel = body.panel_config
+        if panel and panel.enabled and panel.judge_ids:
+            # ── PANEL MODE ──
+            judges = [JUDGE_PERSONAS_BY_ID[jid] for jid in panel.judge_ids if jid in JUDGE_PERSONAS_BY_ID]
+            if not judges:
+                yield f"event: error\ndata: {json.dumps({'error': 'No valid judge personas selected'})}\n\n"
+                return
 
-        # ── PASS 3: Overall Summary ──
-        try:
-            auto_note = f" ({auto_accepted_count} auto-accepted)" if auto_accepted_count > 0 else ""
-            summary_prompt = _SUMMARY_PROMPT.format(
-                total=total,
-                accepted=result_counts["accepted"] + auto_accepted_count,
-                auto_accepted_note=auto_note,
-                waitlisted=result_counts["waitlisted"],
-                rejected=result_counts["rejected"],
-                errors=errors,
-                pool_summary=pool_summary,
-                selection_context=_selection_context(body.selection_preferences),
+            # Seat allocation
+            seat_alloc = _allocate_seats(
+                judges,
+                scoring_total,
+                body.selection_preferences.venue_capacity if body.selection_preferences else None,
+                body.selection_preferences.attendee_mix if body.selection_preferences else None,
             )
-            raw_summary = await call_ai_async(body.provider, body.api_key, body.model, summary_prompt)
-            summary_result = parse_json_response(raw_summary)
-            summary_text = summary_result.get("summary", "")
-            if summary_text:
-                yield f"event: summary\ndata: {json.dumps({'summary': summary_text})}\n\n"
-        except Exception:
-            pass  # Summary is best-effort, don't fail the stream
+
+            yield f"event: phase\ndata: {json.dumps({'phase': 'panel_setup', 'message': f'Judge Panel: {len(judges)} judges, {panel.adjudication_mode} adjudication'})}\n\n"
+
+            for j in judges:
+                seats = seat_alloc[j["id"]]
+                yield f"event: judge_seats\ndata: {json.dumps({'judge_id': j['id'], 'judge_name': j['name'], 'judge_emoji': j['emoji'], 'seats_allocated': seats, 'specialty': j['specialty']})}\n\n"
+
+            # Track all judge decisions: {applicant_id: [{judge_id, score, decision, reasoning}, ...]}
+            all_judge_decisions: dict[str, list[dict]] = {a["applicant_id"]: [] for a in applicants_refreshed}
+
+            for judge_idx, judge in enumerate(judges):
+                seats = seat_alloc[judge["id"]]
+                yield f"event: judge_start\ndata: {json.dumps({'judge_id': judge['id'], 'judge_name': judge['name'], 'judge_emoji': judge['emoji'], 'judge_index': judge_idx, 'total_judges': len(judges), 'seats_remaining': seats})}\n\n"
+
+                # Score ALL applicants concurrently for this judge
+                judge_tasks = {
+                    asyncio.ensure_future(
+                        _judge_score_one(a, body, judge, seats, pool_summary, total, semaphore)
+                    ): a
+                    for a in applicants_refreshed
+                }
+
+                judge_results = []
+                judge_completed = 0
+                for coro in asyncio.as_completed(judge_tasks.keys()):
+                    result = await coro
+                    judge_completed += 1
+                    judge_results.append(result)
+
+                    yield f"event: judge_progress\ndata: {json.dumps({'judge_id': judge['id'], 'judge_name': judge['name'], 'judge_emoji': judge['emoji'], 'applicant_id': result['applicant_id'], 'name': result['name'], 'score': result.get('score', 0), 'decision': result.get('decision', 'pass'), 'reasoning': result.get('reasoning', ''), 'seats_filled': 0, 'seats_allocated': seats, 'completed': judge_completed, 'total': scoring_total})}\n\n"
+
+                # Greedy seat filling: sort by score descending, accept top N
+                judge_results.sort(key=lambda r: r.get("score", 0), reverse=True)
+                seats_filled = 0
+                accepted_names = []
+                for r in judge_results:
+                    if "error" in r:
+                        continue
+                    if seats_filled < seats and r.get("score", 0) > 0:
+                        r["decision"] = "accept"
+                        seats_filled += 1
+                        accepted_names.append(r["name"])
+                    else:
+                        r["decision"] = "pass"
+
+                    all_judge_decisions[r["applicant_id"]].append({
+                        "judge_id": judge["id"],
+                        "judge_name": judge["name"],
+                        "judge_emoji": judge["emoji"],
+                        "score": r.get("score", 0),
+                        "decision": r["decision"],
+                        "reasoning": r.get("reasoning", ""),
+                    })
+
+                yield f"event: judge_complete\ndata: {json.dumps({'judge_id': judge['id'], 'judge_name': judge['name'], 'judge_emoji': judge['emoji'], 'seats_filled': seats_filled, 'seats_allocated': seats, 'accepted_names': accepted_names})}\n\n"
+
+            # ── Adjudication Phase ──
+            yield f"event: phase\ndata: {json.dumps({'phase': 'adjudication', 'message': f'Adjudication ({panel.adjudication_mode} mode): determining final decisions...'})}\n\n"
+
+            result_counts = {"accepted": 0, "waitlisted": 0, "rejected": 0}
+            total_judges = len(judges)
+
+            for a in applicants_refreshed:
+                aid = a["applicant_id"]
+                decisions = all_judge_decisions.get(aid, [])
+                accept_count = sum(1 for d in decisions if d["decision"] == "accept")
+                votes_total = len(decisions)
+
+                if panel.adjudication_mode == "majority":
+                    final_status = "accepted" if accept_count > votes_total / 2 else "waitlisted"
+                else:  # union
+                    final_status = "accepted" if accept_count > 0 else "waitlisted"
+
+                result_counts[final_status] += 1
+
+                # Compute average score across judges
+                scores = [d["score"] for d in decisions if d["score"] > 0]
+                avg_score = round(sum(scores) / len(scores)) if scores else 0
+
+                # Build combined reasoning with judge attribution
+                reasoning_parts = []
+                for d in decisions:
+                    tag = "ACCEPT" if d["decision"] == "accept" else "PASS"
+                    reasoning_parts.append(f"{d['judge_emoji']} {d['judge_name']} [{tag}, {d['score']}]: {d['reasoning']}")
+                combined_reasoning = " | ".join(reasoning_parts)
+
+                accepting_judges_list = [
+                    f"{d['judge_emoji']} {d['judge_name']}"
+                    for d in decisions if d["decision"] == "accept"
+                ]
+
+                db.update_applicant_fields(aid, {
+                    "status": final_status,
+                    "ai_score": str(avg_score),
+                    "ai_reasoning": combined_reasoning,
+                    "panel_votes": f"{accept_count}/{votes_total}",
+                    "accepting_judges": ", ".join(accepting_judges_list) if accepting_judges_list else "",
+                })
+
+                yield f"event: adjudication\ndata: {json.dumps({'applicant_id': aid, 'name': a.get('name', 'Unknown'), 'final_status': final_status, 'votes_accept': accept_count, 'votes_total': votes_total, 'accepting_judges': accepting_judges_list, 'avg_score': avg_score})}\n\n"
+
+            yield f"event: complete\ndata: {json.dumps({'completed': scoring_total, 'total': scoring_total, 'errors': 0})}\n\n"
+
+            # Panel summary
+            try:
+                auto_note = f" ({auto_accepted_count} auto-accepted)" if auto_accepted_count > 0 else ""
+                panel_breakdown = "\n".join(
+                    f"- {j['emoji']} {j['name']}: {seat_alloc[j['id']]} seats"
+                    for j in judges
+                )
+                summary_prompt = _SUMMARY_PROMPT.format(
+                    total=total,
+                    accepted=result_counts["accepted"] + auto_accepted_count,
+                    auto_accepted_note=auto_note,
+                    waitlisted=result_counts["waitlisted"],
+                    rejected=result_counts["rejected"],
+                    errors=0,
+                    pool_summary=pool_summary,
+                    selection_context=_selection_context(body.selection_preferences) + f"\nJUDGE PANEL ({panel.adjudication_mode} mode):\n{panel_breakdown}\n",
+                )
+                raw_summary = await call_ai_async(body.provider, body.api_key, body.model, summary_prompt)
+                summary_result = parse_json_response(raw_summary)
+                summary_text = summary_result.get("summary", "")
+                if summary_text:
+                    yield f"event: summary\ndata: {json.dumps({'summary': summary_text})}\n\n"
+            except Exception:
+                pass
+
+        else:
+            # ── SINGLE REVIEWER MODE (existing behavior) ──
+            yield f"event: phase\ndata: {json.dumps({'phase': 'score', 'message': 'Pass 2: Scoring and making decisions with full pool context...'})}\n\n"
+
+            completed, errors = 0, 0
+            result_counts = {"accepted": 0, "waitlisted": 0, "rejected": 0}
+            tasks = {asyncio.ensure_future(_score_one(a, body, pool_summary, total, semaphore)): a for a in applicants_refreshed}
+
+            for coro in asyncio.as_completed(tasks.keys()):
+                result = await coro
+                completed += 1
+
+                if "error" in result:
+                    errors += 1
+                    yield f"event: error\ndata: {json.dumps({**result, 'completed': completed, 'total': total, 'errors': errors})}\n\n"
+                else:
+                    status = result.get("status", "pending")
+                    if status in result_counts:
+                        result_counts[status] += 1
+                    yield f"event: progress\ndata: {json.dumps({**result, 'completed': completed, 'total': total, 'errors': errors})}\n\n"
+
+            yield f"event: complete\ndata: {json.dumps({'completed': completed, 'total': total, 'errors': errors})}\n\n"
+
+            # ── PASS 3: Overall Summary ──
+            try:
+                auto_note = f" ({auto_accepted_count} auto-accepted)" if auto_accepted_count > 0 else ""
+                summary_prompt = _SUMMARY_PROMPT.format(
+                    total=total,
+                    accepted=result_counts["accepted"] + auto_accepted_count,
+                    auto_accepted_note=auto_note,
+                    waitlisted=result_counts["waitlisted"],
+                    rejected=result_counts["rejected"],
+                    errors=errors,
+                    pool_summary=pool_summary,
+                    selection_context=_selection_context(body.selection_preferences),
+                )
+                raw_summary = await call_ai_async(body.provider, body.api_key, body.model, summary_prompt)
+                summary_result = parse_json_response(raw_summary)
+                summary_text = summary_result.get("summary", "")
+                if summary_text:
+                    yield f"event: summary\ndata: {json.dumps({'summary': summary_text})}\n\n"
+            except Exception:
+                pass  # Summary is best-effort, don't fail the stream
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

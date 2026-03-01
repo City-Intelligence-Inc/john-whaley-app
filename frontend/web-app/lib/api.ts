@@ -25,6 +25,8 @@ export interface Applicant {
   ai_reasoning?: string;
   attendee_type?: string;
   attendee_type_detail?: string;
+  panel_votes?: string;
+  accepting_judges?: string;
   [key: string]: unknown;
 }
 
@@ -81,6 +83,20 @@ export interface ReviewRequest {
   criteria?: string[];
 }
 
+export interface PanelConfig {
+  enabled: boolean;
+  panel_size: 3 | 6 | 9 | 12;
+  judge_ids: string[];
+  adjudication_mode: "union" | "majority";
+}
+
+export const DEFAULT_PANEL_CONFIG: PanelConfig = {
+  enabled: false,
+  panel_size: 3,
+  judge_ids: [],
+  adjudication_mode: "union",
+};
+
 export interface BulkAnalyzeRequest {
   api_key: string;
   model: string;
@@ -90,6 +106,7 @@ export interface BulkAnalyzeRequest {
   criteria_weights?: string[];
   session_id?: string;
   selection_preferences?: SelectionPreferences;
+  panel_config?: PanelConfig;
 }
 
 export interface AnalysisResult {
@@ -162,6 +179,57 @@ export interface SSESummaryEvent {
   summary: string;
 }
 
+export interface SSEJudgeSeatEvent {
+  judge_id: string;
+  judge_name: string;
+  judge_emoji: string;
+  seats_allocated: number;
+  specialty: string;
+}
+
+export interface SSEJudgeStartEvent {
+  judge_id: string;
+  judge_name: string;
+  judge_emoji: string;
+  judge_index: number;
+  total_judges: number;
+  seats_remaining: number;
+}
+
+export interface SSEJudgeProgressEvent {
+  judge_id: string;
+  judge_name: string;
+  judge_emoji: string;
+  applicant_id: string;
+  name: string;
+  score: number;
+  decision: "accept" | "pass";
+  reasoning: string;
+  seats_filled: number;
+  seats_allocated: number;
+  completed: number;
+  total: number;
+}
+
+export interface SSEJudgeCompleteEvent {
+  judge_id: string;
+  judge_name: string;
+  judge_emoji: string;
+  seats_filled: number;
+  seats_allocated: number;
+  accepted_names: string[];
+}
+
+export interface SSEAdjudicationEvent {
+  applicant_id: string;
+  name: string;
+  final_status: string;
+  votes_accept: number;
+  votes_total: number;
+  accepting_judges: string[];
+  avg_score: number;
+}
+
 export interface AnalyzeStreamCallbacks {
   onStart?: (data: SSEStartEvent) => void;
   onPhase?: (data: SSEPhaseEvent) => void;
@@ -172,6 +240,11 @@ export interface AnalyzeStreamCallbacks {
   onError?: (data: SSEErrorEvent) => void;
   onComplete?: (data: SSECompleteEvent) => void;
   onSummary?: (data: SSESummaryEvent) => void;
+  onJudgeSeats?: (data: SSEJudgeSeatEvent) => void;
+  onJudgeStart?: (data: SSEJudgeStartEvent) => void;
+  onJudgeProgress?: (data: SSEJudgeProgressEvent) => void;
+  onJudgeComplete?: (data: SSEJudgeCompleteEvent) => void;
+  onAdjudication?: (data: SSEAdjudicationEvent) => void;
 }
 
 async function fetchAPI<T>(
@@ -335,6 +408,11 @@ export const api = {
           else if (eventType === "error") callbacks.onError?.(data);
           else if (eventType === "complete") callbacks.onComplete?.(data);
           else if (eventType === "summary") callbacks.onSummary?.(data);
+          else if (eventType === "judge_seats") callbacks.onJudgeSeats?.(data);
+          else if (eventType === "judge_start") callbacks.onJudgeStart?.(data);
+          else if (eventType === "judge_progress") callbacks.onJudgeProgress?.(data);
+          else if (eventType === "judge_complete") callbacks.onJudgeComplete?.(data);
+          else if (eventType === "adjudication") callbacks.onAdjudication?.(data);
           eventType = "";
         }
       }
@@ -357,4 +435,9 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(data),
     }),
+
+  getJudgePersonas: () =>
+    fetchAPI<{ id: string; name: string; emoji: string; specialty: string; description: string; preferred_types: string[] }[]>(
+      "/settings/judge-personas"
+    ),
 };

@@ -95,7 +95,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import { Switch } from "@/components/ui/switch";
-import { api, type Applicant, type SelectionPreferences, DEFAULT_SELECTION_PREFERENCES } from "@/lib/api";
+import { api, type Applicant, type SelectionPreferences, type PanelConfig, DEFAULT_SELECTION_PREFERENCES, DEFAULT_PANEL_CONFIG } from "@/lib/api";
 import { useApplicants, useStats, useSessions } from "@/hooks/use-applicants";
 import { CSVUploader } from "@/components/csv-uploader";
 import { SelectionWizard } from "@/components/selection-wizard";
@@ -713,7 +713,8 @@ function ApplicantDetailPanel({
 
   const skipKeys = new Set([
     "applicant_id", "session_id", "name", "email", "status", "ai_score",
-    "ai_reasoning", "ai_review", "company", "title", "location", "linkedin_url", "attendee_type", "attendee_type_detail",
+    "ai_reasoning", "ai_review", "company", "title", "location", "linkedin_url",
+    "attendee_type", "attendee_type_detail", "panel_votes", "accepting_judges",
   ]);
 
   return (
@@ -823,6 +824,29 @@ function ApplicantDetailPanel({
             )}
           </div>
 
+          {/* Panel Votes */}
+          {applicant.panel_votes && (
+            <>
+              <Separator />
+              <div>
+                <h4 className="text-sm font-medium text-muted-foreground mb-2">Panel Decision</h4>
+                <div className="rounded-lg bg-muted/50 p-3 space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <Users className="size-4 text-primary shrink-0" />
+                    <span className="text-sm font-medium">
+                      {String(applicant.panel_votes)} judges accepted
+                    </span>
+                  </div>
+                  {applicant.accepting_judges && (
+                    <p className="text-xs text-muted-foreground pl-6">
+                      {String(applicant.accepting_judges)}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+
           {/* AI Reasoning */}
           {applicant.ai_reasoning && (
             <>
@@ -900,6 +924,7 @@ export default function Page() {
   // Selection wizard state
   const [showWizard, setShowWizard] = useState(false);
   const [selectionPreferences, setSelectionPreferences] = useState<SelectionPreferences>(DEFAULT_SELECTION_PREFERENCES);
+  const [panelConfig, setPanelConfig] = useState<PanelConfig | undefined>(undefined);
   const [wizardCompleted, setWizardCompleted] = useState(false);
 
   // AI config state
@@ -968,25 +993,13 @@ export default function Page() {
       .catch(() => {});
   }, []);
 
-  // Load selection preferences from localStorage, then backend
+  // Clear wizard state on mount so user always configures fresh
   useEffect(() => {
-    const saved = localStorage.getItem("selection_preferences");
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved) as SelectionPreferences;
-        setSelectionPreferences(parsed);
-        setWizardCompleted(true);
-      } catch { /* ignore */ }
-    }
-    api.getSelectionPreferences()
-      .then((p) => {
-        if (p && (p.auto_accept_types?.length || p.venue_capacity || p.custom_priorities)) {
-          setSelectionPreferences(p);
-          setWizardCompleted(true);
-          localStorage.setItem("selection_preferences", JSON.stringify(p));
-        }
-      })
-      .catch(() => {});
+    localStorage.removeItem("selection_preferences");
+    localStorage.removeItem("panel_config");
+    setSelectionPreferences(DEFAULT_SELECTION_PREFERENCES);
+    setPanelConfig(undefined);
+    setWizardCompleted(false);
   }, []);
 
   // Persist session + AI config
@@ -1098,8 +1111,10 @@ export default function Page() {
   };
 
   // Analyze
-  const handleAnalyze = async (overridePrefs?: SelectionPreferences) => {
+  const handleAnalyze = async (overridePrefs?: SelectionPreferences, overridePanelConfig?: PanelConfig) => {
     const prefs = overridePrefs || selectionPreferences;
+    const pc = overridePanelConfig !== undefined ? overridePanelConfig : panelConfig;
+    const isPanelMode = pc?.enabled && (pc.judge_ids?.length ?? 0) > 0;
     setShowAnalysisDialog(true);
     setLogs([]);
     setAnalysisProgress(null);
@@ -1113,7 +1128,7 @@ export default function Page() {
       setLogs((prev) => [...prev, { time, message: msg, color }]);
     };
 
-    log(`Starting 2-pass analysis...`);
+    log(isPanelMode ? `Starting Judge Panel analysis (${pc!.judge_ids.length} judges, ${pc!.adjudication_mode} mode)...` : `Starting 2-pass analysis...`);
     log(`Provider: ${provider === "anthropic" ? "Anthropic" : "OpenAI"} | Model: ${modelLabel}`);
     log(`Prompt: "${prompt.substring(0, 80)}${prompt.length > 80 ? "..." : ""}"`);
     log(`Criteria: ${criteria.join(", ")}`);
@@ -1131,17 +1146,28 @@ export default function Page() {
     let rejectedCount = 0;
     const typeTally: Record<string, number> = {};
     const typeNames: Record<string, string[]> = {};
+    let numJudges = isPanelMode ? pc!.judge_ids.length : 0;
 
     try {
       await api.updatePromptSettings({ default_prompt: prompt, criteria });
       log("Saved prompt settings.");
 
       await api.analyzeAllStream(
-        { api_key: apiKey, model, provider, prompt, criteria, session_id: activeSessionId, selection_preferences: prefs },
+        {
+          api_key: apiKey, model, provider, prompt, criteria,
+          session_id: activeSessionId, selection_preferences: prefs,
+          panel_config: isPanelMode ? pc : undefined,
+        },
         {
           onStart: (data) => {
-            setAnalysisProgress({ completed: 0, total: data.total * 2, errors: 0 });
-            log(`${data.total} applicants to analyze across 2 passes`);
+            // Progress total = total applicant-level events we'll receive
+            // Single: classify events + score events
+            // Panel: classify events + (judges * applicants) + adjudication events
+            const progressTotal = isPanelMode
+              ? data.total + (data.total * numJudges) + data.total
+              : data.total + data.total;
+            setAnalysisProgress({ completed: 0, total: progressTotal, errors: 0 });
+            log(`${data.total} applicants to analyze${isPanelMode ? ` with ${numJudges} judges` : ""}`);
           },
           onPhase: (data) => {
             log("");
@@ -1286,6 +1312,48 @@ export default function Page() {
             log("═".repeat(60), "#6366f1");
             log(data.summary, "#e2e8f0");
             log("═".repeat(60), "#6366f1");
+          },
+          onJudgeSeats: (data) => {
+            log(`  ${data.judge_emoji} ${data.judge_name}: ${data.seats_allocated} seats (${data.specialty})`, "#a78bfa");
+          },
+          onJudgeStart: (data) => {
+            log("");
+            log("─".repeat(60), "#8b5cf6");
+            log(`${data.judge_emoji} ${data.judge_name} reviewing (judge ${data.judge_index + 1}/${data.total_judges}, ${data.seats_remaining} seats)...`, "#8b5cf6");
+            log("─".repeat(60), "#8b5cf6");
+          },
+          onJudgeProgress: (data) => {
+            setAnalysisProgress((prev) => ({
+              completed: (prev?.completed || 0) + 1,
+              total: prev?.total || 1,
+              errors: prev?.errors || 0,
+            }));
+            const decisionColor = data.decision === "accept" ? "#22c55e" : "#6b7280";
+            const decisionLabel = data.decision === "accept" ? "ACCEPT" : "pass";
+            log(`  [${data.completed}/${data.total}] ${data.name}  ·  Score: ${data.score}  ·  ${decisionLabel}`, decisionColor);
+          },
+          onJudgeComplete: (data) => {
+            const names = data.accepted_names.slice(0, 5).join(", ");
+            const moreCount = data.accepted_names.length - 5;
+            log(`  ${data.judge_emoji} Done: ${data.seats_filled}/${data.seats_allocated} seats filled`, "#a78bfa");
+            if (data.accepted_names.length > 0) {
+              log(`  └─ Top picks: ${names}${moreCount > 0 ? `, +${moreCount} more` : ""}`, "#9ca3af");
+            }
+          },
+          onAdjudication: (data) => {
+            setAnalysisProgress((prev) => ({
+              completed: (prev?.completed || 0) + 1,
+              total: prev?.total || 1,
+              errors: prev?.errors || 0,
+            }));
+            const statusColor = data.final_status === "accepted" ? "#22c55e" : "#eab308";
+            const judges = data.accepting_judges.join(", ") || "none";
+            log(`  ${data.name}  ·  ${data.votes_accept}/${data.votes_total} votes  ·  ${data.final_status.toUpperCase()}  ·  Score: ${data.avg_score}`, statusColor);
+            if (data.votes_accept > 0) {
+              log(`     └─ Accepted by: ${judges}`, "#9ca3af");
+            }
+            if (data.final_status === "accepted") acceptedCount++;
+            else if (data.final_status === "waitlisted") waitlistedCount++;
           },
         }
       );
@@ -1637,11 +1705,7 @@ export default function Page() {
                 toast.error("No applicants to analyze", { description: "Import a CSV or connect a Google Sheet first." });
                 return;
               }
-              if (!wizardCompleted) {
-                setShowWizard(true);
-                return;
-              }
-              handleAnalyze();
+              setShowWizard(true);
             }}
             size="sm"
             className="h-9"
@@ -2123,14 +2187,22 @@ export default function Page() {
         open={showWizard}
         onOpenChange={setShowWizard}
         preferences={selectionPreferences}
-        onSave={(savedPrefs) => {
+        panelConfig={panelConfig}
+        onSave={(savedPrefs, savedPanelConfig) => {
           setSelectionPreferences(savedPrefs);
           setWizardCompleted(true);
           localStorage.setItem("selection_preferences", JSON.stringify(savedPrefs));
+          if (savedPanelConfig) {
+            setPanelConfig(savedPanelConfig);
+            localStorage.setItem("panel_config", JSON.stringify(savedPanelConfig));
+          } else {
+            setPanelConfig(undefined);
+            localStorage.removeItem("panel_config");
+          }
           api.updateSelectionPreferences(savedPrefs).catch(() => {});
           // Auto-start analysis after wizard — pass prefs directly to avoid stale closure
           if (apiKey.trim() && (stats?.total ?? 0) > 0) {
-            setTimeout(() => handleAnalyze(savedPrefs), 100);
+            setTimeout(() => handleAnalyze(savedPrefs, savedPanelConfig), 100);
           }
         }}
       />
@@ -2159,10 +2231,10 @@ export default function Page() {
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">
-                    {analysisProgress.completed} of {analysisProgress.total} reviewed
+                    {analysisProgress.completed} of {analysisProgress.total} steps
                   </span>
                   <span className="font-mono">
-                    {Math.round((analysisProgress.completed / analysisProgress.total) * 100)}%
+                    {analysisProgress.total > 0 ? Math.round((analysisProgress.completed / analysisProgress.total) * 100) : 0}%
                     {analysisProgress.errors > 0 && (
                       <span className="text-red-500 ml-2">
                         ({analysisProgress.errors} {analysisProgress.errors === 1 ? "error" : "errors"})

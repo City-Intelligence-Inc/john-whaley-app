@@ -10,6 +10,7 @@ PUT /settings/selection-preferences      Update selection preferences
 from fastapi import APIRouter
 
 from models import PromptSettings, SelectionPreferences
+from judge_personas import JUDGE_PERSONAS
 import db
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -44,3 +45,18 @@ def get_selection_preferences():
 def update_selection_preferences(body: SelectionPreferences):
     db.put_settings(SELECTION_PREFS_KEY, body.model_dump())
     return body.model_dump()
+
+
+@router.get("/judge-personas")
+def get_judge_personas():
+    return [
+        {
+            "id": p["id"],
+            "name": p["name"],
+            "emoji": p["emoji"],
+            "specialty": p["specialty"],
+            "description": p["description"],
+            "preferred_types": p["preferred_types"],
+        }
+        for p in JUDGE_PERSONAS
+    ]

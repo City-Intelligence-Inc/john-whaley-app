@@ -17,8 +17,10 @@ import { Slider } from "@/components/ui/slider";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { ChevronLeft, ChevronRight, Plus, Sparkles, X } from "lucide-react";
-import type { SelectionPreferences } from "@/lib/api";
+import { ChevronLeft, ChevronRight, Plus, Sparkles, X, Users, User } from "lucide-react";
+import type { SelectionPreferences, PanelConfig } from "@/lib/api";
+import { DEFAULT_PANEL_CONFIG } from "@/lib/api";
+import { JUDGE_PERSONAS } from "@/lib/judge-personas";
 
 const ATTENDEE_TYPES = [
   { key: "vc", label: "VCs / Investors" },
@@ -53,25 +55,58 @@ const RELEVANCE_OPTIONS = [
   },
 ];
 
-const TOTAL_STEPS = 5;
+const PANEL_SIZES = [3, 6, 9, 12] as const;
 
 interface SelectionWizardProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   preferences: SelectionPreferences;
-  onSave: (prefs: SelectionPreferences) => void;
+  panelConfig?: PanelConfig;
+  onSave: (prefs: SelectionPreferences, panelConfig?: PanelConfig) => void;
 }
 
 export function SelectionWizard({
   open,
   onOpenChange,
   preferences,
+  panelConfig: initialPanelConfig,
   onSave,
 }: SelectionWizardProps) {
   const [step, setStep] = useState(0);
   const [prefs, setPrefs] = useState<SelectionPreferences>({ ...preferences });
   const [noLimit, setNoLimit] = useState(preferences.venue_capacity === null);
   const [newCategory, setNewCategory] = useState("");
+  const [panel, setPanel] = useState<PanelConfig>(initialPanelConfig || { ...DEFAULT_PANEL_CONFIG });
+
+  const isPanelMode = panel.enabled;
+
+  // Map logical step to content step
+  // Panel mode:   0=ReviewMode, 1=JudgeSelection, 2=Capacity, 3=Mix, 4=AutoAccept, 5=Relevance, 6=Priorities
+  // Single mode:  0=Capacity, 1=Mix, 2=AutoAccept, 3=Relevance, 4=Priorities
+  // We use a "content step" approach: the step index directly maps to content
+  const getStepContent = () => {
+    if (isPanelMode) {
+      if (step === 0) return "review_mode";
+      if (step === 1) return "judge_selection";
+      if (step === 2) return "capacity";
+      if (step === 3) return "mix";
+      if (step === 4) return "auto_accept";
+      if (step === 5) return "relevance";
+      if (step === 6) return "priorities";
+    } else {
+      // Step 0 is always review mode (so user can switch back)
+      if (step === 0) return "review_mode";
+      if (step === 1) return "capacity";
+      if (step === 2) return "mix";
+      if (step === 3) return "auto_accept";
+      if (step === 4) return "relevance";
+      if (step === 5) return "priorities";
+    }
+    return "review_mode";
+  };
+
+  // Recalc total steps when panel mode changes
+  const adjustedTotalSteps = isPanelMode ? 7 : 6;
 
   // Combine built-in types with custom categories
   const allTypes = [
@@ -85,6 +120,7 @@ export function SelectionWizard({
       setPrefs({ ...preferences });
       setNoLimit(preferences.venue_capacity === null);
       setNewCategory("");
+      setPanel(initialPanelConfig || { ...DEFAULT_PANEL_CONFIG });
     }
     onOpenChange(isOpen);
   };
@@ -114,7 +150,7 @@ export function SelectionWizard({
   };
 
   const handleSave = () => {
-    onSave(prefs);
+    onSave(prefs, panel.enabled ? panel : undefined);
     onOpenChange(false);
   };
 
@@ -134,6 +170,19 @@ export function SelectionWizard({
     }));
   };
 
+  const toggleJudge = (judgeId: string) => {
+    setPanel((p) => {
+      const isSelected = p.judge_ids.includes(judgeId);
+      if (isSelected) {
+        return { ...p, judge_ids: p.judge_ids.filter((id) => id !== judgeId) };
+      }
+      if (p.judge_ids.length >= p.panel_size) return p;
+      return { ...p, judge_ids: [...p.judge_ids, judgeId] };
+    });
+  };
+
+  const content = getStepContent();
+
   return (
     <Dialog open={open} onOpenChange={handleOpen}>
       <DialogContent className="max-w-[95vw] sm:max-w-lg max-h-[90vh] flex flex-col overflow-hidden">
@@ -149,7 +198,7 @@ export function SelectionWizard({
 
         {/* Step dots */}
         <div className="flex items-center justify-center gap-2 py-1">
-          {Array.from({ length: TOTAL_STEPS }, (_, i) => (
+          {Array.from({ length: adjustedTotalSteps }, (_, i) => (
             <button
               key={i}
               onClick={() => setStep(i)}
@@ -163,13 +212,163 @@ export function SelectionWizard({
             />
           ))}
           <span className="text-xs text-muted-foreground ml-2">
-            {step + 1} / {TOTAL_STEPS}
+            {step + 1} / {adjustedTotalSteps}
           </span>
         </div>
 
         <div className="flex-1 overflow-y-auto min-h-0 pr-1">
-          {/* Step 1: Venue Capacity */}
-          {step === 0 && (
+          {/* Review Mode Selection */}
+          {content === "review_mode" && (
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-sm font-semibold mb-1">Review Mode</h3>
+                <p className="text-sm text-muted-foreground">
+                  Choose how applicants will be evaluated.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => setPanel((p) => ({ ...p, enabled: false }))}
+                  className={`flex flex-col items-center gap-2 rounded-lg border-2 p-4 transition-colors ${
+                    !isPanelMode ? "border-primary bg-primary/5" : "border-muted hover:bg-muted/50"
+                  }`}
+                >
+                  <User className="size-8 text-muted-foreground" />
+                  <span className="text-sm font-medium">Single Reviewer</span>
+                  <span className="text-xs text-muted-foreground text-center">
+                    One AI reviews all applicants
+                  </span>
+                </button>
+                <button
+                  onClick={() => setPanel((p) => ({ ...p, enabled: true }))}
+                  className={`flex flex-col items-center gap-2 rounded-lg border-2 p-4 transition-colors ${
+                    isPanelMode ? "border-primary bg-primary/5" : "border-muted hover:bg-muted/50"
+                  }`}
+                >
+                  <Users className="size-8 text-muted-foreground" />
+                  <span className="text-sm font-medium">Judge Panel</span>
+                  <span className="text-xs text-muted-foreground text-center">
+                    Multiple AI judges with unique biases
+                  </span>
+                </button>
+              </div>
+
+              {isPanelMode && (
+                <>
+                  <div className="space-y-3">
+                    <div>
+                      <Label className="text-sm font-medium">Panel Size</Label>
+                      <div className="grid grid-cols-4 gap-2 mt-1.5">
+                        {PANEL_SIZES.map((size) => (
+                          <button
+                            key={size}
+                            onClick={() => setPanel((p) => ({
+                              ...p,
+                              panel_size: size,
+                              judge_ids: p.judge_ids.slice(0, size),
+                            }))}
+                            className={`rounded-lg border-2 py-2 text-center font-medium transition-colors ${
+                              panel.panel_size === size
+                                ? "border-primary bg-primary/5"
+                                : "border-muted hover:bg-muted/50"
+                            }`}
+                          >
+                            {size}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <Label className="text-sm font-medium">Adjudication Mode</Label>
+                      <RadioGroup
+                        value={panel.adjudication_mode}
+                        onValueChange={(v) => setPanel((p) => ({ ...p, adjudication_mode: v as "union" | "majority" }))}
+                        className="mt-1.5"
+                      >
+                        <label className="flex items-start gap-3 rounded-md border px-3 py-2 cursor-pointer hover:bg-muted/50 transition-colors">
+                          <RadioGroupItem value="union" className="mt-0.5" />
+                          <div>
+                            <div className="text-sm font-medium">Union (any judge)</div>
+                            <div className="text-xs text-muted-foreground">If ANY judge accepts, the applicant is accepted. More inclusive.</div>
+                          </div>
+                        </label>
+                        <label className="flex items-start gap-3 rounded-md border px-3 py-2 cursor-pointer hover:bg-muted/50 transition-colors">
+                          <RadioGroupItem value="majority" className="mt-0.5" />
+                          <div>
+                            <div className="text-sm font-medium">Majority (&gt;50%)</div>
+                            <div className="text-xs text-muted-foreground">More than half the judges must accept. More selective.</div>
+                          </div>
+                        </label>
+                      </RadioGroup>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border bg-muted/30 p-3">
+                    <h4 className="text-xs font-semibold mb-2 text-muted-foreground uppercase tracking-wide">How the Judge Panel Works</h4>
+                    <ol className="text-xs text-muted-foreground space-y-1.5 list-decimal list-inside">
+                      <li>All applicants are classified by type (same as single mode)</li>
+                      <li>Each judge gets seats based on your venue capacity &amp; attendee mix</li>
+                      <li>Each judge independently scores ALL applicants through their unique lens, then fills their seats with top picks</li>
+                      <li>Final decision: {panel.adjudication_mode === "union" ? "any judge accepts = accepted" : ">50% of judges must accept"}, otherwise waitlisted</li>
+                    </ol>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Judge Selection (panel only) */}
+          {content === "judge_selection" && (
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-sm font-semibold mb-1">Select Your Judges</h3>
+                <p className="text-sm text-muted-foreground">
+                  Pick {panel.panel_size} judges for your panel. Each brings a unique perspective.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-sm font-medium tabular-nums">
+                  {panel.judge_ids.length}/{panel.panel_size} selected
+                </span>
+                {panel.judge_ids.length === panel.panel_size && (
+                  <span className="text-xs text-green-600 font-medium">Panel complete</span>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {JUDGE_PERSONAS.map((persona) => {
+                  const isSelected = panel.judge_ids.includes(persona.id);
+                  const isFull = panel.judge_ids.length >= panel.panel_size;
+                  const isDisabled = !isSelected && isFull;
+                  return (
+                    <button
+                      key={persona.id}
+                      onClick={() => toggleJudge(persona.id)}
+                      disabled={isDisabled}
+                      className={`flex flex-col items-start gap-1 rounded-lg border-2 p-2.5 text-left transition-all ${
+                        isSelected
+                          ? "border-primary bg-primary/5"
+                          : isDisabled
+                            ? "border-muted opacity-40 cursor-not-allowed"
+                            : "border-muted hover:bg-muted/50"
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-lg">{persona.emoji}</span>
+                        <span className="text-xs font-medium leading-tight">{persona.name}</span>
+                      </div>
+                      <span className="text-[10px] text-muted-foreground leading-snug line-clamp-2">
+                        {persona.description}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Venue Capacity */}
+          {content === "capacity" && (
             <div className="space-y-4">
               <div>
                 <h3 className="text-sm font-semibold mb-1">Venue Capacity</h3>
@@ -212,8 +411,8 @@ export function SelectionWizard({
             </div>
           )}
 
-          {/* Step 2: Attendee Mix */}
-          {step === 1 && (
+          {/* Attendee Mix */}
+          {content === "mix" && (
             <div className="space-y-4">
               <div>
                 <h3 className="text-sm font-semibold mb-1">Target Attendee Mix</h3>
@@ -274,8 +473,8 @@ export function SelectionWizard({
             </div>
           )}
 
-          {/* Step 3: Auto-Accept Rules */}
-          {step === 2 && (
+          {/* Auto-Accept Rules */}
+          {content === "auto_accept" && (
             <div className="space-y-4">
               <div>
                 <h3 className="text-sm font-semibold mb-1">Auto-Accept Rules</h3>
@@ -301,8 +500,8 @@ export function SelectionWizard({
             </div>
           )}
 
-          {/* Step 4: AI Relevance Filter */}
-          {step === 3 && (
+          {/* AI Relevance Filter */}
+          {content === "relevance" && (
             <div className="space-y-4">
               <div>
                 <h3 className="text-sm font-semibold mb-1">AI Relevance Filter</h3>
@@ -330,8 +529,8 @@ export function SelectionWizard({
             </div>
           )}
 
-          {/* Step 5: Custom Priorities */}
-          {step === 4 && (
+          {/* Custom Priorities */}
+          {content === "priorities" && (
             <div className="space-y-4">
               <div>
                 <h3 className="text-sm font-semibold mb-1">Custom Priorities</h3>
@@ -361,8 +560,14 @@ export function SelectionWizard({
             Back
           </Button>
           <div className="flex gap-2">
-            {step < TOTAL_STEPS - 1 ? (
-              <Button onClick={() => setStep((s) => s + 1)} size="sm">
+            {step < adjustedTotalSteps - 1 ? (
+              <Button
+                onClick={() => setStep((s) => s + 1)}
+                size="sm"
+                disabled={
+                  isPanelMode && step === 1 && panel.judge_ids.length !== panel.panel_size
+                }
+              >
                 Next
                 <ChevronRight className="size-4 ml-1" />
               </Button>
