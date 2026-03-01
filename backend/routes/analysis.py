@@ -366,7 +366,8 @@ async def analyze_all_stream(body: BulkAnalyzeRequest):
 
         auto_accepted_ids: set[str] = set()
         if auto_accept_types:
-            yield f"event: phase\ndata: {json.dumps({'phase': 'auto_accept', 'message': f'Auto-accepting: {', '.join(auto_accept_types)}...'})}\n\n"
+            aa_msg = f"Auto-accepting: {', '.join(auto_accept_types)}..."
+            yield f"event: phase\ndata: {json.dumps({'phase': 'auto_accept', 'message': aa_msg})}\n\n"
             for aid, info in classified.items():
                 if info.get("attendee_type") in auto_accept_types:
                     auto_accepted_ids.add(aid)

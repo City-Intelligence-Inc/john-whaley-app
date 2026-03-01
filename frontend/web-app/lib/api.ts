@@ -47,6 +47,7 @@ export interface SelectionPreferences {
   auto_accept_types: string[];
   relevance_filter: string;
   custom_priorities: string;
+  custom_categories: string[];
 }
 
 export const DEFAULT_SELECTION_PREFERENCES: SelectionPreferences = {
@@ -55,6 +56,7 @@ export const DEFAULT_SELECTION_PREFERENCES: SelectionPreferences = {
   auto_accept_types: ["student", "faculty", "alumni"],
   relevance_filter: "moderate",
   custom_priorities: "",
+  custom_categories: [],
 };
 
 export interface GoogleSheetImportRequest {

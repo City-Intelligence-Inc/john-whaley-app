@@ -41,6 +41,7 @@ class SelectionPreferences(BaseModel):
     auto_accept_types: list[str] = []             # types to auto-accept
     relevance_filter: str = "moderate"            # strict|moderate|loose|none
     custom_priorities: str = ""                   # freeform text
+    custom_categories: list[str] = []             # user-added attendee types
 
 
 # ── AI Analysis ──

@@ -17,7 +17,7 @@ import { Slider } from "@/components/ui/slider";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Sparkles, X } from "lucide-react";
 import type { SelectionPreferences } from "@/lib/api";
 
 const ATTENDEE_TYPES = [
@@ -71,14 +71,46 @@ export function SelectionWizard({
   const [step, setStep] = useState(0);
   const [prefs, setPrefs] = useState<SelectionPreferences>({ ...preferences });
   const [noLimit, setNoLimit] = useState(preferences.venue_capacity === null);
+  const [newCategory, setNewCategory] = useState("");
+
+  // Combine built-in types with custom categories
+  const allTypes = [
+    ...ATTENDEE_TYPES,
+    ...(prefs.custom_categories || []).map((c) => ({ key: c, label: c })),
+  ];
 
   const handleOpen = (isOpen: boolean) => {
     if (isOpen) {
       setStep(0);
       setPrefs({ ...preferences });
       setNoLimit(preferences.venue_capacity === null);
+      setNewCategory("");
     }
     onOpenChange(isOpen);
+  };
+
+  const addCategory = () => {
+    const value = newCategory.trim();
+    if (!value) return;
+    const existing = allTypes.some((t) => t.key.toLowerCase() === value.toLowerCase());
+    if (existing) return;
+    setPrefs((p) => ({
+      ...p,
+      custom_categories: [...(p.custom_categories || []), value],
+    }));
+    setNewCategory("");
+  };
+
+  const removeCategory = (key: string) => {
+    setPrefs((p) => {
+      const { [key]: _, ...restMix } = p.attendee_mix;
+      return {
+        ...p,
+        custom_categories: (p.custom_categories || []).filter((c) => c !== key),
+        attendee_mix: restMix,
+        auto_accept_types: p.auto_accept_types.filter((t) => t !== key),
+      };
+    });
   };
 
   const handleSave = () => {
@@ -190,12 +222,23 @@ export function SelectionWizard({
                 </p>
               </div>
               <div className="space-y-3">
-                {ATTENDEE_TYPES.map((t) => {
+                {allTypes.map((t) => {
                   const value = prefs.attendee_mix[t.key] ?? 0;
+                  const isCustom = (prefs.custom_categories || []).includes(t.key);
                   return (
                     <div key={t.key} className="space-y-1">
                       <div className="flex items-center justify-between">
-                        <Label className="text-sm">{t.label}</Label>
+                        <div className="flex items-center gap-1.5">
+                          <Label className="text-sm">{t.label}</Label>
+                          {isCustom && (
+                            <button
+                              onClick={() => removeCategory(t.key)}
+                              className="text-muted-foreground hover:text-destructive"
+                            >
+                              <X className="size-3.5" />
+                            </button>
+                          )}
+                        </div>
                         <span className="text-sm font-mono tabular-nums text-muted-foreground w-10 text-right">
                           {value}%
                         </span>
@@ -211,6 +254,23 @@ export function SelectionWizard({
                   );
                 })}
               </div>
+              <div className="flex gap-2">
+                <Input
+                  value={newCategory}
+                  onChange={(e) => setNewCategory(e.target.value)}
+                  placeholder="Add a category..."
+                  className="h-8 text-sm"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addCategory();
+                    }
+                  }}
+                />
+                <Button variant="outline" size="icon" onClick={addCategory} className="h-8 w-8 shrink-0">
+                  <Plus className="size-4" />
+                </Button>
+              </div>
             </div>
           )}
 
@@ -225,7 +285,7 @@ export function SelectionWizard({
                 </p>
               </div>
               <div className="space-y-2">
-                {ATTENDEE_TYPES.map((t) => (
+                {allTypes.map((t) => (
                   <label
                     key={t.key}
                     className="flex items-center gap-3 rounded-md border px-3 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors"

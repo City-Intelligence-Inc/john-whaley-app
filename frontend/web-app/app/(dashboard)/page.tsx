@@ -1098,7 +1098,8 @@ export default function Page() {
   };
 
   // Analyze
-  const handleAnalyze = async () => {
+  const handleAnalyze = async (overridePrefs?: SelectionPreferences) => {
+    const prefs = overridePrefs || selectionPreferences;
     setShowAnalysisDialog(true);
     setLogs([]);
     setAnalysisProgress(null);
@@ -1116,13 +1117,13 @@ export default function Page() {
     log(`Provider: ${provider === "anthropic" ? "Anthropic" : "OpenAI"} | Model: ${modelLabel}`);
     log(`Prompt: "${prompt.substring(0, 80)}${prompt.length > 80 ? "..." : ""}"`);
     log(`Criteria: ${criteria.join(", ")}`);
-    if (selectionPreferences.venue_capacity) {
-      log(`Venue capacity: ${selectionPreferences.venue_capacity}`);
+    if (prefs.venue_capacity) {
+      log(`Venue capacity: ${prefs.venue_capacity}`);
     }
-    if (selectionPreferences.auto_accept_types.length > 0) {
-      log(`Auto-accept: ${selectionPreferences.auto_accept_types.join(", ")}`);
+    if (prefs.auto_accept_types.length > 0) {
+      log(`Auto-accept: ${prefs.auto_accept_types.join(", ")}`);
     }
-    log(`Relevance filter: ${selectionPreferences.relevance_filter}`);
+    log(`Relevance filter: ${prefs.relevance_filter}`);
 
     let acceptedCount = 0;
     let autoAcceptedCount = 0;
@@ -1136,7 +1137,7 @@ export default function Page() {
       log("Saved prompt settings.");
 
       await api.analyzeAllStream(
-        { api_key: apiKey, model, provider, prompt, criteria, session_id: activeSessionId, selection_preferences: selectionPreferences },
+        { api_key: apiKey, model, provider, prompt, criteria, session_id: activeSessionId, selection_preferences: prefs },
         {
           onStart: (data) => {
             setAnalysisProgress({ completed: 0, total: data.total * 2, errors: 0 });
@@ -1271,9 +1272,9 @@ export default function Page() {
             }
             log("═".repeat(60), color);
             // Capacity warning
-            if (selectionPreferences.venue_capacity && acceptedCount > selectionPreferences.venue_capacity) {
+            if (prefs.venue_capacity && acceptedCount > prefs.venue_capacity) {
               log("");
-              log(`⚠ WARNING: ${acceptedCount} accepted exceeds venue capacity of ${selectionPreferences.venue_capacity}!`, "#eab308");
+              log(`⚠ WARNING: ${acceptedCount} accepted exceeds venue capacity of ${prefs.venue_capacity}!`, "#eab308");
             }
           },
         }
@@ -2112,14 +2113,14 @@ export default function Page() {
         open={showWizard}
         onOpenChange={setShowWizard}
         preferences={selectionPreferences}
-        onSave={(prefs) => {
-          setSelectionPreferences(prefs);
+        onSave={(savedPrefs) => {
+          setSelectionPreferences(savedPrefs);
           setWizardCompleted(true);
-          localStorage.setItem("selection_preferences", JSON.stringify(prefs));
-          api.updateSelectionPreferences(prefs).catch(() => {});
-          // Auto-start analysis after wizard
+          localStorage.setItem("selection_preferences", JSON.stringify(savedPrefs));
+          api.updateSelectionPreferences(savedPrefs).catch(() => {});
+          // Auto-start analysis after wizard — pass prefs directly to avoid stale closure
           if (apiKey.trim() && (stats?.total ?? 0) > 0) {
-            setTimeout(() => handleAnalyze(), 100);
+            setTimeout(() => handleAnalyze(savedPrefs), 100);
           }
         }}
       />
