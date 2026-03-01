@@ -40,6 +40,7 @@ import {
   Layers,
   Trash2,
   FolderOpen,
+  SlidersHorizontal,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -94,9 +95,10 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import { Switch } from "@/components/ui/switch";
-import { api, type Applicant } from "@/lib/api";
+import { api, type Applicant, type SelectionPreferences, DEFAULT_SELECTION_PREFERENCES } from "@/lib/api";
 import { useApplicants, useStats, useSessions } from "@/hooks/use-applicants";
 import { CSVUploader } from "@/components/csv-uploader";
+import { SelectionWizard } from "@/components/selection-wizard";
 
 const ANTHROPIC_MODELS = [
   { value: "claude-sonnet-4-20250514", label: "Claude Sonnet 4" },
@@ -671,14 +673,14 @@ function ConsoleLog({
   return (
     <div
       ref={logRef}
-      className="bg-zinc-950 text-green-400 font-mono text-sm rounded-lg border border-zinc-800 p-4 h-72 overflow-y-auto"
+      className="bg-zinc-950 text-green-400 font-mono text-[11px] sm:text-sm rounded-lg border border-zinc-800 p-2 sm:p-4 h-52 sm:h-72 overflow-y-auto overflow-x-hidden"
     >
       {logs.length === 0 && (
         <span className="text-zinc-600">Waiting for activity...</span>
       )}
       {logs.map((log, i) => (
-        <div key={i} className="leading-relaxed" style={log.color ? { color: log.color } : undefined}>
-          <span className="text-zinc-500">[{log.time}]</span> {log.message}
+        <div key={i} className="leading-relaxed break-words" style={log.color ? { color: log.color } : undefined}>
+          <span className="text-zinc-500 hidden sm:inline">[{log.time}]</span> {log.message}
         </div>
       ))}
     </div>
@@ -895,6 +897,11 @@ export default function Page() {
   const [showSettingsDialog, setShowSettingsDialog] = useState(false);
   const [showAnalysisDialog, setShowAnalysisDialog] = useState(false);
 
+  // Selection wizard state
+  const [showWizard, setShowWizard] = useState(false);
+  const [selectionPreferences, setSelectionPreferences] = useState<SelectionPreferences>(DEFAULT_SELECTION_PREFERENCES);
+  const [wizardCompleted, setWizardCompleted] = useState(false);
+
   // AI config state
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
@@ -957,6 +964,27 @@ export default function Page() {
       .then((s) => {
         if (s.default_prompt) setPrompt(s.default_prompt);
         if (s.criteria?.length) setCriteria(s.criteria);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Load selection preferences from localStorage, then backend
+  useEffect(() => {
+    const saved = localStorage.getItem("selection_preferences");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved) as SelectionPreferences;
+        setSelectionPreferences(parsed);
+        setWizardCompleted(true);
+      } catch { /* ignore */ }
+    }
+    api.getSelectionPreferences()
+      .then((p) => {
+        if (p && (p.auto_accept_types?.length || p.venue_capacity || p.custom_priorities)) {
+          setSelectionPreferences(p);
+          setWizardCompleted(true);
+          localStorage.setItem("selection_preferences", JSON.stringify(p));
+        }
       })
       .catch(() => {});
   }, []);
@@ -1088,8 +1116,16 @@ export default function Page() {
     log(`Provider: ${provider === "anthropic" ? "Anthropic" : "OpenAI"} | Model: ${modelLabel}`);
     log(`Prompt: "${prompt.substring(0, 80)}${prompt.length > 80 ? "..." : ""}"`);
     log(`Criteria: ${criteria.join(", ")}`);
+    if (selectionPreferences.venue_capacity) {
+      log(`Venue capacity: ${selectionPreferences.venue_capacity}`);
+    }
+    if (selectionPreferences.auto_accept_types.length > 0) {
+      log(`Auto-accept: ${selectionPreferences.auto_accept_types.join(", ")}`);
+    }
+    log(`Relevance filter: ${selectionPreferences.relevance_filter}`);
 
     let acceptedCount = 0;
+    let autoAcceptedCount = 0;
     let waitlistedCount = 0;
     let rejectedCount = 0;
     const typeTally: Record<string, number> = {};
@@ -1100,7 +1136,7 @@ export default function Page() {
       log("Saved prompt settings.");
 
       await api.analyzeAllStream(
-        { api_key: apiKey, model, provider, prompt, criteria, session_id: activeSessionId },
+        { api_key: apiKey, model, provider, prompt, criteria, session_id: activeSessionId, selection_preferences: selectionPreferences },
         {
           onStart: (data) => {
             setAnalysisProgress({ completed: 0, total: data.total * 2, errors: 0 });
@@ -1177,6 +1213,12 @@ export default function Page() {
             else if (errMsg.includes("insufficient_quota") || errMsg.includes("billing")) errMsg = "API quota exceeded — add credits";
             log(`[${data.completed}/${data.total}] ${data.name} — ERROR: ${errMsg}`, "#ef4444");
           },
+          onAutoAccept: (data) => {
+            autoAcceptedCount++;
+            acceptedCount++;
+            const detail = data.attendee_type_detail || data.attendee_type;
+            log(`[AUTO] ${data.name}  ·  ${detail}  ·  Score: 100  ·  ACCEPTED`, "#22c55e");
+          },
           onProgress: (data) => {
             setAnalysisProgress((prev) => ({
               completed: (prev?.completed || 0) + 1,
@@ -1223,10 +1265,16 @@ export default function Page() {
             if (allFailed) {
               log(`FAILED: All ${data.errors} applicants had errors. Check your API key in Settings.`, "#ef4444");
             } else {
-              log(`DONE: ${acceptedCount} accepted, ${waitlistedCount} waitlisted, ${rejectedCount} rejected` +
+              const autoNote = autoAcceptedCount > 0 ? ` (${autoAcceptedCount} auto-accepted)` : "";
+              log(`DONE: ${acceptedCount} accepted${autoNote}, ${waitlistedCount} waitlisted, ${rejectedCount} rejected` +
                 (data.errors > 0 ? ` (${data.errors} errors)` : ""), color);
             }
             log("═".repeat(60), color);
+            // Capacity warning
+            if (selectionPreferences.venue_capacity && acceptedCount > selectionPreferences.venue_capacity) {
+              log("");
+              log(`⚠ WARNING: ${acceptedCount} accepted exceeds venue capacity of ${selectionPreferences.venue_capacity}!`, "#eab308");
+            }
           },
         }
       );
@@ -1423,7 +1471,7 @@ export default function Page() {
               setSelectedIds(new Set());
             }}
           >
-            <SelectTrigger className="h-10 w-[220px]">
+            <SelectTrigger className="h-10 w-full sm:w-[220px]">
               <FolderOpen className="size-4 mr-2 text-muted-foreground" />
               <SelectValue placeholder="All Sessions" />
             </SelectTrigger>
@@ -1466,7 +1514,7 @@ export default function Page() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-5 gap-3">
+      <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 sm:gap-3">
         {[
           { label: "Total", value: stats?.total ?? 0, filter: "all", color: "text-foreground" },
           { label: "Accepted", value: accepted.length, filter: "accepted", color: "text-green-600 dark:text-green-400" },
@@ -1505,9 +1553,9 @@ export default function Page() {
       )}
 
       {/* Toolbar: Tabs + Search + Actions */}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <Tabs value={statusFilter} onValueChange={setStatusFilter} className="w-auto">
-          <TabsList>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3">
+        <Tabs value={statusFilter} onValueChange={setStatusFilter} className="w-auto overflow-x-auto">
+          <TabsList className="flex-nowrap">
             <TabsTrigger value="all">All</TabsTrigger>
             <TabsTrigger value="accepted">Accepted</TabsTrigger>
             <TabsTrigger value="waitlisted">Waitlisted</TabsTrigger>
@@ -1516,7 +1564,7 @@ export default function Page() {
           </TabsList>
         </Tabs>
 
-        <div className="flex items-center gap-2 flex-1 min-w-0 max-w-md">
+        <div className="flex items-center gap-2 flex-1 min-w-0 sm:max-w-md">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
             <Input
@@ -1560,6 +1608,15 @@ export default function Page() {
           )}
 
           <Button
+            variant="ghost"
+            size="icon"
+            className="size-9"
+            onClick={() => setShowWizard(true)}
+            title="Selection Criteria"
+          >
+            <SlidersHorizontal className="size-4" />
+          </Button>
+          <Button
             onClick={() => {
               if (!apiKey.trim()) {
                 toast.error("Add your API key first", { description: "Go to Settings to configure your AI provider and API key.", action: { label: "Open Settings", onClick: () => setShowSettingsDialog(true) } });
@@ -1567,6 +1624,10 @@ export default function Page() {
               }
               if ((stats?.total ?? 0) === 0) {
                 toast.error("No applicants to analyze", { description: "Import a CSV or connect a Google Sheet first." });
+                return;
+              }
+              if (!wizardCompleted) {
+                setShowWizard(true);
                 return;
               }
               handleAnalyze();
@@ -1761,7 +1822,7 @@ export default function Page() {
 
       {/* Import Dialog */}
       <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>
-        <DialogContent className="sm:max-w-3xl overflow-hidden max-h-[90vh] flex flex-col">
+        <DialogContent className="max-w-[95vw] sm:max-w-3xl overflow-hidden max-h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>Import Applicants</DialogTitle>
             <DialogDescription>
@@ -1873,7 +1934,7 @@ export default function Page() {
 
       {/* Settings Dialog */}
       <Dialog open={showSettingsDialog} onOpenChange={setShowSettingsDialog}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="max-w-[95vw] sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Settings</DialogTitle>
             <DialogDescription>
@@ -1986,6 +2047,49 @@ export default function Page() {
                 </div>
               )}
             </div>
+
+            <Separator />
+
+            {/* Selection Criteria Summary */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-medium flex items-center gap-2">
+                  <SlidersHorizontal className="size-4" />
+                  Selection Criteria
+                </Label>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setShowSettingsDialog(false);
+                    setShowWizard(true);
+                  }}
+                  className="h-7 text-xs"
+                >
+                  Edit
+                </Button>
+              </div>
+              <div className="rounded-md border p-3 text-sm space-y-1.5">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Venue capacity:</span>
+                  <span>{selectionPreferences.venue_capacity ?? "No limit"}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Relevance filter:</span>
+                  <span className="capitalize">{selectionPreferences.relevance_filter}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Auto-accept:</span>
+                  <span>{selectionPreferences.auto_accept_types.length > 0 ? selectionPreferences.auto_accept_types.join(", ") : "None"}</span>
+                </div>
+                {selectionPreferences.custom_priorities && (
+                  <div>
+                    <span className="text-muted-foreground">Priorities:</span>
+                    <p className="text-xs mt-0.5">{selectionPreferences.custom_priorities.substring(0, 100)}{selectionPreferences.custom_priorities.length > 100 ? "..." : ""}</p>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
 
           <DialogFooter>
@@ -2003,9 +2107,26 @@ export default function Page() {
         </DialogContent>
       </Dialog>
 
+      {/* Selection Wizard */}
+      <SelectionWizard
+        open={showWizard}
+        onOpenChange={setShowWizard}
+        preferences={selectionPreferences}
+        onSave={(prefs) => {
+          setSelectionPreferences(prefs);
+          setWizardCompleted(true);
+          localStorage.setItem("selection_preferences", JSON.stringify(prefs));
+          api.updateSelectionPreferences(prefs).catch(() => {});
+          // Auto-start analysis after wizard
+          if (apiKey.trim() && (stats?.total ?? 0) > 0) {
+            setTimeout(() => handleAnalyze(), 100);
+          }
+        }}
+      />
+
       {/* Analysis Dialog */}
       <Dialog open={showAnalysisDialog} onOpenChange={(open) => { if (!analyzing) setShowAnalysisDialog(open); }}>
-        <DialogContent className="sm:max-w-2xl" showCloseButton={!analyzing}>
+        <DialogContent className="max-w-[95vw] sm:max-w-2xl max-h-[90vh] overflow-y-auto" showCloseButton={!analyzing}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               {analyzing ? (

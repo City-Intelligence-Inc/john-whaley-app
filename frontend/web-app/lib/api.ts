@@ -41,6 +41,22 @@ export interface PromptSettings {
   criteria: string[];
 }
 
+export interface SelectionPreferences {
+  venue_capacity: number | null;
+  attendee_mix: Record<string, number>;
+  auto_accept_types: string[];
+  relevance_filter: string;
+  custom_priorities: string;
+}
+
+export const DEFAULT_SELECTION_PREFERENCES: SelectionPreferences = {
+  venue_capacity: null,
+  attendee_mix: {},
+  auto_accept_types: ["student", "faculty", "alumni"],
+  relevance_filter: "moderate",
+  custom_priorities: "",
+};
+
 export interface GoogleSheetImportRequest {
   sheet_url: string;
   sheet_name?: string;
@@ -71,6 +87,7 @@ export interface BulkAnalyzeRequest {
   criteria: string[];
   criteria_weights?: string[];
   session_id?: string;
+  selection_preferences?: SelectionPreferences;
 }
 
 export interface AnalysisResult {
@@ -132,11 +149,19 @@ export interface SSECompleteEvent {
   errors: number;
 }
 
+export interface SSEAutoAcceptEvent {
+  applicant_id: string;
+  name: string;
+  attendee_type: string;
+  attendee_type_detail: string;
+}
+
 export interface AnalyzeStreamCallbacks {
   onStart?: (data: SSEStartEvent) => void;
   onPhase?: (data: SSEPhaseEvent) => void;
   onClassify?: (data: SSEClassifyEvent) => void;
   onClassifyError?: (data: SSEErrorEvent) => void;
+  onAutoAccept?: (data: SSEAutoAcceptEvent) => void;
   onProgress?: (data: SSEProgressEvent) => void;
   onError?: (data: SSEErrorEvent) => void;
   onComplete?: (data: SSECompleteEvent) => void;
@@ -298,6 +323,7 @@ export const api = {
           else if (eventType === "phase") callbacks.onPhase?.(data);
           else if (eventType === "classify") callbacks.onClassify?.(data);
           else if (eventType === "classify_error") callbacks.onClassifyError?.(data);
+          else if (eventType === "auto_accept") callbacks.onAutoAccept?.(data);
           else if (eventType === "progress") callbacks.onProgress?.(data);
           else if (eventType === "error") callbacks.onError?.(data);
           else if (eventType === "complete") callbacks.onComplete?.(data);
@@ -312,6 +338,14 @@ export const api = {
 
   updatePromptSettings: (data: PromptSettings) =>
     fetchAPI<PromptSettings>("/settings/prompts", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  getSelectionPreferences: () => fetchAPI<SelectionPreferences>("/settings/selection-preferences"),
+
+  updateSelectionPreferences: (data: SelectionPreferences) =>
+    fetchAPI<SelectionPreferences>("/settings/selection-preferences", {
       method: "PUT",
       body: JSON.stringify(data),
     }),

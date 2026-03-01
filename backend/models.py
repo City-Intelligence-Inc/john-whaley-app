@@ -33,6 +33,16 @@ class GoogleSheetImport(BaseModel):
     session_id: Optional[str] = None
 
 
+# ── Selection Preferences ──
+
+class SelectionPreferences(BaseModel):
+    venue_capacity: Optional[int] = None          # null = no limit
+    attendee_mix: dict[str, int] = {}             # type -> target %
+    auto_accept_types: list[str] = []             # types to auto-accept
+    relevance_filter: str = "moderate"            # strict|moderate|loose|none
+    custom_priorities: str = ""                   # freeform text
+
+
 # ── AI Analysis ──
 
 class ReviewRequest(BaseModel):
@@ -51,6 +61,7 @@ class BulkAnalyzeRequest(BaseModel):
     criteria: list[str] = []
     criteria_weights: Optional[list[str]] = None
     session_id: Optional[str] = None
+    selection_preferences: Optional[SelectionPreferences] = None
 
 
 # ── Settings ──

@@ -12,7 +12,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from config import AI_FIELDS
-from models import ReviewRequest, BulkAnalyzeRequest
+from models import ReviewRequest, BulkAnalyzeRequest, SelectionPreferences
 from ai import call_ai, call_ai_async, parse_json_response
 import db
 
@@ -163,7 +163,7 @@ _SCORE_PROMPT = """
 
 EVENT CONTEXT: CS 224G Demo Day & Poster Session at Stanford (March 19, 2026).
 CS 224G is Stanford's course on building LLM-powered applications.
-
+{selection_context}
 APPLICANT POOL CONTEXT — here is the current distribution of all {total} applicants:
 {pool_summary}
 
@@ -189,6 +189,37 @@ Scoring guidelines:
 
 Return ONLY the JSON, no other text.
 """.strip()
+
+
+def _selection_context(prefs: SelectionPreferences | None) -> str:
+    """Build prompt text from selection preferences."""
+    if not prefs:
+        return ""
+    parts: list[str] = []
+    if prefs.venue_capacity:
+        parts.append(f"VENUE CAPACITY: The venue can hold {prefs.venue_capacity} attendees. Be more selective to stay within this limit.")
+    if prefs.attendee_mix:
+        type_labels = {
+            "vc": "VCs / Investors", "entrepreneur": "Founders / Entrepreneurs",
+            "faculty": "Faculty / Researchers", "alumni": "Stanford Alumni",
+            "press": "Press / Media", "student": "Students", "other": "Other",
+        }
+        mix_lines = [f"  - {type_labels.get(k, k)}: {v}%" for k, v in prefs.attendee_mix.items() if v > 0]
+        if mix_lines:
+            parts.append("TARGET ATTENDEE MIX:\n" + "\n".join(mix_lines))
+    relevance_desc = {
+        "strict": "RELEVANCE FILTER: STRICT — Only accept applicants with direct, clear relevance to AI/LLM/the event topic. Reject tangential connections.",
+        "moderate": "RELEVANCE FILTER: MODERATE — Accept applicants with reasonable relevance. Some tangential connections are OK if the person brings other value.",
+        "loose": "RELEVANCE FILTER: LOOSE — Accept most applicants who show any interest or connection. Only reject clearly irrelevant applications.",
+        "none": "RELEVANCE FILTER: NONE — Do not filter by relevance. Score purely on other factors.",
+    }
+    if prefs.relevance_filter in relevance_desc:
+        parts.append(relevance_desc[prefs.relevance_filter])
+    if prefs.custom_priorities.strip():
+        parts.append(f"ORGANIZER PRIORITIES: {prefs.custom_priorities.strip()}")
+    if not parts:
+        return ""
+    return "\nSELECTION CRITERIA:\n" + "\n\n".join(parts) + "\n"
 
 
 async def _classify_one(applicant: dict, body: BulkAnalyzeRequest, semaphore: asyncio.Semaphore) -> dict:
@@ -234,6 +265,7 @@ async def _score_one(applicant: dict, body: BulkAnalyzeRequest, pool_summary: st
         prompt = _SCORE_PROMPT.format(
             base_prompt=body.prompt,
             criteria=_criteria_text(body.criteria, body.criteria_weights),
+            selection_context=_selection_context(body.selection_preferences),
             total=total,
             pool_summary=pool_summary,
             info=_applicant_info_text(applicant),
@@ -327,11 +359,33 @@ async def analyze_all_stream(body: BulkAnalyzeRequest):
         pool_summary = _build_pool_summary(type_counts, total)
         yield f"event: phase\ndata: {json.dumps({'phase': 'pool_summary', 'message': 'Classification complete. Pool distribution:', 'type_counts': type_counts, 'total': total})}\n\n"
 
+        # ── AUTO-ACCEPT PHASE ──
+        auto_accept_types = []
+        if body.selection_preferences and body.selection_preferences.auto_accept_types:
+            auto_accept_types = body.selection_preferences.auto_accept_types
+
+        auto_accepted_ids: set[str] = set()
+        if auto_accept_types:
+            yield f"event: phase\ndata: {json.dumps({'phase': 'auto_accept', 'message': f'Auto-accepting: {', '.join(auto_accept_types)}...'})}\n\n"
+            for aid, info in classified.items():
+                if info.get("attendee_type") in auto_accept_types:
+                    auto_accepted_ids.add(aid)
+                    db.update_applicant_fields(aid, {
+                        "status": "accepted",
+                        "ai_score": "100",
+                        "ai_reasoning": f"Auto-accepted ({info.get('attendee_type')})",
+                    })
+                    yield f"event: auto_accept\ndata: {json.dumps({'applicant_id': aid, 'name': info.get('name', 'Unknown'), 'attendee_type': info.get('attendee_type', ''), 'attendee_type_detail': info.get('attendee_type_detail', '')})}\n\n"
+
         # ── PASS 2: Scoring & Decisions ──
         yield f"event: phase\ndata: {json.dumps({'phase': 'score', 'message': 'Pass 2: Scoring and making decisions with full pool context...'})}\n\n"
 
-        # Re-fetch applicants to get updated type fields
-        applicants_refreshed = db.scan_all_applicants(session_id=body.session_id)
+        # Re-fetch applicants to get updated type fields, exclude auto-accepted
+        applicants_refreshed = [
+            a for a in db.scan_all_applicants(session_id=body.session_id)
+            if a["applicant_id"] not in auto_accepted_ids
+        ]
+        scoring_total = len(applicants_refreshed)
 
         completed, errors = 0, 0
         tasks = {asyncio.ensure_future(_score_one(a, body, pool_summary, total, semaphore)): a for a in applicants_refreshed}
