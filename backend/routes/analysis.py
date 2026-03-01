@@ -130,17 +130,29 @@ Here is the applicant's information:
 
 {info}
 
+EVENT CONTEXT: This is for CS 224G Demo Day & Poster Session at Stanford (March 19, 2026).
+CS 224G is Stanford's course on building LLM-powered applications. The event showcases student
+projects to VCs, entrepreneurs, faculty, alumni, press, and other students.
+
 Evaluate this applicant and return ONLY a JSON object with this exact format:
 {{"score": <number 1-100>, "status": "accepted" or "waitlisted" or "rejected", "attendee_type": "vc" or "entrepreneur" or "faculty" or "alumni" or "press" or "student" or "other", "reasoning": "brief 1-2 sentence explanation"}}
 
-For attendee_type, classify the applicant into one of these categories based on their background:
-- "vc" = venture capitalist, investor, angel investor, partner at a fund
-- "entrepreneur" = founder, CEO, startup executive, business owner
-- "faculty" = professor, researcher, academic, postdoc
-- "alumni" = CS 224G or Stanford alumni
-- "press" = journalist, reporter, media, tech press, blogger
-- "student" = current student
-- "other" = does not fit the above categories
+For attendee_type, classify the applicant into ONE of these categories based on their background:
+- "vc" = VC partner, angel investor, fund manager, investing professional, anyone whose primary role is investing
+- "entrepreneur" = Founder, CEO, CTO, startup executive, business builder — someone running or building a company
+- "faculty" = Professor, researcher, academic staff, postdoc at a university (any university, not just Stanford)
+- "alumni" = Stanford alumni, CS 224G alumni, former Stanford student or staff who are NOT primarily a VC, founder, or professor now
+- "press" = Journalist, reporter, tech media writer, blogger, content creator covering technology
+- "student" = Currently enrolled student at any university
+- "other" = Industry professional, engineer, or anyone who does not clearly fit the above categories
+
+PRIORITY RULES for ambiguous cases — classify by their CURRENT primary role:
+- A Stanford alum who is now a VC partner → "vc" (current role takes priority)
+- A Stanford alum who is now a startup founder → "entrepreneur"
+- A Stanford alum who is now a professor → "faculty"
+- A Stanford alum with no other distinguishing role → "alumni"
+- A student who is also a founder → "entrepreneur" (if that is their primary identity)
+- When in doubt, pick the role most relevant to why they would attend a demo day for LLM projects
 
 Return ONLY the JSON, no other text.
 """.strip()
