@@ -86,6 +86,24 @@ export interface SSEStartEvent {
   total: number;
 }
 
+export interface SSEPhaseEvent {
+  phase: string;
+  message: string;
+  type_counts?: Record<string, number>;
+  total?: number;
+}
+
+export interface SSEClassifyEvent {
+  completed: number;
+  total: number;
+  errors: number;
+  applicant_id: string;
+  name: string;
+  attendee_type: string;
+  attendee_type_detail: string;
+  summary: string;
+}
+
 export interface SSEProgressEvent {
   completed: number;
   total: number;
@@ -116,6 +134,9 @@ export interface SSECompleteEvent {
 
 export interface AnalyzeStreamCallbacks {
   onStart?: (data: SSEStartEvent) => void;
+  onPhase?: (data: SSEPhaseEvent) => void;
+  onClassify?: (data: SSEClassifyEvent) => void;
+  onClassifyError?: (data: SSEErrorEvent) => void;
   onProgress?: (data: SSEProgressEvent) => void;
   onError?: (data: SSEErrorEvent) => void;
   onComplete?: (data: SSECompleteEvent) => void;
@@ -274,6 +295,9 @@ export const api = {
         } else if (line.startsWith("data: ") && eventType) {
           const data = JSON.parse(line.slice(6));
           if (eventType === "start") callbacks.onStart?.(data);
+          else if (eventType === "phase") callbacks.onPhase?.(data);
+          else if (eventType === "classify") callbacks.onClassify?.(data);
+          else if (eventType === "classify_error") callbacks.onClassifyError?.(data);
           else if (eventType === "progress") callbacks.onProgress?.(data);
           else if (eventType === "error") callbacks.onError?.(data);
           else if (eventType === "complete") callbacks.onComplete?.(data);

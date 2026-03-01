@@ -3,7 +3,7 @@ AI analysis routes — single applicant review, bulk analysis, and SSE streaming
 
 POST /applicants/{id}/review          Review one applicant
 POST /applicants/analyze-all          Bulk analyze (single LLM call)
-POST /applicants/analyze-all-stream   Bulk analyze with SSE progress
+POST /applicants/analyze-all-stream   Bulk analyze with SSE progress (2-pass)
 """
 
 import asyncio
@@ -121,59 +121,124 @@ Rank them by score (highest first). Return ONLY the JSON, no other text."""
     return result
 
 
-# ── SSE streaming bulk analyze ──
+# ── SSE streaming 2-pass bulk analyze ──
 
-_SINGLE_REVIEW_PROMPT = """
-{base_prompt}{criteria}
+# Pass 1: Classification only — no scoring or decisions
+_CLASSIFY_PROMPT = """
+EVENT CONTEXT: CS 224G Demo Day & Poster Session at Stanford (March 19, 2026).
+CS 224G is Stanford's course on building LLM-powered applications. The event showcases
+student projects to VCs, entrepreneurs, faculty, alumni, press, and other students.
 
 Here is the applicant's information:
 
 {info}
 
-EVENT CONTEXT: This is for CS 224G Demo Day & Poster Session at Stanford (March 19, 2026).
-CS 224G is Stanford's course on building LLM-powered applications. The event showcases student
-projects to VCs, entrepreneurs, faculty, alumni, press, and other students.
+Classify this applicant into ONE attendee type. Return ONLY a JSON object:
+{{"attendee_type": "<type>", "attendee_type_detail": "<specific label>", "summary": "<1 sentence: who they are and why they'd attend>"}}
 
-Evaluate this applicant and return ONLY a JSON object with this exact format:
-{{"score": <number 1-100>, "status": "accepted" or "waitlisted" or "rejected", "attendee_type": "vc" or "entrepreneur" or "faculty" or "alumni" or "press" or "student" or "other", "attendee_type_detail": "<specific role>", "reasoning": "<2-3 sentence explanation>"}}
+attendee_type must be one of: "vc", "entrepreneur", "faculty", "alumni", "press", "student", "other"
 
-For attendee_type, classify the applicant into ONE of these categories based on their background:
-- "vc" = VC partner, angel investor, fund manager, investing professional, anyone whose primary role is investing
-- "entrepreneur" = Founder, CEO, CTO, startup executive, business builder — someone running or building a company
-- "faculty" = Professor, researcher, academic staff, postdoc at a university (any university, not just Stanford)
-- "alumni" = Stanford alumni, CS 224G alumni, former Stanford student or staff who are NOT primarily a VC, founder, or professor now
-- "press" = Journalist, reporter, tech media writer, blogger, content creator covering technology
+Rules:
+- "vc" = VC partner, angel investor, fund manager, investing professional
+- "entrepreneur" = Founder, CEO, CTO, startup executive actively running/building a company
+- "faculty" = Professor, researcher, academic staff, postdoc at any university
+- "alumni" = Stanford or CS 224G alumni NOT primarily a VC/founder/professor now
+- "press" = Journalist, reporter, tech media, blogger covering technology
 - "student" = Currently enrolled student at any university
-- "other" = Industry professional, engineer, or anyone who does not clearly fit the above categories
+- "other" = Everyone else (industry engineers, PMs, designers, consultants, etc.)
 
-For attendee_type_detail: provide a SHORT specific label (1-3 words) describing what the person actually does.
-- For "other": this is REQUIRED — e.g. "Engineer", "Product Manager", "Designer", "Data Scientist", "Consultant", "Lawyer", "Government"
-- For known types: also provide a more specific label — e.g. "GP at Sequoia", "Stanford CS Prof", "TechCrunch Reporter", "PhD Student", "YC Founder"
+Classify by CURRENT primary role (Stanford alum now a VC → "vc").
 
-PRIORITY RULES for ambiguous cases — classify by their CURRENT primary role:
-- A Stanford alum who is now a VC partner → "vc" (current role takes priority)
-- A Stanford alum who is now a startup founder → "entrepreneur"
-- A Stanford alum who is now a professor → "faculty"
-- A Stanford alum with no other distinguishing role → "alumni"
-- A student who is also a founder → "entrepreneur" (if that is their primary identity)
-- When in doubt, pick the role most relevant to why they would attend a demo day for LLM projects
+For attendee_type_detail, use a BROAD role category (not a specific job title):
+- Good: "Engineer", "Product Manager", "Designer", "Data Scientist", "Consultant", "Executive", "Ops/DevOps", "Security", "Research Scientist"
+- Bad: "Senior Staff Platform Infrastructure Engineer" — too specific, just say "Engineer"
+- For non-"other" types: use a short descriptor like "Seed VC", "AI Startup Founder", "CS Professor", "CS 224G Alum", "Tech Reporter", "MS Student"
 
-For reasoning: Write 2-3 descriptive sentences that explain WHO this person is, WHY you classified them this way, and how relevant they are to a CS 224G Demo Day. Mention their specific role, company/affiliation, and what makes them a good or poor fit.
+Return ONLY the JSON, no other text.
+""".strip()
+
+# Pass 2: Scoring and decisions — with pool context
+_SCORE_PROMPT = """
+{base_prompt}{criteria}
+
+EVENT CONTEXT: CS 224G Demo Day & Poster Session at Stanford (March 19, 2026).
+CS 224G is Stanford's course on building LLM-powered applications.
+
+APPLICANT POOL CONTEXT — here is the current distribution of all {total} applicants:
+{pool_summary}
+
+You are now scoring this specific applicant:
+
+{info}
+
+This person was classified as: {attendee_type} ({attendee_type_detail})
+
+Score this applicant relative to the FULL POOL. Consider:
+1. How relevant is this person to a demo day showcasing LLM-powered student projects?
+2. How much value would they add as an attendee (networking, feedback, investment, press coverage)?
+3. Given the pool distribution, do we need more people like them?
+
+Return ONLY a JSON object:
+{{"score": <1-100>, "status": "accepted" or "waitlisted" or "rejected", "reasoning": "<2-3 sentences: who they are, why this score, and how they compare to others in the pool>"}}
+
+Scoring guidelines:
+- 80-100: Highly relevant — would significantly benefit from or contribute to the event
+- 60-79: Moderately relevant — reasonable fit, put on waitlist unless category is underrepresented
+- 40-59: Low relevance — tangential connection to LLM/AI, likely reject unless we need diversity
+- 1-39: Not relevant — no clear connection to the event's purpose
 
 Return ONLY the JSON, no other text.
 """.strip()
 
 
-async def _analyze_one(applicant: dict, body: BulkAnalyzeRequest, semaphore: asyncio.Semaphore) -> dict:
-    """Analyze a single applicant (runs under semaphore for concurrency control)."""
+async def _classify_one(applicant: dict, body: BulkAnalyzeRequest, semaphore: asyncio.Semaphore) -> dict:
+    """Pass 1: Classify a single applicant (type only, no scoring)."""
     applicant_id = applicant["applicant_id"]
     name = applicant.get("name", "Unknown")
 
     async with semaphore:
-        prompt = _SINGLE_REVIEW_PROMPT.format(
+        prompt = _CLASSIFY_PROMPT.format(info=_applicant_info_text(applicant))
+
+        try:
+            raw = await call_ai_async(body.provider, body.api_key, body.model, prompt)
+            result = parse_json_response(raw)
+
+            fields = {
+                "attendee_type": result.get("attendee_type", "other"),
+                "attendee_type_detail": result.get("attendee_type_detail", ""),
+            }
+            db.update_applicant_fields(applicant_id, fields)
+
+            return {
+                "applicant_id": applicant_id,
+                "name": name,
+                "attendee_type": fields["attendee_type"],
+                "attendee_type_detail": fields["attendee_type_detail"],
+                "summary": result.get("summary", ""),
+            }
+
+        except json.JSONDecodeError:
+            return {"applicant_id": applicant_id, "name": name, "error": f"Invalid JSON: {raw[:200]}"}
+        except Exception as e:
+            return {"applicant_id": applicant_id, "name": name, "error": str(e)}
+
+
+async def _score_one(applicant: dict, body: BulkAnalyzeRequest, pool_summary: str, total: int, semaphore: asyncio.Semaphore) -> dict:
+    """Pass 2: Score and decide on a single applicant (with pool context)."""
+    applicant_id = applicant["applicant_id"]
+    name = applicant.get("name", "Unknown")
+    attendee_type = applicant.get("attendee_type", "other")
+    attendee_type_detail = applicant.get("attendee_type_detail", "")
+
+    async with semaphore:
+        prompt = _SCORE_PROMPT.format(
             base_prompt=body.prompt,
             criteria=_criteria_text(body.criteria, body.criteria_weights),
+            total=total,
+            pool_summary=pool_summary,
             info=_applicant_info_text(applicant),
+            attendee_type=attendee_type,
+            attendee_type_detail=attendee_type_detail,
         )
 
         try:
@@ -184,8 +249,6 @@ async def _analyze_one(applicant: dict, body: BulkAnalyzeRequest, semaphore: asy
                 "status": result.get("status", "pending"),
                 "ai_score": str(result.get("score", 0)),
                 "ai_reasoning": result.get("reasoning", ""),
-                "attendee_type": result.get("attendee_type", "other"),
-                "attendee_type_detail": result.get("attendee_type_detail", ""),
             }
             db.update_applicant_fields(applicant_id, fields)
 
@@ -195,8 +258,8 @@ async def _analyze_one(applicant: dict, body: BulkAnalyzeRequest, semaphore: asy
                 "score": int(result.get("score", 0)),
                 "status": fields["status"],
                 "reasoning": fields["ai_reasoning"],
-                "attendee_type": fields["attendee_type"],
-                "attendee_type_detail": fields["attendee_type_detail"],
+                "attendee_type": attendee_type,
+                "attendee_type_detail": attendee_type_detail,
             }
 
         except json.JSONDecodeError:
@@ -205,6 +268,25 @@ async def _analyze_one(applicant: dict, body: BulkAnalyzeRequest, semaphore: asy
         except Exception as e:
             db.update_applicant_fields(applicant_id, {"ai_reasoning": "Analysis failed", "ai_score": "0"})
             return {"applicant_id": applicant_id, "name": name, "error": str(e)}
+
+
+def _build_pool_summary(type_counts: dict[str, int], total: int) -> str:
+    """Build a text summary of the applicant pool distribution."""
+    type_labels = {
+        "vc": "VCs / Investors",
+        "entrepreneur": "Founders / Entrepreneurs",
+        "faculty": "Faculty / Researchers",
+        "alumni": "Stanford Alumni",
+        "press": "Press / Media",
+        "student": "Students",
+        "other": "Other (Industry professionals)",
+    }
+    lines = []
+    for key, label in type_labels.items():
+        count = type_counts.get(key, 0)
+        pct = round(count / total * 100) if total > 0 else 0
+        lines.append(f"- {label}: {count} ({pct}%)")
+    return "\n".join(lines)
 
 
 @router.post("/analyze-all-stream")
@@ -219,8 +301,40 @@ async def analyze_all_stream(body: BulkAnalyzeRequest):
 
         yield f"event: start\ndata: {json.dumps({'total': total})}\n\n"
 
+        # ── PASS 1: Classification ──
+        yield f"event: phase\ndata: {json.dumps({'phase': 'classify', 'message': 'Pass 1: Classifying all applicants...'})}\n\n"
+
         completed, errors = 0, 0
-        tasks = {asyncio.ensure_future(_analyze_one(a, body, semaphore)): a for a in applicants}
+        type_counts: dict[str, int] = {}
+        classified: dict[str, dict] = {}  # applicant_id → classification result
+
+        tasks = {asyncio.ensure_future(_classify_one(a, body, semaphore)): a for a in applicants}
+
+        for coro in asyncio.as_completed(tasks.keys()):
+            result = await coro
+            completed += 1
+
+            if "error" in result:
+                errors += 1
+                yield f"event: classify_error\ndata: {json.dumps({**result, 'completed': completed, 'total': total, 'errors': errors})}\n\n"
+            else:
+                t = result.get("attendee_type", "other")
+                type_counts[t] = type_counts.get(t, 0) + 1
+                classified[result["applicant_id"]] = result
+                yield f"event: classify\ndata: {json.dumps({**result, 'completed': completed, 'total': total, 'errors': errors})}\n\n"
+
+        # Emit pool summary after classification
+        pool_summary = _build_pool_summary(type_counts, total)
+        yield f"event: phase\ndata: {json.dumps({'phase': 'pool_summary', 'message': 'Classification complete. Pool distribution:', 'type_counts': type_counts, 'total': total})}\n\n"
+
+        # ── PASS 2: Scoring & Decisions ──
+        yield f"event: phase\ndata: {json.dumps({'phase': 'score', 'message': 'Pass 2: Scoring and making decisions with full pool context...'})}\n\n"
+
+        # Re-fetch applicants to get updated type fields
+        applicants_refreshed = db.scan_all_applicants(session_id=body.session_id)
+
+        completed, errors = 0, 0
+        tasks = {asyncio.ensure_future(_score_one(a, body, pool_summary, total, semaphore)): a for a in applicants_refreshed}
 
         for coro in asyncio.as_completed(tasks.keys()):
             result = await coro

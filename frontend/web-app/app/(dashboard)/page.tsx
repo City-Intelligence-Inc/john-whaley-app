@@ -1085,7 +1085,7 @@ export default function Page() {
       setLogs((prev) => [...prev, { time, message: msg, color }]);
     };
 
-    log(`Starting per-applicant analysis...`);
+    log(`Starting 2-pass analysis...`);
     log(`Provider: ${provider === "anthropic" ? "Anthropic" : "OpenAI"} | Model: ${modelLabel}`);
     log(`Prompt: "${prompt.substring(0, 80)}${prompt.length > 80 ? "..." : ""}"`);
     log(`Criteria: ${criteria.join(", ")}`);
@@ -1099,20 +1099,60 @@ export default function Page() {
     try {
       await api.updatePromptSettings({ default_prompt: prompt, criteria });
       log("Saved prompt settings.");
-      log("Streaming analysis — each applicant analyzed individually...");
-      log("─".repeat(60));
 
       await api.analyzeAllStream(
         { api_key: apiKey, model, provider, prompt, criteria, session_id: activeSessionId },
         {
           onStart: (data) => {
-            setAnalysisProgress({ completed: 0, total: data.total, errors: 0 });
-            log(`Analyzing ${data.total} applicants (concurrency: 10)...`);
+            setAnalysisProgress({ completed: 0, total: data.total * 2, errors: 0 });
+            log(`${data.total} applicants to analyze across 2 passes`);
           },
-          onProgress: (data) => {
-            setAnalysisProgress({ completed: data.completed, total: data.total, errors: data.errors });
+          onPhase: (data) => {
+            log("");
+            log("═".repeat(60), "#6366f1");
+            log(data.message, "#6366f1");
+            log("═".repeat(60), "#6366f1");
 
-            // Track type counts
+            // Show pool summary after classification
+            if (data.phase === "pool_summary" && data.type_counts) {
+              const total = data.total || 0;
+              for (const t of ATTENDEE_TYPES) {
+                const count = data.type_counts[t.key] || 0;
+                const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+                const bar = "█".repeat(Math.max(1, Math.round(pct / 3))) + (count === 0 ? "░" : "");
+                const names = typeNames[t.key]?.slice(0, 4).join(", ") || "—";
+                const moreCount = (typeNames[t.key]?.length || 0) - 4;
+                log(`  ${t.label.padEnd(24)} ${String(count).padStart(3)} (${String(pct).padStart(2)}%) ${bar}`, t.color);
+                if (count > 0) {
+                  log(`     └─ ${names}${moreCount > 0 ? `, +${moreCount} more` : ""}`, "#9ca3af");
+                }
+              }
+
+              // Balance warnings
+              const alerts: string[] = [];
+              for (const t of ATTENDEE_TYPES) {
+                const count = data.type_counts[t.key] || 0;
+                if (t.key === "other") continue;
+                if (count === 0) alerts.push(`⚠ No ${t.label} — consider sourcing more`);
+                else if (count < Math.ceil(total * 0.03)) alerts.push(`⚠ Only ${count} ${t.label} — underrepresented`);
+              }
+              const otherCount = data.type_counts["other"] || 0;
+              if (otherCount > total * 0.4) {
+                alerts.push(`⚠ ${otherCount} "Other" (${Math.round((otherCount / total) * 100)}%) — large uncategorized group`);
+              }
+              if (alerts.length > 0) {
+                log("");
+                for (const a of alerts) log(`  ${a}`, "#eab308");
+              }
+            }
+          },
+          onClassify: (data) => {
+            setAnalysisProgress((prev) => ({
+              completed: (prev?.completed || 0) + 1,
+              total: prev?.total || data.total * 2,
+              errors: prev?.errors || 0,
+            }));
+
             const type = data.attendee_type || "other";
             const typeLabel = ATTENDEE_TYPES.find((t) => t.key === type)?.label || type;
             const detail = data.attendee_type_detail || typeLabel;
@@ -1120,11 +1160,31 @@ export default function Page() {
             if (!typeNames[type]) typeNames[type] = [];
             typeNames[type].push(data.name);
 
-            // Status color
+            const typeColor = ATTENDEE_TYPES.find((t) => t.key === type)?.color;
+            log(`[${data.completed}/${data.total}] ${data.name}  →  ${typeLabel}  ·  ${detail}`, typeColor);
+            if (data.summary) {
+              log(`   └─ ${data.summary}`, "#9ca3af");
+            }
+          },
+          onClassifyError: (data) => {
+            setAnalysisProgress((prev) => ({
+              completed: (prev?.completed || 0) + 1,
+              total: prev?.total || data.total * 2,
+              errors: (prev?.errors || 0) + 1,
+            }));
+            log(`[${data.completed}/${data.total}] ${data.name} — CLASSIFY ERROR: ${data.error}`, "#ef4444");
+          },
+          onProgress: (data) => {
+            setAnalysisProgress((prev) => ({
+              completed: (prev?.completed || 0) + 1,
+              total: prev?.total || data.total * 2,
+              errors: prev?.errors || 0,
+            }));
+
+            const detail = data.attendee_type_detail || data.attendee_type || "";
             const statusColor = data.status === "accepted" ? "#22c55e" : data.status === "rejected" ? "#ef4444" : data.status === "waitlisted" ? "#eab308" : undefined;
             const statusLabel = data.status.toUpperCase();
 
-            // Rich log line
             log(`[${data.completed}/${data.total}] ${data.name}  ·  ${detail}  ·  Score: ${data.score}  ·  ${statusLabel}`, statusColor);
             if (data.reasoning) {
               log(`   └─ ${data.reasoning}`, "#9ca3af");
@@ -1135,55 +1195,24 @@ export default function Page() {
             else if (data.status === "rejected") rejectedCount++;
           },
           onError: (data) => {
-            setAnalysisProgress({ completed: data.completed, total: data.total, errors: data.errors });
-            log(`[${data.completed}/${data.total}] ${data.name} — ERROR: ${data.error}`, "#ef4444");
+            setAnalysisProgress((prev) => ({
+              completed: (prev?.completed || 0) + 1,
+              total: prev?.total || data.total * 2,
+              errors: (prev?.errors || 0) + 1,
+            }));
+            log(`[${data.completed}/${data.total}] ${data.name} — SCORE ERROR: ${data.error}`, "#ef4444");
           },
           onComplete: (data) => {
-            setAnalysisProgress({ completed: data.completed, total: data.total, errors: data.errors });
-            log("─".repeat(60));
-            log(`Analysis complete: ${acceptedCount} accepted, ${waitlistedCount} waitlisted, ${rejectedCount} rejected` +
-              (data.errors > 0 ? ` (${data.errors} errors)` : ""));
-
-            // Category summary
+            setAnalysisProgress((prev) => ({
+              completed: prev?.total || data.total * 2,
+              total: prev?.total || data.total * 2,
+              errors: data.errors,
+            }));
             log("");
-            log("CATEGORY BREAKDOWN:", "#6366f1");
-            for (const t of ATTENDEE_TYPES) {
-              const count = typeTally[t.key] || 0;
-              const pct = data.completed > 0 ? Math.round((count / data.completed) * 100) : 0;
-              const bar = "█".repeat(Math.max(1, Math.round(pct / 3))) + (count === 0 ? "░" : "");
-              const names = typeNames[t.key]?.slice(0, 3).join(", ") || "—";
-              const moreCount = (typeNames[t.key]?.length || 0) - 3;
-              log(`  ${t.label.padEnd(24)} ${String(count).padStart(3)} (${String(pct).padStart(2)}%) ${bar}`, t.color);
-              if (count > 0) {
-                log(`     └─ ${names}${moreCount > 0 ? `, +${moreCount} more` : ""}`, "#9ca3af");
-              }
-            }
-
-            // Balance check
-            log("");
-            log("BALANCE CHECK:", "#6366f1");
-            const total = data.completed;
-            const alerts: string[] = [];
-            for (const t of ATTENDEE_TYPES) {
-              const count = typeTally[t.key] || 0;
-              if (t.key === "other") continue;
-              if (count === 0) {
-                alerts.push(`⚠ No ${t.label} found — consider sourcing more`);
-              } else if (count < Math.ceil(total * 0.03)) {
-                alerts.push(`⚠ Only ${count} ${t.label} (${Math.round((count / total) * 100)}%) — may want more representation`);
-              }
-            }
-            const otherCount = typeTally["other"] || 0;
-            if (otherCount > total * 0.4) {
-              alerts.push(`⚠ ${otherCount} "Other" (${Math.round((otherCount / total) * 100)}%) — high proportion of uncategorized attendees`);
-            }
-            if (alerts.length === 0) {
-              log("  ✓ Good mix across all categories", "#22c55e");
-            } else {
-              for (const a of alerts) {
-                log(`  ${a}`, "#eab308");
-              }
-            }
+            log("═".repeat(60), "#22c55e");
+            log(`DONE: ${acceptedCount} accepted, ${waitlistedCount} waitlisted, ${rejectedCount} rejected` +
+              (data.errors > 0 ? ` (${data.errors} errors)` : ""), "#22c55e");
+            log("═".repeat(60), "#22c55e");
           },
         }
       );
