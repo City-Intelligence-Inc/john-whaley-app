@@ -2,10 +2,12 @@ import asyncio
 import csv
 import io
 import json
+import re
 import uuid
 from typing import Optional
 
 import boto3
+import httpx
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -60,6 +62,11 @@ class PromptSettings(BaseModel):
     criteria: list[str] = ["relevance", "experience", "potential_contribution"]
 
 
+class GoogleSheetImport(BaseModel):
+    sheet_url: str
+    sheet_name: Optional[str] = None  # specific tab name, defaults to first sheet
+
+
 class BulkAnalyzeRequest(BaseModel):
     api_key: str
     model: str = "claude-sonnet-4-20250514"
@@ -96,6 +103,119 @@ async def upload_csv(file: UploadFile = File(...)):
         items.append(item)
 
     return {"count": len(items), "items": items}
+
+
+def extract_sheet_id(url: str) -> str:
+    """Extract Google Sheet ID from various URL formats."""
+    patterns = [
+        r"/spreadsheets/d/([a-zA-Z0-9-_]+)",
+        r"^([a-zA-Z0-9-_]{20,})$",  # raw sheet ID
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, url)
+        if match:
+            return match.group(1)
+    raise ValueError("Could not extract Google Sheet ID from URL")
+
+
+@app.post("/applicants/import-google-sheet", status_code=201)
+async def import_google_sheet(body: GoogleSheetImport):
+    try:
+        sheet_id = extract_sheet_id(body.sheet_url)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid Google Sheet URL. Make sure the sheet is publicly accessible.")
+
+    # Build CSV export URL
+    export_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
+    if body.sheet_name:
+        export_url += f"&sheet={body.sheet_name}"
+
+    # Fetch the sheet data
+    async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
+        try:
+            resp = await client.get(export_url)
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                raise HTTPException(status_code=404, detail="Google Sheet not found. Make sure the URL is correct.")
+            raise HTTPException(
+                status_code=400,
+                detail="Could not fetch Google Sheet. Make sure it's set to 'Anyone with the link can view'."
+            )
+        except httpx.RequestError:
+            raise HTTPException(status_code=502, detail="Failed to connect to Google Sheets. Try again.")
+
+    # Check if we got HTML instead of CSV (sign of auth wall)
+    content_type = resp.headers.get("content-type", "")
+    if "text/html" in content_type:
+        raise HTTPException(
+            status_code=403,
+            detail="Google Sheet is not publicly accessible. Set sharing to 'Anyone with the link can view'."
+        )
+
+    text = resp.text
+    reader = csv.DictReader(io.StringIO(text))
+
+    # Get existing applicants for dedup (by email)
+    existing = table.scan(ProjectionExpression="applicant_id, email, #n", ExpressionAttributeNames={"#n": "name"})
+    existing_emails = {}
+    for item in existing.get("Items", []):
+        if item.get("email"):
+            existing_emails[item["email"].strip().lower()] = item["applicant_id"]
+
+    new_items = []
+    updated_items = []
+    for row in reader:
+        item = {"status": "pending"}
+        for key, value in row.items():
+            if key and value:
+                clean_key = key.strip().lower().replace(" ", "_")
+                item[clean_key] = value.strip()
+
+        if "name" not in item:
+            first = item.get("first_name", "")
+            last = item.get("last_name", "")
+            if first or last:
+                item["name"] = f"{first} {last}".strip()
+
+        # Dedup by email
+        email = item.get("email", "").strip().lower()
+        if email and email in existing_emails:
+            # Update existing applicant (don't overwrite status or AI fields)
+            applicant_id = existing_emails[email]
+            update_fields = {k: v for k, v in item.items() if k not in ("status", "ai_review", "ai_score", "ai_reasoning")}
+            if update_fields:
+                update_parts = []
+                expression_values = {}
+                expression_names = {}
+                for key, value in update_fields.items():
+                    safe_key = key.replace("-", "_")
+                    update_parts.append(f"#{safe_key} = :{safe_key}")
+                    expression_values[f":{safe_key}"] = value
+                    expression_names[f"#{safe_key}"] = key
+                if update_parts:
+                    table.update_item(
+                        Key={"applicant_id": applicant_id},
+                        UpdateExpression="SET " + ", ".join(update_parts),
+                        ExpressionAttributeValues=expression_values,
+                        ExpressionAttributeNames=expression_names,
+                    )
+            updated_items.append(applicant_id)
+        else:
+            # New applicant
+            applicant_id = str(uuid.uuid4())
+            item["applicant_id"] = applicant_id
+            table.put_item(Item=item)
+            new_items.append(item)
+            if email:
+                existing_emails[email] = applicant_id
+
+    return {
+        "new_count": len(new_items),
+        "updated_count": len(updated_items),
+        "total_in_sheet": len(new_items) + len(updated_items),
+        "items": new_items,
+    }
 
 
 @app.get("/applicants/stats")
@@ -403,7 +523,16 @@ Here is the applicant's information:
 {info}
 
 Evaluate this applicant and return ONLY a JSON object with this exact format:
-{{"score": <number 1-100>, "status": "accepted" or "waitlisted" or "rejected", "reasoning": "brief 1-2 sentence explanation"}}
+{{"score": <number 1-100>, "status": "accepted" or "waitlisted" or "rejected", "attendee_type": "vc" or "entrepreneur" or "faculty" or "alumni" or "press" or "student" or "other", "reasoning": "brief 1-2 sentence explanation"}}
+
+For attendee_type, classify the applicant into one of these categories based on their background:
+- "vc" = venture capitalist, investor, angel investor, partner at a fund
+- "entrepreneur" = founder, CEO, startup executive, business owner
+- "faculty" = professor, researcher, academic, postdoc
+- "alumni" = CS 224G or Stanford alumni
+- "press" = journalist, reporter, media, tech press, blogger
+- "student" = current student
+- "other" = does not fit the above categories
 
 Return ONLY the JSON, no other text."""
 

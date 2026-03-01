@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Applicant Reviewer",
-  description: "Review event applicants with AI-powered insights",
+  title: "CS 224G Demo Day Reviewer",
+  description: "AI-powered applicant review for CS 224G Demo Day at Stanford",
 };
 
 export default function RootLayout({

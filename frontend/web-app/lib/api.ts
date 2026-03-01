@@ -28,6 +28,18 @@ export interface PromptSettings {
   criteria: string[];
 }
 
+export interface GoogleSheetImportRequest {
+  sheet_url: string;
+  sheet_name?: string;
+}
+
+export interface GoogleSheetImportResponse {
+  new_count: number;
+  updated_count: number;
+  total_in_sheet: number;
+  items: Applicant[];
+}
+
 export interface ReviewRequest {
   api_key: string;
   model: string;
@@ -139,6 +151,13 @@ export const api = {
   deleteAllApplicants: () =>
     fetchAPI<{ deleted: number }>("/applicants/all", {
       method: "DELETE",
+    }),
+
+  // Google Sheet Import
+  importGoogleSheet: (data: GoogleSheetImportRequest) =>
+    fetchAPI<GoogleSheetImportResponse>("/applicants/import-google-sheet", {
+      method: "POST",
+      body: JSON.stringify(data),
     }),
 
   // CSV Upload
