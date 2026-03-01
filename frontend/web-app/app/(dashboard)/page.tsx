@@ -97,6 +97,13 @@ function ApplicantRow({
         ? "text-yellow-600 dark:text-yellow-400"
         : "text-red-600 dark:text-red-400";
 
+  const displayName =
+    applicant.name ||
+    applicant.email ||
+    (applicant.title && applicant.company ? `${applicant.title} @ ${applicant.company}` : null) ||
+    applicant.company ||
+    "Unknown";
+
   return (
     <div className="border rounded-lg">
       <div
@@ -108,7 +115,7 @@ function ApplicantRow({
         </span>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="font-medium truncate">{applicant.name || "Unknown"}</span>
+            <span className="font-medium truncate">{displayName}</span>
             {applicant.title && applicant.company && (
               <span className="text-xs text-muted-foreground truncate hidden sm:inline">
                 {applicant.title} @ {applicant.company}

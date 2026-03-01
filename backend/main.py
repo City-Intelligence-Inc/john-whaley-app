@@ -188,6 +188,18 @@ def update_applicant(applicant_id: str, body: ApplicantUpdate):
     return updated["Item"]
 
 
+@app.delete("/applicants/all")
+def delete_all_applicants():
+    response = table.scan(ProjectionExpression="applicant_id")
+    items = response.get("Items", [])
+    count = 0
+    with table.batch_writer() as batch:
+        for item in items:
+            batch.delete_item(Key={"applicant_id": item["applicant_id"]})
+            count += 1
+    return {"deleted": count}
+
+
 @app.delete("/applicants/{applicant_id}")
 def delete_applicant(applicant_id: str):
     response = table.get_item(Key={"applicant_id": applicant_id})
@@ -261,18 +273,6 @@ def review_applicant(applicant_id: str, body: ReviewRequest):
     return updated["Item"]
 
 
-@app.delete("/applicants/all")
-def delete_all_applicants():
-    response = table.scan(ProjectionExpression="applicant_id")
-    items = response.get("Items", [])
-    count = 0
-    with table.batch_writer() as batch:
-        for item in items:
-            batch.delete_item(Key={"applicant_id": item["applicant_id"]})
-            count += 1
-    return {"deleted": count}
-
-
 @app.post("/applicants/analyze-all")
 def analyze_all_applicants(body: BulkAnalyzeRequest):
     response = table.scan()
@@ -324,7 +324,7 @@ Rank them by score (highest first). The top candidates should be "accepted", bor
             client = anthropic.Anthropic(api_key=body.api_key)
             message = client.messages.create(
                 model=body.model,
-                max_tokens=4096,
+                max_tokens=16384,
                 messages=[{"role": "user", "content": full_prompt}],
             )
             raw = message.content[0].text
@@ -334,7 +334,7 @@ Rank them by score (highest first). The top candidates should be "accepted", bor
             completion = client.chat.completions.create(
                 model=body.model,
                 messages=[{"role": "user", "content": full_prompt}],
-                max_tokens=4096,
+                max_tokens=16384,
             )
             raw = completion.choices[0].message.content
         else:
