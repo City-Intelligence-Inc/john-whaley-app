@@ -74,6 +74,23 @@ def analyze_all(body: BulkAnalyzeRequest):
     if not applicants:
         raise HTTPException(status_code=400, detail="No applicants to analyze")
 
+    # Persist analysis config on the session before LLM runs
+    if body.session_id:
+        analysis_config: dict = {
+            "last_analysis_model": body.model,
+            "last_analysis_provider": body.provider,
+            "last_analysis_prompt": body.prompt,
+            "last_analysis_criteria": body.criteria,
+        }
+        if body.selection_preferences:
+            analysis_config["selection_preferences"] = body.selection_preferences.model_dump()
+        if body.panel_config:
+            analysis_config["panel_config"] = body.panel_config.model_dump()
+        try:
+            db.update_session_fields(body.session_id, analysis_config)
+        except Exception:
+            pass
+
     summaries = []
     for a in applicants:
         info = ", ".join(f"{k}: {v}" for k, v in a.items() if k not in {"applicant_id"} | AI_FIELDS)
@@ -481,6 +498,23 @@ async def analyze_all_stream(body: BulkAnalyzeRequest):
     applicants = db.scan_all_applicants(session_id=body.session_id)
     if not applicants:
         raise HTTPException(status_code=400, detail="No applicants to analyze")
+
+    # Persist analysis config on the session before LLM runs
+    if body.session_id:
+        analysis_config: dict = {
+            "last_analysis_model": body.model,
+            "last_analysis_provider": body.provider,
+            "last_analysis_prompt": body.prompt,
+            "last_analysis_criteria": body.criteria,
+        }
+        if body.selection_preferences:
+            analysis_config["selection_preferences"] = body.selection_preferences.model_dump()
+        if body.panel_config:
+            analysis_config["panel_config"] = body.panel_config.model_dump()
+        try:
+            db.update_session_fields(body.session_id, analysis_config)
+        except Exception:
+            pass  # Don't block analysis if session save fails
 
     async def event_stream():
         total = len(applicants)
