@@ -242,204 +242,177 @@ function AttendeeTypeCharts({ applicants }: { applicants: Applicant[] }) {
     return buckets;
   }, [applicants]);
 
-  const emptyOverlay = (msg: string) => (
-    <div className="absolute inset-0 flex items-center justify-center">
-      <span className="text-sm text-muted-foreground">{msg}</span>
-    </div>
-  );
+  // Don't render anything if no analysis has been done yet
+  if (!hasTypes && !hasScores) return null;
 
   return (
     <div className="space-y-4">
       {/* Type summary badges */}
       <div className="flex flex-wrap gap-2">
-        {ATTENDEE_TYPES.map((t) => {
-          const c = typeCounts.find((tc) => tc.key === t.key);
-          const count = c?.count || 0;
-          return (
-            <div
-              key={t.key}
-              className="flex items-center gap-2 rounded-lg border px-3 py-2"
-              style={{ opacity: count > 0 ? 1 : 0.45 }}
-            >
-              <div className="size-3 rounded-full" style={{ backgroundColor: t.color }} />
-              <span className="text-sm font-medium">{t.label}</span>
-              <span className="text-lg font-bold tabular-nums">{count}</span>
-              {hasData && count > 0 && (
-                <span className="text-xs text-muted-foreground">
-                  ({Math.round((count / applicants.length) * 100)}%)
-                </span>
-              )}
-            </div>
-          );
-        })}
+        {typeCounts.filter((t) => t.count > 0).map((t) => (
+          <div
+            key={t.key}
+            className="flex items-center gap-2 rounded-lg border px-3 py-2"
+          >
+            <div className="size-3 rounded-full" style={{ backgroundColor: t.color }} />
+            <span className="text-sm font-medium">{t.label}</span>
+            <span className="text-lg font-bold tabular-nums">{t.count}</span>
+            <span className="text-xs text-muted-foreground">
+              ({Math.round((t.count / applicants.length) * 100)}%)
+            </span>
+          </div>
+        ))}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {/* 1. Attendee Breakdown — pie for main types, bar for detailed roles */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Attendee Types</CardTitle>
-            <CardDescription className="text-xs">Distribution by main category</CardDescription>
-          </CardHeader>
-          <CardContent className="relative">
-            <ResponsiveContainer width="100%" height={240}>
-              <PieChart>
-                <Pie
-                  data={typeCountsNonZero.length > 0 ? typeCountsNonZero : [{ label: "No data", count: 1, color: "#e5e7eb", key: "empty" }]}
-                  dataKey="count"
-                  nameKey="label"
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={50}
-                  outerRadius={85}
-                  paddingAngle={2}
-                  label={typeCountsNonZero.length > 0 ? ({ label, percent }: { label: string; percent: number }) => `${label} ${(percent * 100).toFixed(0)}%` : false}
-                  labelLine={typeCountsNonZero.length > 0}
-                >
-                  {(typeCountsNonZero.length > 0 ? typeCountsNonZero : [{ key: "empty", color: "#e5e7eb" }]).map((entry) => (
-                    <Cell key={entry.key} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(value: number) => [value, "Applicants"]} />
-              </PieChart>
-            </ResponsiveContainer>
-            {!hasTypes && emptyOverlay("Run AI analysis to see breakdown")}
-          </CardContent>
-        </Card>
+        {/* 1. Attendee Types Pie */}
+        {typeCountsNonZero.length > 0 && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Attendee Types</CardTitle>
+              <CardDescription className="text-xs">Distribution by main category</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={240}>
+                <PieChart>
+                  <Pie
+                    data={typeCountsNonZero}
+                    dataKey="count"
+                    nameKey="label"
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={50}
+                    outerRadius={85}
+                    paddingAngle={2}
+                    label={({ label, percent }: { label: string; percent: number }) => `${label} ${(percent * 100).toFixed(0)}%`}
+                    labelLine={true}
+                  >
+                    {typeCountsNonZero.map((entry) => (
+                      <Cell key={entry.key} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value: number) => [value, "Applicants"]} />
+                </PieChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        )}
 
-        {/* 1b. Detailed Roles — top roles across all types */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Top Roles</CardTitle>
-            <CardDescription className="text-xs">Most common specific roles</CardDescription>
-          </CardHeader>
-          <CardContent className="relative">
-            <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={detailedNonZero.slice(0, 8)} layout="vertical" margin={{ left: 10 }}>
-                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
-                <YAxis type="category" dataKey="label" width={130} tick={{ fontSize: 11 }} />
-                <Tooltip formatter={(value: number) => [value, "Applicants"]} />
-                <Bar dataKey="count" name="Applicants" radius={[0, 4, 4, 0]}>
-                  {detailedNonZero.slice(0, 8).map((entry) => (
-                    <Cell key={entry.key} fill={entry.color} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-            {!hasTypes && emptyOverlay("Run AI analysis to see roles")}
-          </CardContent>
-        </Card>
+        {/* 2. Top Roles */}
+        {detailedNonZero.length > 0 && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Top Roles</CardTitle>
+              <CardDescription className="text-xs">Most common specific roles</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={240}>
+                <BarChart data={detailedNonZero.slice(0, 8)} layout="vertical" margin={{ left: 10 }}>
+                  <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
+                  <YAxis type="category" dataKey="label" width={130} tick={{ fontSize: 11 }} />
+                  <Tooltip formatter={(value: number) => [value, "Applicants"]} />
+                  <Bar dataKey="count" name="Applicants" radius={[0, 4, 4, 0]}>
+                    {detailedNonZero.slice(0, 8).map((entry) => (
+                      <Cell key={entry.key} fill={entry.color} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        )}
 
-        {/* 2. Score Distribution Histogram */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Score Distribution</CardTitle>
-            <CardDescription className="text-xs">AI scores across all applicants</CardDescription>
-          </CardHeader>
-          <CardContent className="relative">
-            <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={scoreDistribution} margin={{ left: -10 }}>
-                <XAxis dataKey="range" tick={{ fontSize: 11 }} interval={0} angle={-30} textAnchor="end" height={50} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-                <Tooltip />
-                <Bar dataKey="count" name="Applicants" fill="#6366f1" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-            {!hasScores && emptyOverlay("Run AI analysis to see scores")}
-          </CardContent>
-        </Card>
+        {/* 3. Score Distribution */}
+        {hasScores && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Score Distribution</CardTitle>
+              <CardDescription className="text-xs">AI scores across all applicants</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={240}>
+                <BarChart data={scoreDistribution} margin={{ left: -10 }}>
+                  <XAxis dataKey="range" tick={{ fontSize: 11 }} interval={0} angle={-30} textAnchor="end" height={50} />
+                  <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+                  <Tooltip />
+                  <Bar dataKey="count" name="Applicants" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        )}
 
-        {/* 3. Avg AI Score by Type */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Avg Score by Type</CardTitle>
-            <CardDescription className="text-xs">Mean AI score per attendee group</CardDescription>
-          </CardHeader>
-          <CardContent className="relative">
-            <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={avgScoreByType} layout="vertical" margin={{ left: 10 }}>
-                <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 11 }} />
-                <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 11 }} />
-                <Tooltip formatter={(value: number) => [`${value}/100`, "Avg Score"]} />
-                <Bar dataKey="avg" name="Avg Score" radius={[0, 4, 4, 0]}>
-                  {avgScoreByType.map((entry, i) => (
-                    <Cell key={i} fill={entry.avg > 0 ? entry.color : "#e5e7eb"} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-            {!hasScores && emptyOverlay("Run AI analysis to see scores")}
-          </CardContent>
-        </Card>
+        {/* 4. Avg Score by Type */}
+        {hasScores && avgScoreByType.some((t) => t.avg > 0) && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Avg Score by Type</CardTitle>
+              <CardDescription className="text-xs">Mean AI score per attendee group</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={240}>
+                <BarChart data={avgScoreByType.filter((t) => t.avg > 0)} layout="vertical" margin={{ left: 10 }}>
+                  <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 11 }} />
+                  <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 11 }} />
+                  <Tooltip formatter={(value: number) => [`${value}/100`, "Avg Score"]} />
+                  <Bar dataKey="avg" name="Avg Score" radius={[0, 4, 4, 0]}>
+                    {avgScoreByType.filter((t) => t.avg > 0).map((entry, i) => (
+                      <Cell key={i} fill={entry.color} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        )}
 
-        {/* 4. Decisions by Type (stacked) */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Decisions by Type</CardTitle>
-            <CardDescription className="text-xs">Accept / waitlist / reject per group</CardDescription>
-          </CardHeader>
-          <CardContent className="relative">
-            <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={typeStatusData} layout="vertical" margin={{ left: 10 }}>
-                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
-                <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 11 }} />
-                <Tooltip />
-                <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
-                <Bar dataKey="accepted" stackId="a" fill="#22c55e" name="Accepted" />
-                <Bar dataKey="waitlisted" stackId="a" fill="#eab308" name="Waitlisted" />
-                <Bar dataKey="rejected" stackId="a" fill="#ef4444" name="Rejected" />
-                <Bar dataKey="pending" stackId="a" fill="#d1d5db" name="Pending" />
-              </BarChart>
-            </ResponsiveContainer>
-            {!hasTypes && emptyOverlay("Run AI analysis to see decisions")}
-          </CardContent>
-        </Card>
+        {/* 5. Decisions by Type */}
+        {hasTypes && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Decisions by Type</CardTitle>
+              <CardDescription className="text-xs">Accept / waitlist / reject per group</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={240}>
+                <BarChart data={typeStatusData.filter((t) => (t.accepted + t.waitlisted + t.rejected + t.pending) > 0)} layout="vertical" margin={{ left: 10 }}>
+                  <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
+                  <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 11 }} />
+                  <Tooltip />
+                  <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
+                  <Bar dataKey="accepted" stackId="a" fill="#22c55e" name="Accepted" />
+                  <Bar dataKey="waitlisted" stackId="a" fill="#eab308" name="Waitlisted" />
+                  <Bar dataKey="rejected" stackId="a" fill="#ef4444" name="Rejected" />
+                  <Bar dataKey="pending" stackId="a" fill="#d1d5db" name="Pending" />
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        )}
 
-        {/* 5. Acceptance Rate by Type */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Acceptance Rate</CardTitle>
-            <CardDescription className="text-xs">% accepted per attendee group</CardDescription>
-          </CardHeader>
-          <CardContent className="relative">
-            <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={acceptRateByType} layout="vertical" margin={{ left: 10 }}>
-                <XAxis type="number" domain={[0, 100]} unit="%" tick={{ fontSize: 11 }} />
-                <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 11 }} />
-                <Tooltip formatter={(value: number) => [`${value}%`, "Accept Rate"]} />
-                <Bar dataKey="rate" name="Accept Rate" radius={[0, 4, 4, 0]}>
-                  {acceptRateByType.map((entry, i) => (
-                    <Cell key={i} fill={entry.rate > 0 ? entry.color : "#e5e7eb"} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-            {!hasTypes && emptyOverlay("Run AI analysis to see rates")}
-          </CardContent>
-        </Card>
-
-        {/* 6. Group Size Comparison */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Group Sizes</CardTitle>
-            <CardDescription className="text-xs">Applicant count per type</CardDescription>
-          </CardHeader>
-          <CardContent className="relative">
-            <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={typeCounts} margin={{ left: -10 }}>
-                <XAxis dataKey="label" tick={{ fontSize: 10 }} interval={0} angle={-35} textAnchor="end" height={60} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-                <Tooltip />
-                <Bar dataKey="count" name="Applicants" radius={[4, 4, 0, 0]}>
-                  {typeCounts.map((entry) => (
-                    <Cell key={entry.key} fill={entry.count > 0 ? entry.color : "#e5e7eb"} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-            {!hasTypes && emptyOverlay("Import applicants to see groups")}
-          </CardContent>
-        </Card>
+        {/* 6. Acceptance Rate */}
+        {hasTypes && acceptRateByType.some((t) => t.accepted > 0) && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Acceptance Rate</CardTitle>
+              <CardDescription className="text-xs">% accepted per attendee group</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={240}>
+                <BarChart data={acceptRateByType.filter((t) => t.total > 0)} layout="vertical" margin={{ left: 10 }}>
+                  <XAxis type="number" domain={[0, 100]} unit="%" tick={{ fontSize: 11 }} />
+                  <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 11 }} />
+                  <Tooltip formatter={(value: number) => [`${value}%`, "Accept Rate"]} />
+                  <Bar dataKey="rate" name="Accept Rate" radius={[0, 4, 4, 0]}>
+                    {acceptRateByType.filter((t) => t.total > 0).map((entry, i) => (
+                      <Cell key={i} fill={entry.color} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   );
@@ -1198,7 +1171,11 @@ export default function Page() {
               total: prev?.total || data.total * 2,
               errors: (prev?.errors || 0) + 1,
             }));
-            log(`[${data.completed}/${data.total}] ${data.name} — CLASSIFY ERROR: ${data.error}`, "#ef4444");
+            let errMsg = data.error || "Unknown error";
+            if (errMsg.includes("authentication_error")) errMsg = "API key is invalid or expired";
+            else if (errMsg.includes("rate_limit")) errMsg = "Rate limit exceeded — too many requests";
+            else if (errMsg.includes("insufficient_quota") || errMsg.includes("billing")) errMsg = "API quota exceeded — add credits";
+            log(`[${data.completed}/${data.total}] ${data.name} — ERROR: ${errMsg}`, "#ef4444");
           },
           onProgress: (data) => {
             setAnalysisProgress((prev) => ({
@@ -1226,7 +1203,12 @@ export default function Page() {
               total: prev?.total || data.total * 2,
               errors: (prev?.errors || 0) + 1,
             }));
-            log(`[${data.completed}/${data.total}] ${data.name} — SCORE ERROR: ${data.error}`, "#ef4444");
+            // Parse error to be human-readable
+            let errMsg = data.error || "Unknown error";
+            if (errMsg.includes("authentication_error")) errMsg = "API key is invalid or expired";
+            else if (errMsg.includes("rate_limit")) errMsg = "Rate limit exceeded — too many requests";
+            else if (errMsg.includes("insufficient_quota") || errMsg.includes("billing")) errMsg = "API quota exceeded — add credits";
+            log(`[${data.completed}/${data.total}] ${data.name} — ERROR: ${errMsg}`, "#ef4444");
           },
           onComplete: (data) => {
             setAnalysisProgress((prev) => ({
@@ -1235,17 +1217,28 @@ export default function Page() {
               errors: data.errors,
             }));
             log("");
-            log("═".repeat(60), "#22c55e");
-            log(`DONE: ${acceptedCount} accepted, ${waitlistedCount} waitlisted, ${rejectedCount} rejected` +
-              (data.errors > 0 ? ` (${data.errors} errors)` : ""), "#22c55e");
-            log("═".repeat(60), "#22c55e");
+            const allFailed = data.errors >= data.completed;
+            const color = allFailed ? "#ef4444" : data.errors > 0 ? "#eab308" : "#22c55e";
+            log("═".repeat(60), color);
+            if (allFailed) {
+              log(`FAILED: All ${data.errors} applicants had errors. Check your API key in Settings.`, "#ef4444");
+            } else {
+              log(`DONE: ${acceptedCount} accepted, ${waitlistedCount} waitlisted, ${rejectedCount} rejected` +
+                (data.errors > 0 ? ` (${data.errors} errors)` : ""), color);
+            }
+            log("═".repeat(60), color);
           },
         }
       );
 
-      toast.success(
-        `Analysis complete: ${acceptedCount} accepted, ${waitlistedCount} waitlisted, ${rejectedCount} rejected`
-      );
+      const allErrored = acceptedCount + waitlistedCount + rejectedCount === 0;
+      if (allErrored) {
+        toast.error("Analysis failed — check your API key in Settings");
+      } else {
+        toast.success(
+          `Analysis complete: ${acceptedCount} accepted, ${waitlistedCount} waitlisted, ${rejectedCount} rejected`
+        );
+      }
 
       await refreshApplicants();
       await refreshStats();
@@ -1496,18 +1489,20 @@ export default function Page() {
         ))}
       </div>
 
-      {/* Charts (collapsible) */}
-      <Collapsible open={showChartsOpen} onOpenChange={setShowChartsOpen}>
-        <CollapsibleTrigger asChild>
-          <Button variant="ghost" size="sm" className="text-sm text-muted-foreground gap-1.5">
-            {showChartsOpen ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
-            {showChartsOpen ? "Hide" : "Show"} Charts
-          </Button>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="mt-2">
-          <AttendeeTypeCharts applicants={applicants} />
-        </CollapsibleContent>
-      </Collapsible>
+      {/* Charts (collapsible) — only show when there's analysis data */}
+      {applicants.some((a) => a.attendee_type || Number(a.ai_score) > 0) && (
+        <Collapsible open={showChartsOpen} onOpenChange={setShowChartsOpen}>
+          <CollapsibleTrigger asChild>
+            <Button variant="ghost" size="sm" className="text-sm text-muted-foreground gap-1.5">
+              {showChartsOpen ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+              {showChartsOpen ? "Hide" : "Show"} Charts
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-2">
+            <AttendeeTypeCharts applicants={applicants} />
+          </CollapsibleContent>
+        </Collapsible>
+      )}
 
       {/* Toolbar: Tabs + Search + Actions */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -1565,8 +1560,17 @@ export default function Page() {
           )}
 
           <Button
-            onClick={handleAnalyze}
-            disabled={!apiKey.trim() || (stats?.total ?? 0) === 0}
+            onClick={() => {
+              if (!apiKey.trim()) {
+                toast.error("Add your API key first", { description: "Go to Settings to configure your AI provider and API key.", action: { label: "Open Settings", onClick: () => setShowSettingsDialog(true) } });
+                return;
+              }
+              if ((stats?.total ?? 0) === 0) {
+                toast.error("No applicants to analyze", { description: "Import a CSV or connect a Google Sheet first." });
+                return;
+              }
+              handleAnalyze();
+            }}
             size="sm"
             className="h-9"
           >
@@ -1653,8 +1657,8 @@ export default function Page() {
                 <TableRow>
                   <TableCell colSpan={8} className="text-center py-12 text-muted-foreground">
                     {applicants.length === 0
-                      ? "No applicants yet. Import a CSV or connect a Google Sheet."
-                      : "No applicants match your filter."}
+                      ? "No applicants yet. Click Import above to upload a CSV."
+                      : `No ${statusFilter !== "all" ? statusFilter : ""} applicants match your search.`.trim()}
                   </TableCell>
                 </TableRow>
               )}
