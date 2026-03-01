@@ -24,7 +24,9 @@ export function CSVUploader({ onUploadSuccess, sessionId }: { onUploadSuccess?: 
   const inputRef = useRef<HTMLInputElement>(null);
 
   const parseCSV = useCallback((text: string) => {
-    const lines = text.split("\n").filter((l) => l.trim());
+    // Strip BOM and normalize line endings
+    const cleaned = text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    const lines = cleaned.split("\n").filter((l) => l.trim());
     if (lines.length === 0) return;
 
     // Simple CSV parsing — handles quoted fields
@@ -179,8 +181,8 @@ export function CSVUploader({ onUploadSuccess, sessionId }: { onUploadSuccess?: 
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        {headers.map((h) => (
-                          <TableHead key={h} className="whitespace-nowrap">
+                        {headers.map((h, idx) => (
+                          <TableHead key={idx} className="whitespace-nowrap">
                             {h}
                           </TableHead>
                         ))}
@@ -189,8 +191,8 @@ export function CSVUploader({ onUploadSuccess, sessionId }: { onUploadSuccess?: 
                     <TableBody>
                       {preview.map((row, i) => (
                         <TableRow key={i}>
-                          {headers.map((h) => (
-                            <TableCell key={h} className="whitespace-nowrap">
+                          {headers.map((h, idx) => (
+                            <TableCell key={idx} className="whitespace-nowrap">
                               {row[h]}
                             </TableCell>
                           ))}

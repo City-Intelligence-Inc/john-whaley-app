@@ -782,9 +782,11 @@ export default function Page() {
       if (!activeSessionId && result.session_id) {
         setActiveSessionId(result.session_id);
         refreshSessions();
+        // Don't call refreshStats/refreshApplicants — hooks auto-refresh when activeSessionId changes
+      } else {
+        refreshStats();
+        refreshApplicants();
       }
-      refreshStats();
-      refreshApplicants();
       if (result.new_count > 0) {
         toast.success(`Synced: ${result.new_count} new, ${result.updated_count} updated`);
       } else if (result.updated_count > 0) {
@@ -838,12 +840,15 @@ export default function Page() {
 
   // Import handler
   const handleUploadSuccess = (_count: number, sessionId: string) => {
-    if (!activeSessionId) {
-      setActiveSessionId(sessionId);
-    }
     refreshSessions();
-    refreshStats();
-    refreshApplicants();
+    if (!activeSessionId) {
+      // Setting activeSessionId triggers hooks to auto-refresh via useEffect
+      setActiveSessionId(sessionId);
+    } else {
+      // Session didn't change — manually refresh with current (correct) sessionId
+      refreshStats();
+      refreshApplicants();
+    }
     setShowImportDialog(false);
   };
 
@@ -1377,7 +1382,7 @@ export default function Page() {
 
       {/* Import Dialog */}
       <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-3xl overflow-hidden max-h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>Import Applicants</DialogTitle>
             <DialogDescription>
@@ -1385,7 +1390,7 @@ export default function Page() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-6">
+          <div className="space-y-6 overflow-y-auto min-h-0">
             {/* CSV Upload */}
             <div>
               <h4 className="text-sm font-medium mb-3 flex items-center gap-2">
