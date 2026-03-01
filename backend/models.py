@@ -30,6 +30,7 @@ class BatchStatusUpdate(BaseModel):
 class GoogleSheetImport(BaseModel):
     sheet_url: str
     sheet_name: Optional[str] = None
+    session_id: Optional[str] = None
 
 
 # ── AI Analysis ──
@@ -49,6 +50,7 @@ class BulkAnalyzeRequest(BaseModel):
     prompt: str
     criteria: list[str] = []
     criteria_weights: Optional[list[str]] = None
+    session_id: Optional[str] = None
 
 
 # ── Settings ──
@@ -61,3 +63,16 @@ class PromptSettings(BaseModel):
         "potential contribution."
     )
     criteria: list[str] = ["relevance", "experience", "potential_contribution"]
+
+
+# ── Sessions ──
+
+class SessionCreate(BaseModel):
+    name: str
+    source: str = "manual"          # "csv", "google_sheet", "manual"
+    source_detail: Optional[str] = None
+
+
+class SessionUpdate(BaseModel):
+    name: Optional[str] = None
+    status: Optional[str] = None    # "active", "archived"

@@ -6,7 +6,7 @@ POST /applicants/import-google-sheet  Pull from a public Google Sheet
 """
 
 import re
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File, Query
 import httpx
 
 from config import AI_FIELDS
@@ -20,20 +20,32 @@ router = APIRouter(prefix="/applicants", tags=["import"])
 # ── CSV Upload ──
 
 @router.post("/upload-csv", status_code=201)
-async def upload_csv(file: UploadFile = File(...)):
+async def upload_csv(file: UploadFile = File(...), session_id: str | None = Query(None)):
     if not file.filename or not file.filename.endswith(".csv"):
         raise HTTPException(status_code=400, detail="File must be a CSV")
 
     text = (await file.read()).decode("utf-8")
     rows = parse_csv_rows(text)
 
+    # Auto-create session if none provided
+    if not session_id:
+        session = db.create_session({
+            "name": file.filename.replace(".csv", ""),
+            "source": "csv",
+            "source_detail": file.filename,
+        })
+        session_id = session["session_id"]
+
     items = []
     for row in rows:
         row["status"] = "pending"
+        row["session_id"] = session_id
         item = db.create_applicant_item(row)
         items.append(item)
 
-    return {"count": len(items), "items": items}
+    db._update_session_count(session_id)
+
+    return {"count": len(items), "items": items, "session_id": session_id}
 
 
 # ── Google Sheets Import ──
@@ -80,9 +92,20 @@ async def import_google_sheet(body: GoogleSheetImport):
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid Google Sheet URL.")
 
+    session_id = body.session_id
+
+    # Auto-create session if none provided
+    if not session_id:
+        session = db.create_session({
+            "name": f"Google Sheet Import",
+            "source": "google_sheet",
+            "source_detail": body.sheet_url,
+        })
+        session_id = session["session_id"]
+
     text = await _fetch_sheet_csv(sheet_id, body.sheet_name)
     rows = parse_csv_rows(text)
-    existing_emails = db.scan_existing_emails()
+    existing_emails = db.scan_existing_emails(session_id=session_id)
 
     new_items, updated_ids = [], []
 
@@ -99,14 +122,18 @@ async def import_google_sheet(body: GoogleSheetImport):
         else:
             # New applicant
             row["status"] = "pending"
+            row["session_id"] = session_id
             item = db.create_applicant_item(row)
             new_items.append(item)
             if email:
                 existing_emails[email] = item["applicant_id"]
+
+    db._update_session_count(session_id)
 
     return {
         "new_count": len(new_items),
         "updated_count": len(updated_ids),
         "total_in_sheet": len(new_items) + len(updated_ids),
         "items": new_items,
+        "session_id": session_id,
     }

@@ -1,7 +1,18 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+export interface Session {
+  session_id: string;
+  name: string;
+  created_at: string;
+  source: string;
+  source_detail?: string;
+  applicant_count: number;
+  status: string;
+}
+
 export interface Applicant {
   applicant_id: string;
+  session_id?: string;
   name?: string;
   email?: string;
   linkedin_url?: string;
@@ -12,6 +23,7 @@ export interface Applicant {
   ai_review?: string;
   ai_score?: string;
   ai_reasoning?: string;
+  attendee_type?: string;
   [key: string]: unknown;
 }
 
@@ -31,6 +43,7 @@ export interface PromptSettings {
 export interface GoogleSheetImportRequest {
   sheet_url: string;
   sheet_name?: string;
+  session_id?: string;
 }
 
 export interface GoogleSheetImportResponse {
@@ -38,6 +51,7 @@ export interface GoogleSheetImportResponse {
   updated_count: number;
   total_in_sheet: number;
   items: Applicant[];
+  session_id: string;
 }
 
 export interface ReviewRequest {
@@ -55,6 +69,7 @@ export interface BulkAnalyzeRequest {
   prompt: string;
   criteria: string[];
   criteria_weights?: string[];
+  session_id?: string;
 }
 
 export interface AnalysisResult {
@@ -79,6 +94,7 @@ export interface SSEProgressEvent {
   score: number;
   status: string;
   reasoning: string;
+  attendee_type: string;
 }
 
 export interface SSEErrorEvent {
@@ -126,8 +142,31 @@ async function fetchAPI<T>(
 }
 
 export const api = {
+  // Sessions
+  listSessions: () => fetchAPI<Session[]>("/sessions"),
+
+  createSession: (data: { name: string; source?: string; source_detail?: string }) =>
+    fetchAPI<Session>("/sessions", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  getSession: (id: string) => fetchAPI<Session>(`/sessions/${id}`),
+
+  updateSession: (id: string, data: { name?: string; status?: string }) =>
+    fetchAPI<Session>(`/sessions/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  deleteSession: (id: string) =>
+    fetchAPI<{ detail: string }>(`/sessions/${id}`, {
+      method: "DELETE",
+    }),
+
   // Applicants
-  listApplicants: () => fetchAPI<Applicant[]>("/applicants"),
+  listApplicants: (sessionId?: string) =>
+    fetchAPI<Applicant[]>(`/applicants${sessionId ? `?session_id=${sessionId}` : ""}`),
 
   getApplicant: (id: string) => fetchAPI<Applicant>(`/applicants/${id}`),
 
@@ -148,8 +187,8 @@ export const api = {
       method: "DELETE",
     }),
 
-  deleteAllApplicants: () =>
-    fetchAPI<{ deleted: number }>("/applicants/all", {
+  deleteAllApplicants: (sessionId?: string) =>
+    fetchAPI<{ deleted: number }>(`/applicants/all${sessionId ? `?session_id=${sessionId}` : ""}`, {
       method: "DELETE",
     }),
 
@@ -161,10 +200,11 @@ export const api = {
     }),
 
   // CSV Upload
-  uploadCSV: async (file: File) => {
+  uploadCSV: async (file: File, sessionId?: string) => {
     const formData = new FormData();
     formData.append("file", file);
-    const res = await fetch(`${API_URL}/applicants/upload-csv`, {
+    const qs = sessionId ? `?session_id=${sessionId}` : "";
+    const res = await fetch(`${API_URL}/applicants/upload-csv${qs}`, {
       method: "POST",
       body: formData,
     });
@@ -172,11 +212,12 @@ export const api = {
       const error = await res.json().catch(() => ({ detail: res.statusText }));
       throw new Error(error.detail || "Upload failed");
     }
-    return res.json() as Promise<{ count: number; items: Applicant[] }>;
+    return res.json() as Promise<{ count: number; items: Applicant[]; session_id: string }>;
   },
 
   // Stats
-  getStats: () => fetchAPI<Stats>("/applicants/stats"),
+  getStats: (sessionId?: string) =>
+    fetchAPI<Stats>(`/applicants/stats${sessionId ? `?session_id=${sessionId}` : ""}`),
 
   // Batch status
   batchUpdateStatus: (applicantIds: string[], status: string) =>

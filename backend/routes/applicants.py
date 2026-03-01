@@ -14,7 +14,7 @@ PUT    /applicants/{id}         Update one
 DELETE /applicants/{id}         Delete one
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from config import VALID_STATUSES
 from models import ApplicantCreate, ApplicantUpdate, BatchStatusUpdate
@@ -26,8 +26,8 @@ router = APIRouter(prefix="/applicants", tags=["applicants"])
 # ── Static paths first (no path params) ──
 
 @router.get("/stats")
-def get_stats():
-    return db.get_status_counts()
+def get_stats(session_id: str | None = Query(None)):
+    return db.get_status_counts(session_id=session_id)
 
 
 @router.put("/batch-status")
@@ -43,14 +43,14 @@ def batch_update_status(body: BatchStatusUpdate):
 
 
 @router.delete("/all")
-def delete_all():
-    count = db.delete_all_applicants()
+def delete_all(session_id: str | None = Query(None)):
+    count = db.delete_all_applicants(session_id=session_id)
     return {"deleted": count}
 
 
 @router.get("")
-def list_applicants():
-    return db.scan_all_applicants()
+def list_applicants(session_id: str | None = Query(None)):
+    return db.scan_all_applicants(session_id=session_id)
 
 
 @router.post("", status_code=201)

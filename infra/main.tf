@@ -21,6 +21,32 @@ resource "aws_dynamodb_table" "applicants" {
     type = "S"
   }
 
+  attribute {
+    name = "session_id"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name            = "session-index"
+    hash_key        = "session_id"
+    projection_type = "ALL"
+  }
+
+  tags = {
+    Project = "john-whaley-app"
+  }
+}
+
+resource "aws_dynamodb_table" "sessions" {
+  name         = "john-whaley-sessions"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "session_id"
+
+  attribute {
+    name = "session_id"
+    type = "S"
+  }
+
   tags = {
     Project = "john-whaley-app"
   }
@@ -117,7 +143,9 @@ resource "aws_iam_policy" "dynamodb_access" {
       Effect   = "Allow"
       Resource = [
         aws_dynamodb_table.applicants.arn,
-        aws_dynamodb_table.settings.arn
+        "${aws_dynamodb_table.applicants.arn}/index/*",
+        aws_dynamodb_table.settings.arn,
+        aws_dynamodb_table.sessions.arn,
       ]
     }]
   })

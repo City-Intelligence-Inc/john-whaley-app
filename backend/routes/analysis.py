@@ -69,7 +69,7 @@ def review_applicant(applicant_id: str, body: ReviewRequest):
 
 @router.post("/analyze-all")
 def analyze_all(body: BulkAnalyzeRequest):
-    applicants = db.scan_all_applicants()
+    applicants = db.scan_all_applicants(session_id=body.session_id)
     if not applicants:
         raise HTTPException(status_code=400, detail="No applicants to analyze")
 
@@ -189,7 +189,7 @@ async def _analyze_one(applicant: dict, body: BulkAnalyzeRequest, semaphore: asy
 
 @router.post("/analyze-all-stream")
 async def analyze_all_stream(body: BulkAnalyzeRequest):
-    applicants = db.scan_all_applicants()
+    applicants = db.scan_all_applicants(session_id=body.session_id)
     if not applicants:
         raise HTTPException(status_code=400, detail="No applicants to analyze")
 

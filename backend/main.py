@@ -12,6 +12,7 @@ from routes.applicants import router as applicants_router
 from routes.import_data import router as import_router
 from routes.analysis import router as analysis_router
 from routes.settings import router as settings_router
+from routes.sessions import router as sessions_router
 
 app = FastAPI(title="John Whaley Applicant Reviewer")
 
@@ -27,6 +28,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(sessions_router)
 app.include_router(applicants_router)
 app.include_router(import_router)
 app.include_router(analysis_router)
