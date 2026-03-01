@@ -1037,14 +1037,28 @@ export default function Page() {
       setSheetUrl(savedSheetUrl);
       setSheetConnected(true);
     }
+    // Panel config + persona edits from localStorage
+    try {
+      const savedPanel = localStorage.getItem("panel_config");
+      if (savedPanel) setPanelConfig(JSON.parse(savedPanel));
+    } catch {}
+    try {
+      const savedEdits = localStorage.getItem("persona_edits");
+      if (savedEdits) setPersonaEdits(JSON.parse(savedEdits));
+    } catch {}
   }, []);
 
-  // Load saved prompt settings
+  // Load saved prompt settings + selection preferences from backend
   useEffect(() => {
     api.getPromptSettings()
       .then((s) => {
         if (s.default_prompt) setPrompt(s.default_prompt);
         if (s.criteria?.length) setCriteria(s.criteria);
+      })
+      .catch(() => {});
+    api.getSelectionPreferences()
+      .then((prefs) => {
+        if (prefs) setSelectionPreferences(prefs);
       })
       .catch(() => {});
   }, []);
@@ -1060,6 +1074,19 @@ export default function Page() {
     localStorage.setItem("ai_provider", provider);
     localStorage.setItem("ai_model", model);
   }, [apiKey, provider, model]);
+
+  // Persist panel config + persona edits
+  useEffect(() => {
+    localStorage.setItem("panel_config", JSON.stringify(panelConfig));
+  }, [panelConfig]);
+
+  useEffect(() => {
+    if (Object.keys(personaEdits).length > 0) {
+      localStorage.setItem("persona_edits", JSON.stringify(personaEdits));
+    } else {
+      localStorage.removeItem("persona_edits");
+    }
+  }, [personaEdits]);
 
   // Auto-scroll console log
   useEffect(() => {
