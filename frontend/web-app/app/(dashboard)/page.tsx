@@ -23,6 +23,7 @@ import {
   MapPin,
   Sparkles,
   Users,
+  User,
   Terminal,
   Linkedin,
   Eye,
@@ -40,7 +41,7 @@ import {
   Layers,
   Trash2,
   FolderOpen,
-  SlidersHorizontal,
+  MoreHorizontal,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -95,10 +96,17 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import { Switch } from "@/components/ui/switch";
+import { Slider } from "@/components/ui/slider";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import {
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+} from "@/components/ui/popover";
 import { api, type Applicant, type SelectionPreferences, type PanelConfig, DEFAULT_SELECTION_PREFERENCES, DEFAULT_PANEL_CONFIG } from "@/lib/api";
 import { useApplicants, useStats, useSessions } from "@/hooks/use-applicants";
 import { CSVUploader } from "@/components/csv-uploader";
-import { SelectionWizard } from "@/components/selection-wizard";
+import { JUDGE_PERSONAS, type JudgePersona } from "@/lib/judge-personas";
 
 const ANTHROPIC_MODELS = [
   { value: "claude-sonnet-4-20250514", label: "Claude Sonnet 4" },
@@ -895,6 +903,55 @@ function ApplicantDetailPanel({
 }
 
 
+/* ── Shaped Emoji for Judge Personas ── */
+
+function ShapedEmoji({ persona, size = "lg" }: { persona: JudgePersona; size?: "sm" | "lg" }) {
+  const dim = size === "lg" ? "size-9" : "size-7";
+  const textSize = size === "lg" ? "text-xl" : "text-base";
+  const shapeClasses: Record<string, string> = {
+    circle: "rounded-full",
+    square: "rounded-sm",
+    rounded: "rounded-xl",
+    pill: "rounded-full px-3",
+  };
+  if (persona.shape === "diamond") {
+    return (
+      <div className={`${dim} flex items-center justify-center`}>
+        <div className={`${dim} ${persona.color} flex items-center justify-center rotate-45 rounded-sm`}>
+          <span className={`${textSize} -rotate-45 leading-none`}>{persona.emoji}</span>
+        </div>
+      </div>
+    );
+  }
+  if (persona.shape === "hexagon") {
+    return (
+      <div
+        className={`${dim} ${persona.color} flex items-center justify-center`}
+        style={{ clipPath: "polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)" }}
+      >
+        <span className={`${textSize} leading-none`}>{persona.emoji}</span>
+      </div>
+    );
+  }
+  return (
+    <div className={`${dim} ${persona.color} ${shapeClasses[persona.shape] || "rounded-full"} flex items-center justify-center`}>
+      <span className={`${textSize} leading-none`}>{persona.emoji}</span>
+    </div>
+  );
+}
+
+const SETTINGS_ATTENDEE_TYPES = [
+  { key: "vc", label: "VCs / Investors" },
+  { key: "entrepreneur", label: "Founders" },
+  { key: "faculty", label: "Faculty" },
+  { key: "alumni", label: "Alumni" },
+  { key: "press", label: "Press" },
+  { key: "student", label: "Students" },
+  { key: "other", label: "Other" },
+];
+
+const PANEL_SIZES = [3, 6, 9, 12] as const;
+
 /* ── Main Page ── */
 
 export default function Page() {
@@ -921,11 +978,10 @@ export default function Page() {
   const [showSettingsDialog, setShowSettingsDialog] = useState(false);
   const [showAnalysisDialog, setShowAnalysisDialog] = useState(false);
 
-  // Selection wizard state
-  const [showWizard, setShowWizard] = useState(false);
+  // Selection preferences state
   const [selectionPreferences, setSelectionPreferences] = useState<SelectionPreferences>(DEFAULT_SELECTION_PREFERENCES);
-  const [panelConfig, setPanelConfig] = useState<PanelConfig | undefined>(undefined);
-  const [wizardCompleted, setWizardCompleted] = useState(false);
+  const [panelConfig, setPanelConfig] = useState<PanelConfig>(DEFAULT_PANEL_CONFIG);
+  const [personaEdits, setPersonaEdits] = useState<Record<string, string>>({});
 
   // AI config state
   const [apiKey, setApiKey] = useState("");
@@ -991,15 +1047,6 @@ export default function Page() {
         if (s.criteria?.length) setCriteria(s.criteria);
       })
       .catch(() => {});
-  }, []);
-
-  // Clear wizard state on mount so user always configures fresh
-  useEffect(() => {
-    localStorage.removeItem("selection_preferences");
-    localStorage.removeItem("panel_config");
-    setSelectionPreferences(DEFAULT_SELECTION_PREFERENCES);
-    setPanelConfig(undefined);
-    setWizardCompleted(false);
   }, []);
 
   // Persist session + AI config
@@ -1687,15 +1734,6 @@ export default function Page() {
           )}
 
           <Button
-            variant="ghost"
-            size="icon"
-            className="size-9"
-            onClick={() => setShowWizard(true)}
-            title="Selection Criteria"
-          >
-            <SlidersHorizontal className="size-4" />
-          </Button>
-          <Button
             onClick={() => {
               if (!apiKey.trim()) {
                 toast.error("Add your API key first", { description: "Go to Settings to configure your AI provider and API key.", action: { label: "Open Settings", onClick: () => setShowSettingsDialog(true) } });
@@ -1705,7 +1743,7 @@ export default function Page() {
                 toast.error("No applicants to analyze", { description: "Import a CSV or connect a Google Sheet first." });
                 return;
               }
-              setShowWizard(true);
+              handleAnalyze();
             }}
             size="sm"
             className="h-9"
@@ -2007,162 +2045,383 @@ export default function Page() {
         </DialogContent>
       </Dialog>
 
-      {/* Settings Dialog */}
+      {/* Settings Dialog — unified settings page */}
       <Dialog open={showSettingsDialog} onOpenChange={setShowSettingsDialog}>
-        <DialogContent className="max-w-[95vw] sm:max-w-lg">
+        <DialogContent className="max-w-[95vw] sm:max-w-xl max-h-[90vh] flex flex-col overflow-hidden">
           <DialogHeader>
             <DialogTitle>Settings</DialogTitle>
             <DialogDescription>
-              Configure AI provider, prompt, and evaluation criteria.
+              Everything in one place. Configure once, run analysis anytime.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-5 max-h-[70vh] overflow-y-auto pr-1">
-            {/* API Key */}
-            <div className="space-y-2">
-              <Label className="text-sm font-medium flex items-center gap-2">
-                <Key className="size-4" />
-                API Key
-              </Label>
-              <div className="relative">
-                <Input
-                  type={showKey ? "text" : "password"}
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="Paste your API key here..."
-                  className="pr-10 h-10"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowKey(!showKey)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  {showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                </button>
-              </div>
-            </div>
+          <div className="space-y-5 flex-1 overflow-y-auto pr-1 min-h-0">
 
-            {/* Provider + Model */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label className="text-sm">Provider</Label>
-                <Select value={provider} onValueChange={handleProviderChange}>
-                  <SelectTrigger className="h-10">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="anthropic">Anthropic</SelectItem>
-                    <SelectItem value="openai">OpenAI</SelectItem>
-                  </SelectContent>
-                </Select>
+            {/* ── AI Provider ── */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">AI Provider</h3>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Provider</Label>
+                  <Select value={provider} onValueChange={handleProviderChange}>
+                    <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="anthropic">Anthropic</SelectItem>
+                      <SelectItem value="openai">OpenAI</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Model</Label>
+                  <Select value={model} onValueChange={setModel}>
+                    <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {models.map((m) => (
+                        <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label className="text-sm">Model</Label>
-                <Select value={model} onValueChange={setModel}>
-                  <SelectTrigger className="h-10">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {models.map((m) => (
-                      <SelectItem key={m.value} value={m.value}>
-                        {m.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <div className="space-y-1.5">
+                <Label className="text-xs">API Key</Label>
+                <div className="relative">
+                  <Input
+                    type={showKey ? "text" : "password"}
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    placeholder="Paste your API key here..."
+                    className="pr-10 h-9 text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowKey(!showKey)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    {showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                  </button>
+                </div>
               </div>
             </div>
 
             <Separator />
 
-            {/* Prompt */}
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">AI Instructions</Label>
-              <Textarea
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                rows={4}
-                placeholder="Describe your event and ideal attendees..."
-                className="resize-none text-sm"
-              />
-            </div>
-
-            {/* Criteria */}
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Evaluation Criteria</Label>
-              <div className="flex gap-2">
-                <Input
-                  value={newCriterion}
-                  onChange={(e) => setNewCriterion(e.target.value)}
-                  placeholder="Add a criterion..."
-                  className="h-9 text-sm"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      addCriterion();
-                    }
-                  }}
-                />
-                <Button variant="outline" size="icon" onClick={addCriterion} className="h-9 w-9">
-                  <Plus className="size-4" />
-                </Button>
+            {/* ── Review Mode ── */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Review Mode</h3>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => setPanelConfig((p) => ({ ...p, enabled: false }))}
+                  className={`flex flex-col items-center gap-1.5 rounded-lg border-2 p-3 transition-colors ${
+                    !panelConfig.enabled ? "border-primary bg-primary/5" : "border-muted hover:bg-muted/50"
+                  }`}
+                >
+                  <User className="size-6 text-muted-foreground" />
+                  <span className="text-xs font-medium">Single Reviewer</span>
+                </button>
+                <button
+                  onClick={() => setPanelConfig((p) => ({ ...p, enabled: true }))}
+                  className={`flex flex-col items-center gap-1.5 rounded-lg border-2 p-3 transition-colors ${
+                    panelConfig.enabled ? "border-primary bg-primary/5" : "border-muted hover:bg-muted/50"
+                  }`}
+                >
+                  <Users className="size-6 text-muted-foreground" />
+                  <span className="text-xs font-medium">Judge Panel</span>
+                </button>
               </div>
-              {criteria.length > 0 && (
-                <div className="space-y-1.5">
-                  {criteria.map((c, i) => (
-                    <div key={c} className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
-                      <GripVertical className="size-3.5 text-muted-foreground" />
-                      <span className="text-muted-foreground font-mono text-xs w-5">{i + 1}.</span>
-                      <span className="flex-1">{c}</span>
-                      <button onClick={() => removeCriterion(c)} className="text-muted-foreground hover:text-destructive p-0.5">
-                        <X className="size-4" />
-                      </button>
+
+              {panelConfig.enabled && (
+                <div className="space-y-3 rounded-lg border p-3">
+                  {/* Panel Size */}
+                  <div className="flex items-center gap-3">
+                    <Label className="text-xs whitespace-nowrap">Panel size</Label>
+                    <div className="flex gap-1.5">
+                      {PANEL_SIZES.map((size) => (
+                        <button
+                          key={size}
+                          onClick={() => setPanelConfig((p) => ({
+                            ...p,
+                            panel_size: size,
+                            judge_ids: p.judge_ids.slice(0, size),
+                          }))}
+                          className={`size-8 rounded text-xs font-medium transition-colors ${
+                            panelConfig.panel_size === size ? "bg-primary text-primary-foreground" : "border hover:bg-muted/50"
+                          }`}
+                        >
+                          {size}
+                        </button>
+                      ))}
                     </div>
-                  ))}
+                    <span className="text-xs text-muted-foreground ml-auto">
+                      {panelConfig.judge_ids.length}/{panelConfig.panel_size} picked
+                    </span>
+                  </div>
+
+                  {/* Adjudication */}
+                  <div className="flex items-center gap-3">
+                    <Label className="text-xs whitespace-nowrap">Accept if</Label>
+                    <RadioGroup
+                      value={panelConfig.adjudication_mode}
+                      onValueChange={(v) => setPanelConfig((p) => ({ ...p, adjudication_mode: v as "union" | "majority" }))}
+                      className="flex gap-3"
+                    >
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <RadioGroupItem value="union" />
+                        <span className="text-xs">Any judge</span>
+                      </label>
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <RadioGroupItem value="majority" />
+                        <span className="text-xs">Majority</span>
+                      </label>
+                    </RadioGroup>
+                  </div>
+
+                  {/* Judge Grid */}
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {JUDGE_PERSONAS.map((persona) => {
+                      const isSelected = panelConfig.judge_ids.includes(persona.id);
+                      const isFull = panelConfig.judge_ids.length >= panelConfig.panel_size;
+                      const isDisabled = !isSelected && isFull;
+                      const editedDesc = personaEdits[persona.id];
+                      const displayDesc = editedDesc !== undefined ? editedDesc : persona.description;
+                      return (
+                        <div
+                          key={persona.id}
+                          className={`relative flex items-start gap-2 rounded-md border p-2 transition-all ${
+                            isSelected
+                              ? "border-primary bg-primary/5"
+                              : isDisabled
+                                ? "opacity-40"
+                                : "hover:bg-muted/50"
+                          }`}
+                        >
+                          <button
+                            onClick={() => {
+                              setPanelConfig((p) => {
+                                const has = p.judge_ids.includes(persona.id);
+                                if (has) return { ...p, judge_ids: p.judge_ids.filter((id) => id !== persona.id) };
+                                if (p.judge_ids.length >= p.panel_size) return p;
+                                return { ...p, judge_ids: [...p.judge_ids, persona.id] };
+                              });
+                            }}
+                            disabled={isDisabled}
+                            className={`flex items-start gap-2 flex-1 text-left ${isDisabled ? "cursor-not-allowed" : ""}`}
+                          >
+                            <ShapedEmoji persona={persona} size="sm" />
+                            <div className="min-w-0">
+                              <div className="text-[11px] font-medium leading-tight truncate">{persona.name}</div>
+                              <div className="text-[9px] text-muted-foreground leading-snug line-clamp-2">{displayDesc}</div>
+                            </div>
+                          </button>
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <button
+                                onClick={(e) => e.stopPropagation()}
+                                className="shrink-0 p-0.5 rounded hover:bg-muted/80 text-muted-foreground hover:text-foreground"
+                              >
+                                <MoreHorizontal className="size-3" />
+                              </button>
+                            </PopoverTrigger>
+                            <PopoverContent side="right" align="start" className="w-64 p-3" onClick={(e) => e.stopPropagation()}>
+                              <div className="space-y-2">
+                                <div className="flex items-center gap-2">
+                                  <ShapedEmoji persona={persona} size="lg" />
+                                  <div>
+                                    <h4 className="text-sm font-semibold">{persona.name}</h4>
+                                    <p className="text-[10px] text-muted-foreground">{persona.specialty}</p>
+                                  </div>
+                                </div>
+                                <Label className="text-xs text-muted-foreground">Persona prompt</Label>
+                                <Textarea
+                                  value={editedDesc !== undefined ? editedDesc : persona.description}
+                                  onChange={(e) => setPersonaEdits((prev) => ({ ...prev, [persona.id]: e.target.value }))}
+                                  rows={3}
+                                  className="text-xs resize-none"
+                                />
+                                {editedDesc !== undefined && editedDesc !== persona.description && (
+                                  <button
+                                    onClick={() => setPersonaEdits((prev) => { const n = { ...prev }; delete n[persona.id]; return n; })}
+                                    className="text-[10px] text-muted-foreground hover:text-foreground underline"
+                                  >
+                                    Reset to default
+                                  </button>
+                                )}
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </div>
 
             <Separator />
 
-            {/* Selection Criteria Summary */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label className="text-sm font-medium flex items-center gap-2">
-                  <SlidersHorizontal className="size-4" />
-                  Selection Criteria
-                </Label>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setShowSettingsDialog(false);
-                    setShowWizard(true);
-                  }}
-                  className="h-7 text-xs"
-                >
-                  Edit
-                </Button>
-              </div>
-              <div className="rounded-md border p-3 text-sm space-y-1.5">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Venue capacity:</span>
-                  <span>{selectionPreferences.venue_capacity ?? "No limit"}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Relevance filter:</span>
-                  <span className="capitalize">{selectionPreferences.relevance_filter}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Auto-accept:</span>
-                  <span>{selectionPreferences.auto_accept_types.length > 0 ? selectionPreferences.auto_accept_types.join(", ") : "None"}</span>
-                </div>
-                {selectionPreferences.custom_priorities && (
-                  <div>
-                    <span className="text-muted-foreground">Priorities:</span>
-                    <p className="text-xs mt-0.5">{selectionPreferences.custom_priorities.substring(0, 100)}{selectionPreferences.custom_priorities.length > 100 ? "..." : ""}</p>
+            {/* ── Selection Rules ── */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Selection Rules</h3>
+
+              {/* Venue Capacity */}
+              <div className="flex items-center gap-3">
+                <Label className="text-xs whitespace-nowrap w-24">Venue capacity</Label>
+                {selectionPreferences.venue_capacity === null ? (
+                  <button
+                    onClick={() => setSelectionPreferences((p) => ({ ...p, venue_capacity: 200 }))}
+                    className="text-xs text-muted-foreground hover:text-foreground underline"
+                  >
+                    No limit (click to set)
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min={1}
+                      value={selectionPreferences.venue_capacity ?? ""}
+                      onChange={(e) => setSelectionPreferences((p) => ({ ...p, venue_capacity: e.target.value ? parseInt(e.target.value) : null }))}
+                      className="h-8 w-24 text-sm"
+                    />
+                    <button
+                      onClick={() => setSelectionPreferences((p) => ({ ...p, venue_capacity: null }))}
+                      className="text-xs text-muted-foreground hover:text-foreground underline"
+                    >
+                      Remove limit
+                    </button>
                   </div>
                 )}
+              </div>
+
+              {/* Relevance Filter */}
+              <div className="flex items-center gap-3">
+                <Label className="text-xs whitespace-nowrap w-24">Relevance</Label>
+                <Select
+                  value={selectionPreferences.relevance_filter}
+                  onValueChange={(v) => setSelectionPreferences((p) => ({ ...p, relevance_filter: v }))}
+                >
+                  <SelectTrigger className="h-8 text-xs w-32"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="strict">Strict</SelectItem>
+                    <SelectItem value="moderate">Moderate</SelectItem>
+                    <SelectItem value="loose">Loose</SelectItem>
+                    <SelectItem value="none">None</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Auto-Accept */}
+              <div className="space-y-1.5">
+                <Label className="text-xs">Auto-accept these types (skip AI scoring)</Label>
+                <div className="flex flex-wrap gap-1.5">
+                  {SETTINGS_ATTENDEE_TYPES.map((t) => {
+                    const checked = selectionPreferences.auto_accept_types.includes(t.key);
+                    return (
+                      <button
+                        key={t.key}
+                        onClick={() => setSelectionPreferences((p) => ({
+                          ...p,
+                          auto_accept_types: checked
+                            ? p.auto_accept_types.filter((x) => x !== t.key)
+                            : [...p.auto_accept_types, t.key],
+                        }))}
+                        className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                          checked ? "bg-primary text-primary-foreground border-primary" : "hover:bg-muted/50"
+                        }`}
+                      >
+                        {t.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Attendee Mix */}
+              <Collapsible>
+                <CollapsibleTrigger asChild>
+                  <button className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+                    <ChevronRight className="size-3" />
+                    Target attendee mix (optional)
+                  </button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="mt-2 space-y-2">
+                  {SETTINGS_ATTENDEE_TYPES.map((t) => {
+                    const value = selectionPreferences.attendee_mix[t.key] ?? 0;
+                    return (
+                      <div key={t.key} className="flex items-center gap-2">
+                        <span className="text-xs w-20 truncate">{t.label}</span>
+                        <Slider
+                          value={[value]}
+                          min={0}
+                          max={50}
+                          step={5}
+                          onValueChange={([v]) => setSelectionPreferences((p) => ({
+                            ...p,
+                            attendee_mix: { ...p.attendee_mix, [t.key]: v },
+                          }))}
+                          className="flex-1"
+                        />
+                        <span className="text-xs font-mono w-8 text-right">{value}%</span>
+                      </div>
+                    );
+                  })}
+                </CollapsibleContent>
+              </Collapsible>
+            </div>
+
+            <Separator />
+
+            {/* ── AI Prompt ── */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">AI Prompt</h3>
+              <Textarea
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                rows={3}
+                placeholder="Describe your event and ideal attendees..."
+                className="resize-none text-sm"
+              />
+
+              {/* Criteria */}
+              <div className="space-y-1.5">
+                <Label className="text-xs">Evaluation criteria</Label>
+                <div className="flex gap-2">
+                  <Input
+                    value={newCriterion}
+                    onChange={(e) => setNewCriterion(e.target.value)}
+                    placeholder="Add a criterion..."
+                    className="h-8 text-xs"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") { e.preventDefault(); addCriterion(); }
+                    }}
+                  />
+                  <Button variant="outline" size="icon" onClick={addCriterion} className="h-8 w-8">
+                    <Plus className="size-3.5" />
+                  </Button>
+                </div>
+                {criteria.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {criteria.map((c) => (
+                      <span key={c} className="inline-flex items-center gap-1 rounded-full border bg-muted/30 px-2.5 py-1 text-xs">
+                        {c}
+                        <button onClick={() => removeCriterion(c)} className="text-muted-foreground hover:text-destructive">
+                          <X className="size-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Custom Priorities */}
+              <div className="space-y-1.5">
+                <Label className="text-xs">Extra instructions (optional)</Label>
+                <Textarea
+                  value={selectionPreferences.custom_priorities}
+                  onChange={(e) => setSelectionPreferences((p) => ({ ...p, custom_priorities: e.target.value }))}
+                  rows={2}
+                  placeholder="e.g. Prioritize people who have built AI products..."
+                  className="resize-none text-xs"
+                />
               </div>
             </div>
           </div>
@@ -2170,47 +2429,17 @@ export default function Page() {
           <DialogFooter>
             <Button
               onClick={() => {
-                api.updatePromptSettings({ default_prompt: prompt, criteria })
-                  .then(() => toast.success("Settings saved"))
-                  .catch(() => toast.error("Failed to save settings"));
+                api.updatePromptSettings({ default_prompt: prompt, criteria }).catch(() => {});
+                api.updateSelectionPreferences(selectionPreferences).catch(() => {});
+                toast.success("Settings saved");
                 setShowSettingsDialog(false);
               }}
             >
-              Save Settings
+              Save
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Selection Wizard */}
-      <SelectionWizard
-        open={showWizard}
-        onOpenChange={setShowWizard}
-        preferences={selectionPreferences}
-        panelConfig={panelConfig}
-        onSave={(savedPrefs, savedPanelConfig, savedPersonaEdits) => {
-          setSelectionPreferences(savedPrefs);
-          setWizardCompleted(true);
-          localStorage.setItem("selection_preferences", JSON.stringify(savedPrefs));
-          if (savedPanelConfig) {
-            setPanelConfig(savedPanelConfig);
-            localStorage.setItem("panel_config", JSON.stringify(savedPanelConfig));
-          } else {
-            setPanelConfig(undefined);
-            localStorage.removeItem("panel_config");
-          }
-          if (savedPersonaEdits && Object.keys(savedPersonaEdits).length > 0) {
-            localStorage.setItem("persona_edits", JSON.stringify(savedPersonaEdits));
-          } else {
-            localStorage.removeItem("persona_edits");
-          }
-          api.updateSelectionPreferences(savedPrefs).catch(() => {});
-          // Auto-start analysis after wizard — pass prefs directly to avoid stale closure
-          if (apiKey.trim() && (stats?.total ?? 0) > 0) {
-            setTimeout(() => handleAnalyze(savedPrefs, savedPanelConfig), 100);
-          }
-        }}
-      />
 
       {/* Analysis Dialog */}
       <Dialog open={showAnalysisDialog} onOpenChange={(open) => { if (!analyzing) setShowAnalysisDialog(open); }}>
