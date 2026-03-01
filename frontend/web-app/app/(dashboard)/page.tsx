@@ -275,34 +275,58 @@ function AttendeeTypeCharts({ applicants }: { applicants: Applicant[] }) {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {/* 1. Detailed Attendee Breakdown Pie — splits "other" into specific roles */}
+        {/* 1. Attendee Breakdown — pie for main types, bar for detailed roles */}
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">Attendee Breakdown</CardTitle>
-            <CardDescription className="text-xs">Distribution by role (Others shown by specific role)</CardDescription>
+            <CardTitle className="text-base">Attendee Types</CardTitle>
+            <CardDescription className="text-xs">Distribution by main category</CardDescription>
           </CardHeader>
           <CardContent className="relative">
             <ResponsiveContainer width="100%" height={240}>
               <PieChart>
                 <Pie
-                  data={detailedNonZero.length > 0 ? detailedNonZero : [{ label: "No data", count: 1, color: "#e5e7eb", key: "empty" }]}
+                  data={typeCountsNonZero.length > 0 ? typeCountsNonZero : [{ label: "No data", count: 1, color: "#e5e7eb", key: "empty" }]}
                   dataKey="count"
                   nameKey="label"
                   cx="50%"
                   cy="50%"
-                  innerRadius={45}
-                  outerRadius={80}
-                  label={detailedNonZero.length > 0 ? ({ label, count }: { label: string; count: number }) => `${label} (${count})` : false}
-                  labelLine={detailedNonZero.length > 0}
+                  innerRadius={50}
+                  outerRadius={85}
+                  paddingAngle={2}
+                  label={typeCountsNonZero.length > 0 ? ({ label, percent }: { label: string; percent: number }) => `${label} ${(percent * 100).toFixed(0)}%` : false}
+                  labelLine={typeCountsNonZero.length > 0}
                 >
-                  {(detailedNonZero.length > 0 ? detailedNonZero : [{ key: "empty", color: "#e5e7eb" }]).map((entry) => (
+                  {(typeCountsNonZero.length > 0 ? typeCountsNonZero : [{ key: "empty", color: "#e5e7eb" }]).map((entry) => (
                     <Cell key={entry.key} fill={entry.color} />
                   ))}
                 </Pie>
-                <Tooltip />
+                <Tooltip formatter={(value: number) => [value, "Applicants"]} />
               </PieChart>
             </ResponsiveContainer>
             {!hasTypes && emptyOverlay("Run AI analysis to see breakdown")}
+          </CardContent>
+        </Card>
+
+        {/* 1b. Detailed Roles — top roles across all types */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Top Roles</CardTitle>
+            <CardDescription className="text-xs">Most common specific roles</CardDescription>
+          </CardHeader>
+          <CardContent className="relative">
+            <ResponsiveContainer width="100%" height={240}>
+              <BarChart data={detailedNonZero.slice(0, 8)} layout="vertical" margin={{ left: 10 }}>
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
+                <YAxis type="category" dataKey="label" width={130} tick={{ fontSize: 11 }} />
+                <Tooltip formatter={(value: number) => [value, "Applicants"]} />
+                <Bar dataKey="count" name="Applicants" radius={[0, 4, 4, 0]}>
+                  {detailedNonZero.slice(0, 8).map((entry) => (
+                    <Cell key={entry.key} fill={entry.color} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+            {!hasTypes && emptyOverlay("Run AI analysis to see roles")}
           </CardContent>
         </Card>
 
@@ -887,6 +911,8 @@ export default function Page() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [sortBy, setSortBy] = useState<string>("score");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [selectedApplicantId, setSelectedApplicantId] = useState<string | null>(null);
   const [showCardScanner, setShowCardScanner] = useState(false);
   const [showChartsOpen, setShowChartsOpen] = useState(false);
@@ -1255,11 +1281,29 @@ export default function Page() {
       });
     }
     return [...list].sort((a, b) => {
-      const sa = a.ai_score ? parseInt(a.ai_score) : 0;
-      const sb = b.ai_score ? parseInt(b.ai_score) : 0;
-      return sb - sa;
+      let cmp = 0;
+      switch (sortBy) {
+        case "name":
+          cmp = (a.name || "").localeCompare(b.name || "");
+          break;
+        case "company":
+          cmp = (a.company || "").localeCompare(b.company || "");
+          break;
+        case "score":
+          cmp = (parseInt(a.ai_score || "0") || 0) - (parseInt(b.ai_score || "0") || 0);
+          break;
+        case "status":
+          cmp = (a.status || "").localeCompare(b.status || "");
+          break;
+        case "type":
+          cmp = (a.attendee_type_detail || a.attendee_type || "").localeCompare(b.attendee_type_detail || b.attendee_type || "");
+          break;
+        default:
+          cmp = (parseInt(a.ai_score || "0") || 0) - (parseInt(b.ai_score || "0") || 0);
+      }
+      return sortDir === "asc" ? cmp : -cmp;
     });
-  }, [applicants, statusFilter, searchQuery]);
+  }, [applicants, statusFilter, searchQuery, sortBy, sortDir]);
 
   const handleExportCSV = useCallback(() => {
     if (applicants.length === 0) return;
@@ -1565,11 +1609,35 @@ export default function Page() {
                   />
                 </TableHead>
                 <TableHead className="w-10">#</TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead>Company</TableHead>
-                <TableHead className="w-20 text-center">Score</TableHead>
-                <TableHead className="w-28">Status</TableHead>
-                <TableHead className="w-28">Type</TableHead>
+                {([
+                  { key: "name", label: "Name", className: "" },
+                  { key: "company", label: "Company", className: "" },
+                  { key: "score", label: "Score", className: "w-20 text-center" },
+                  { key: "status", label: "Status", className: "w-28" },
+                  { key: "type", label: "Type", className: "w-28" },
+                ] as const).map((col) => (
+                  <TableHead
+                    key={col.key}
+                    className={`${col.className} cursor-pointer select-none hover:text-foreground transition-colors`}
+                    onClick={() => {
+                      if (sortBy === col.key) {
+                        setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+                      } else {
+                        setSortBy(col.key);
+                        setSortDir(col.key === "name" || col.key === "company" || col.key === "type" ? "asc" : "desc");
+                      }
+                    }}
+                  >
+                    <span className="inline-flex items-center gap-1">
+                      {col.label}
+                      {sortBy === col.key ? (
+                        sortDir === "asc" ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />
+                      ) : (
+                        <ChevronDown className="size-3.5 opacity-0 group-hover:opacity-30" />
+                      )}
+                    </span>
+                  </TableHead>
+                ))}
                 <TableHead className="w-28 text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
