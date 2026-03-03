@@ -14,6 +14,17 @@ export interface Session {
   last_analysis_criteria?: string[];
   selection_preferences?: SelectionPreferences;
   panel_config?: PanelConfig;
+  last_analysis_at?: string;
+  last_analysis_results?: {
+    total: number;
+    accepted: number;
+    auto_accepted: number;
+    waitlisted: number;
+    rejected: number;
+    errors: number;
+  };
+  last_analysis_summary?: string;
+  last_analysis_type_counts?: Record<string, number>;
 }
 
 export interface AdminSession extends Session {

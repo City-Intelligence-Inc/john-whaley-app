@@ -8,6 +8,7 @@ POST /applicants/analyze-all-stream   Bulk analyze with SSE progress (2-pass)
 
 import asyncio
 import json
+from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
@@ -718,7 +719,27 @@ async def analyze_all_stream(body: BulkAnalyzeRequest):
                 if summary_text:
                     yield f"event: summary\ndata: {json.dumps({'summary': summary_text})}\n\n"
             except Exception:
-                pass
+                summary_text = ""
+
+            # Save results snapshot to session
+            if body.session_id:
+                snapshot = {
+                    "last_analysis_at": datetime.now(timezone.utc).isoformat(),
+                    "last_analysis_results": {
+                        "total": total,
+                        "accepted": result_counts["accepted"] + auto_accepted_count,
+                        "auto_accepted": auto_accepted_count,
+                        "waitlisted": result_counts["waitlisted"],
+                        "rejected": result_counts["rejected"],
+                        "errors": 0,
+                    },
+                    "last_analysis_summary": summary_text,
+                    "last_analysis_type_counts": dict(type_counts),
+                }
+                try:
+                    db.update_session_fields(body.session_id, snapshot)
+                except Exception:
+                    pass
 
         else:
             # ── SINGLE REVIEWER MODE (existing behavior) ──
@@ -762,6 +783,26 @@ async def analyze_all_stream(body: BulkAnalyzeRequest):
                 if summary_text:
                     yield f"event: summary\ndata: {json.dumps({'summary': summary_text})}\n\n"
             except Exception:
-                pass  # Summary is best-effort, don't fail the stream
+                summary_text = ""
+
+            # Save results snapshot to session
+            if body.session_id:
+                snapshot = {
+                    "last_analysis_at": datetime.now(timezone.utc).isoformat(),
+                    "last_analysis_results": {
+                        "total": total,
+                        "accepted": result_counts["accepted"] + auto_accepted_count,
+                        "auto_accepted": auto_accepted_count,
+                        "waitlisted": result_counts["waitlisted"],
+                        "rejected": result_counts["rejected"],
+                        "errors": errors,
+                    },
+                    "last_analysis_summary": summary_text,
+                    "last_analysis_type_counts": dict(type_counts),
+                }
+                try:
+                    db.update_session_fields(body.session_id, snapshot)
+                except Exception:
+                    pass
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

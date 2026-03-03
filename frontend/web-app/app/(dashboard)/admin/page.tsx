@@ -57,8 +57,23 @@ function modelShortName(model?: string): string {
   return model;
 }
 
-function StatusBar({ stats }: { stats: AdminSession["stats"] }) {
-  const { total, accepted, rejected, waitlisted, pending } = stats;
+function StatusBar({ session }: { session: AdminSession }) {
+  const { stats } = session;
+  const snapshot = session.last_analysis_results;
+  const isCleared = stats.total === 0 && !!snapshot;
+
+  // Use snapshot data if session was cleared
+  const data = isCleared
+    ? {
+        total: snapshot.total,
+        accepted: snapshot.accepted,
+        waitlisted: snapshot.waitlisted,
+        rejected: snapshot.rejected,
+        pending: 0,
+      }
+    : stats;
+
+  const { total, accepted, rejected, waitlisted, pending } = data;
   if (total === 0) return <span className="text-muted-foreground text-xs">No applicants</span>;
 
   const segments = [
@@ -72,20 +87,28 @@ function StatusBar({ stats }: { stats: AdminSession["stats"] }) {
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
-          <div className="flex h-2.5 w-28 overflow-hidden rounded-full bg-gray-100">
-            {segments.map(
-              (seg) =>
-                seg.count > 0 && (
-                  <div
-                    key={seg.label}
-                    className={`${seg.color} h-full`}
-                    style={{ width: `${(seg.count / total) * 100}%` }}
-                  />
-                )
+          <div className="flex items-center gap-2">
+            <div className={`flex h-2.5 w-28 overflow-hidden rounded-full bg-gray-100 ${isCleared ? "opacity-60" : ""}`}>
+              {segments.map(
+                (seg) =>
+                  seg.count > 0 && (
+                    <div
+                      key={seg.label}
+                      className={`${seg.color} h-full`}
+                      style={{ width: `${(seg.count / total) * 100}%` }}
+                    />
+                  )
+              )}
+            </div>
+            {isCleared && (
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-orange-600 border-orange-300">
+                Cleared
+              </Badge>
             )}
           </div>
         </TooltipTrigger>
         <TooltipContent>
+          {isCleared && <div className="mb-1 text-xs text-orange-500 font-medium">Last analysis (cleared)</div>}
           {segments.map((seg) => (
             <div key={seg.label} className="flex justify-between gap-3">
               <span>{seg.label}</span>
@@ -100,8 +123,16 @@ function StatusBar({ stats }: { stats: AdminSession["stats"] }) {
 
 function SummaryCards({ sessions }: { sessions: AdminSession[] }) {
   const totalSessions = sessions.length;
-  const totalApplicants = sessions.reduce((s, x) => s + (x.stats.total || x.applicant_count || 0), 0);
-  const totalAccepted = sessions.reduce((s, x) => s + x.stats.accepted, 0);
+  const totalApplicants = sessions.reduce((s, x) => {
+    if (x.stats.total > 0) return s + x.stats.total;
+    if (x.last_analysis_results) return s + x.last_analysis_results.total;
+    return s + (x.applicant_count || 0);
+  }, 0);
+  const totalAccepted = sessions.reduce((s, x) => {
+    if (x.stats.total > 0) return s + x.stats.accepted;
+    if (x.last_analysis_results) return s + x.last_analysis_results.accepted;
+    return s;
+  }, 0);
   const acceptanceRate = totalApplicants > 0 ? ((totalAccepted / totalApplicants) * 100).toFixed(1) : "0";
 
   // Most used model
@@ -140,28 +171,92 @@ function SummaryCards({ sessions }: { sessions: AdminSession[] }) {
   );
 }
 
+const TYPE_LABELS: Record<string, string> = {
+  vc: "VCs / Investors",
+  entrepreneur: "Founders / Entrepreneurs",
+  faculty: "Faculty / Researchers",
+  alumni: "Alumni",
+  press: "Press / Media",
+  student: "Students",
+  other: "Other",
+};
+
 function ExpandedDetails({ session }: { session: AdminSession }) {
+  const results = session.last_analysis_results;
+  const isCleared = session.stats.total === 0 && !!results;
+
   return (
     <div className="grid gap-4 p-4 text-sm md:grid-cols-2">
-      {/* Prompt Used */}
-      {session.last_analysis_prompt && (
+      {/* Last Analysis Results */}
+      {results && (
         <div className="md:col-span-2">
-          <h4 className="mb-1 font-semibold">Prompt Used</h4>
-          <pre className="max-h-48 overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap">
-            {session.last_analysis_prompt}
-          </pre>
+          <div className="flex items-center gap-2 mb-2">
+            <h4 className="font-semibold">Last Analysis Results</h4>
+            {isCleared && (
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-orange-600 border-orange-300">
+                Applicants Cleared
+              </Badge>
+            )}
+            {session.last_analysis_at && (
+              <span className="text-xs text-muted-foreground ml-auto">
+                {relativeTime(session.last_analysis_at)} ({new Date(session.last_analysis_at).toLocaleString()})
+              </span>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Badge variant="secondary" className="bg-green-100 text-green-800">
+              {results.accepted} accepted
+              {results.auto_accepted > 0 && ` (${results.auto_accepted} auto)`}
+            </Badge>
+            <Badge variant="secondary" className="bg-yellow-100 text-yellow-800">
+              {results.waitlisted} waitlisted
+            </Badge>
+            <Badge variant="secondary" className="bg-red-100 text-red-800">
+              {results.rejected} rejected
+            </Badge>
+            {results.errors > 0 && (
+              <Badge variant="destructive">
+                {results.errors} errors
+              </Badge>
+            )}
+            <Badge variant="outline">
+              {results.total} total
+            </Badge>
+          </div>
         </div>
       )}
 
-      {/* Criteria */}
-      {session.last_analysis_criteria && session.last_analysis_criteria.length > 0 && (
+      {/* AI Summary */}
+      {session.last_analysis_summary && (
+        <div className="md:col-span-2">
+          <h4 className="mb-1 font-semibold">AI Summary</h4>
+          <p className="rounded-md bg-muted p-3 text-xs leading-relaxed">
+            {session.last_analysis_summary}
+          </p>
+        </div>
+      )}
+
+      {/* Type Distribution */}
+      {session.last_analysis_type_counts && Object.keys(session.last_analysis_type_counts).length > 0 && (
         <div>
-          <h4 className="mb-1 font-semibold">Criteria</h4>
-          <ul className="list-inside list-disc space-y-0.5">
-            {session.last_analysis_criteria.map((c, i) => (
-              <li key={i}>{c}</li>
-            ))}
-          </ul>
+          <h4 className="mb-1 font-semibold">Applicant Types</h4>
+          <div className="space-y-1">
+            {Object.entries(session.last_analysis_type_counts)
+              .sort(([, a], [, b]) => b - a)
+              .map(([type, count]) => {
+                const total = results?.total || Object.values(session.last_analysis_type_counts!).reduce((s, v) => s + v, 0);
+                const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+                return (
+                  <div key={type} className="flex items-center gap-2">
+                    <span className="w-32 text-xs text-muted-foreground truncate">{TYPE_LABELS[type] || type}</span>
+                    <div className="flex-1 h-2 rounded-full bg-gray-100 overflow-hidden">
+                      <div className="h-full bg-blue-400 rounded-full" style={{ width: `${pct}%` }} />
+                    </div>
+                    <span className="text-xs w-14 text-right">{count} ({pct}%)</span>
+                  </div>
+                );
+              })}
+          </div>
         </div>
       )}
 
@@ -189,13 +284,21 @@ function ExpandedDetails({ session }: { session: AdminSession }) {
             {(session.selection_preferences.auto_accept_types?.length ?? 0) > 0 && (
               <div className="flex gap-2">
                 <dt className="text-muted-foreground">Auto-accept:</dt>
-                <dd>{session.selection_preferences.auto_accept_types.join(", ")}</dd>
+                <dd>
+                  {session.selection_preferences.auto_accept_types.map((t) => (
+                    <Badge key={t} variant="outline" className="mr-1 text-[10px] px-1.5 py-0">{t}</Badge>
+                  ))}
+                </dd>
               </div>
             )}
             {session.selection_preferences.relevance_filter && (
               <div className="flex gap-2">
                 <dt className="text-muted-foreground">Relevance Filter:</dt>
-                <dd>{session.selection_preferences.relevance_filter}</dd>
+                <dd>
+                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 capitalize">
+                    {session.selection_preferences.relevance_filter}
+                  </Badge>
+                </dd>
               </div>
             )}
             {session.selection_preferences.custom_priorities && (
@@ -205,6 +308,28 @@ function ExpandedDetails({ session }: { session: AdminSession }) {
               </div>
             )}
           </dl>
+        </div>
+      )}
+
+      {/* Prompt Used */}
+      {session.last_analysis_prompt && (
+        <div className="md:col-span-2">
+          <h4 className="mb-1 font-semibold">Prompt Used</h4>
+          <pre className="max-h-48 overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap">
+            {session.last_analysis_prompt}
+          </pre>
+        </div>
+      )}
+
+      {/* Criteria */}
+      {session.last_analysis_criteria && session.last_analysis_criteria.length > 0 && (
+        <div>
+          <h4 className="mb-1 font-semibold">Criteria</h4>
+          <ul className="list-inside list-disc space-y-0.5">
+            {session.last_analysis_criteria.map((c, i) => (
+              <li key={i}>{c}</li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -322,9 +447,15 @@ export default function AdminPage() {
                           </Tooltip>
                         </TooltipProvider>
                       </TableCell>
-                      <TableCell className="text-right">{s.stats.total || s.applicant_count}</TableCell>
+                      <TableCell className="text-right">
+                        {s.stats.total > 0
+                          ? s.stats.total
+                          : s.last_analysis_results
+                            ? <span className="text-muted-foreground">{s.last_analysis_results.total}</span>
+                            : s.applicant_count}
+                      </TableCell>
                       <TableCell>
-                        <StatusBar stats={s.stats} />
+                        <StatusBar session={s} />
                       </TableCell>
                       <TableCell>
                         {s.last_analysis_model ? (
