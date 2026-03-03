@@ -1514,38 +1514,55 @@ export default function Page() {
     }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      list = list.filter((a) => {
-        const name = (a.name || "").toLowerCase();
-        const email = (a.email || "").toLowerCase();
-        const company = (a.company || "").toLowerCase();
-        const title = (a.title || "").toLowerCase();
-        return name.includes(q) || email.includes(q) || company.includes(q) || title.includes(q);
-      });
+      list = list.filter((a) =>
+        Object.values(a).some((v) => v != null && String(v).toLowerCase().includes(q))
+      );
     }
     return [...list].sort((a, b) => {
       let cmp = 0;
-      switch (sortBy) {
-        case "name":
-          cmp = (a.name || "").localeCompare(b.name || "");
-          break;
-        case "company":
-          cmp = (a.company || "").localeCompare(b.company || "");
-          break;
-        case "score":
-          cmp = (parseInt(a.ai_score || "0") || 0) - (parseInt(b.ai_score || "0") || 0);
-          break;
-        case "status":
-          cmp = (a.status || "").localeCompare(b.status || "");
-          break;
-        case "type":
-          cmp = (a.attendee_type_detail || a.attendee_type || "").localeCompare(b.attendee_type_detail || b.attendee_type || "");
-          break;
-        default:
-          cmp = (parseInt(a.ai_score || "0") || 0) - (parseInt(b.ai_score || "0") || 0);
+      if (sortBy === "ai_score") {
+        cmp = (parseInt(String(a.ai_score || "0")) || 0) - (parseInt(String(b.ai_score || "0")) || 0);
+      } else {
+        const va = String(a[sortBy] ?? "");
+        const vb = String(b[sortBy] ?? "");
+        cmp = va.localeCompare(vb);
       }
       return sortDir === "asc" ? cmp : -cmp;
     });
   }, [applicants, statusFilter, searchQuery, sortBy, sortDir]);
+
+  // Dynamic table columns — derived from actual applicant data
+  const HIDDEN_KEYS = new Set([
+    "applicant_id", "session_id",
+    "ai_review", "ai_reasoning", "panel_votes", "accepting_judges",
+    "linkedin_url", "linkedin_about", "linkedin_experience",
+  ]);
+  // Priority columns shown first (if they exist in data)
+  const PRIORITY_COLS = ["name", "email", "title", "company", "location", "ai_score", "status", "attendee_type"];
+
+  const tableColumns = useMemo(() => {
+    const seen = new Set<string>();
+    for (const a of applicants) {
+      for (const key of Object.keys(a)) {
+        if (!HIDDEN_KEYS.has(key) && a[key] !== undefined && a[key] !== null && a[key] !== "") {
+          seen.add(key);
+        }
+      }
+    }
+    // Order: priority keys first (that exist), then remaining alphabetically
+    const ordered = [
+      ...PRIORITY_COLS.filter((k) => seen.has(k)),
+      ...[...seen].filter((k) => !PRIORITY_COLS.includes(k)).sort(),
+    ];
+    return ordered;
+  }, [applicants]);
+
+  const COLUMN_LABELS: Record<string, string> = {
+    name: "Name", email: "Email", title: "Title", company: "Company",
+    location: "Location", ai_score: "Score", status: "Status",
+    attendee_type: "Type", attendee_type_detail: "Type Detail",
+    linkedin_headline: "Headline", education: "Education",
+  };
 
   const handleExportCSV = useCallback(() => {
     if (applicants.length === 0) return;
@@ -1816,7 +1833,7 @@ export default function Page() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {selectedIds.size > 0 && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -1912,28 +1929,22 @@ export default function Page() {
                   />
                 </TableHead>
                 <TableHead className="w-10">#</TableHead>
-                {([
-                  { key: "name", label: "Name", className: "" },
-                  { key: "company", label: "Company", className: "" },
-                  { key: "score", label: "Score", className: "w-20 text-center" },
-                  { key: "status", label: "Status", className: "w-28" },
-                  { key: "type", label: "Type", className: "w-28" },
-                ] as const).map((col) => (
+                {tableColumns.map((key) => (
                   <TableHead
-                    key={col.key}
-                    className={`${col.className} cursor-pointer select-none hover:text-foreground transition-colors`}
+                    key={key}
+                    className={`${key === "ai_score" ? "w-20 text-center" : key === "status" ? "w-28" : ""} cursor-pointer select-none hover:text-foreground transition-colors`}
                     onClick={() => {
-                      if (sortBy === col.key) {
+                      if (sortBy === key) {
                         setSortDir((d) => (d === "asc" ? "desc" : "asc"));
                       } else {
-                        setSortBy(col.key);
-                        setSortDir(col.key === "name" || col.key === "company" || col.key === "type" ? "asc" : "desc");
+                        setSortBy(key);
+                        setSortDir(key === "ai_score" ? "desc" : "asc");
                       }
                     }}
                   >
                     <span className="inline-flex items-center gap-1">
-                      {col.label}
-                      {sortBy === col.key ? (
+                      {COLUMN_LABELS[key] || key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
+                      {sortBy === key ? (
                         sortDir === "asc" ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />
                       ) : (
                         <ChevronDown className="size-3.5 opacity-0 group-hover:opacity-30" />
@@ -1947,14 +1958,14 @@ export default function Page() {
             <TableBody>
               {loadingApplicants && (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center py-12">
+                  <TableCell colSpan={tableColumns.length + 3} className="text-center py-12">
                     <Loader2 className="size-6 animate-spin mx-auto text-muted-foreground" />
                   </TableCell>
                 </TableRow>
               )}
               {!loadingApplicants && filteredApplicants.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center py-12 text-muted-foreground">
+                  <TableCell colSpan={tableColumns.length + 3} className="text-center py-12 text-muted-foreground">
                     {applicants.length === 0
                       ? "No applicants yet. Click Import above to upload a CSV."
                       : `No ${statusFilter !== "all" ? statusFilter : ""} applicants match your search.`.trim()}
@@ -1963,17 +1974,11 @@ export default function Page() {
               )}
               {!loadingApplicants && filteredApplicants.map((a, i) => {
                 const score = a.ai_score ? parseInt(a.ai_score) : 0;
-                const scoreColor =
+                const scoreColorClass =
                   score >= 70 ? "text-green-600 dark:text-green-400"
                   : score >= 40 ? "text-yellow-600 dark:text-yellow-400"
                   : score > 0 ? "text-red-600 dark:text-red-400"
                   : "text-muted-foreground";
-                const displayName =
-                  a.name ||
-                  a.email ||
-                  (a.title && a.company ? `${a.title} @ ${a.company}` : null) ||
-                  a.company ||
-                  "Unknown";
 
                 return (
                   <TableRow
@@ -1991,33 +1996,62 @@ export default function Page() {
                     <TableCell className="text-muted-foreground font-mono text-sm">
                       {i + 1}
                     </TableCell>
-                    <TableCell className="font-medium max-w-[200px] truncate">
-                      {displayName}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground max-w-[150px] truncate">
-                      {a.company || "—"}
-                    </TableCell>
-                    <TableCell className="text-center">
-                      {score > 0 ? (
-                        <span className={`font-bold tabular-nums ${scoreColor}`}>{score}</span>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${statusColor(a.status)}`}>
-                        {a.status.charAt(0).toUpperCase() + a.status.slice(1)}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      {a.attendee_type ? (
-                        <Badge variant="outline" className="text-xs font-normal">
-                          {a.attendee_type_detail || a.attendee_type}
-                        </Badge>
-                      ) : (
-                        <span className="text-muted-foreground text-xs">—</span>
-                      )}
-                    </TableCell>
+                    {tableColumns.map((key) => {
+                      const val = a[key];
+                      // Special rendering for known column types
+                      if (key === "ai_score") {
+                        return (
+                          <TableCell key={key} className="text-center">
+                            {score > 0 ? (
+                              <span className={`font-bold tabular-nums ${scoreColorClass}`}>{score}</span>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                        );
+                      }
+                      if (key === "status") {
+                        return (
+                          <TableCell key={key}>
+                            <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${statusColor(String(val || "pending"))}`}>
+                              {String(val || "pending").charAt(0).toUpperCase() + String(val || "pending").slice(1)}
+                            </span>
+                          </TableCell>
+                        );
+                      }
+                      if (key === "attendee_type") {
+                        return (
+                          <TableCell key={key}>
+                            {val ? (
+                              <Badge variant="outline" className="text-xs font-normal">
+                                {String(a.attendee_type_detail || val)}
+                              </Badge>
+                            ) : (
+                              <span className="text-muted-foreground text-xs">—</span>
+                            )}
+                          </TableCell>
+                        );
+                      }
+                      if (key === "name") {
+                        const displayName =
+                          a.name ||
+                          a.email ||
+                          (a.title && a.company ? `${a.title} @ ${a.company}` : null) ||
+                          a.company ||
+                          "Unknown";
+                        return (
+                          <TableCell key={key} className="font-medium max-w-[200px] truncate">
+                            {displayName}
+                          </TableCell>
+                        );
+                      }
+                      // Generic text cell
+                      return (
+                        <TableCell key={key} className="max-w-[200px] truncate text-muted-foreground">
+                          {val != null && val !== "" ? String(val) : "—"}
+                        </TableCell>
+                      );
+                    })}
                     <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
