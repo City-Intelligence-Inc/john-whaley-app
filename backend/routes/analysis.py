@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from config import AI_FIELDS
+from config import AI_FIELDS, get_applicant_name
 from models import ReviewRequest, BulkAnalyzeRequest, SelectionPreferences
 from ai import call_ai, call_ai_async, parse_json_response
 from judge_personas import JUDGE_PERSONAS_BY_ID
@@ -288,7 +288,7 @@ async def _judge_score_one(
 ) -> dict:
     """Score a single applicant through a judge's lens."""
     applicant_id = applicant["applicant_id"]
-    name = applicant.get("name", "Unknown")
+    name = get_applicant_name(applicant)
     attendee_type = applicant.get("attendee_type", "other")
     attendee_type_detail = applicant.get("attendee_type_detail", "")
 
@@ -395,7 +395,7 @@ def _selection_context(prefs: SelectionPreferences | None) -> str:
 async def _classify_one(applicant: dict, body: BulkAnalyzeRequest, semaphore: asyncio.Semaphore) -> dict:
     """Pass 1: Classify a single applicant (type only, no scoring)."""
     applicant_id = applicant["applicant_id"]
-    name = applicant.get("name", "Unknown")
+    name = get_applicant_name(applicant)
 
     async with semaphore:
         prompt = _CLASSIFY_PROMPT.format(
@@ -430,7 +430,7 @@ async def _classify_one(applicant: dict, body: BulkAnalyzeRequest, semaphore: as
 async def _score_one(applicant: dict, body: BulkAnalyzeRequest, pool_summary: str, total: int, semaphore: asyncio.Semaphore) -> dict:
     """Pass 2: Score and decide on a single applicant (with pool context)."""
     applicant_id = applicant["applicant_id"]
-    name = applicant.get("name", "Unknown")
+    name = get_applicant_name(applicant)
     attendee_type = applicant.get("attendee_type", "other")
     attendee_type_detail = applicant.get("attendee_type_detail", "")
 

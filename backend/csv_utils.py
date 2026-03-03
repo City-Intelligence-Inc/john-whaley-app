@@ -6,6 +6,13 @@ import csv
 import io
 import re
 
+# Column names that should be normalized to "name"
+_NAME_KEY_PATTERNS = re.compile(
+    r"^(full_name|applicant_name|person_name|contact_name|"
+    r"applicant|person|contact|entity|candidate|candidate_name|"
+    r"attendee|attendee_name|member|member_name|display_name)$"
+)
+
 # Column names that should be normalized to "linkedin_url"
 _LINKEDIN_KEY_PATTERNS = re.compile(
     r"^(linkedin|linkedin_url|linkedin_profile|linkedin_link|"
@@ -42,6 +49,13 @@ def parse_csv_rows(text: str) -> list[dict]:
             last = item.get("last_name", "")
             if first or last:
                 item["name"] = f"{first} {last}".strip()
+
+        # Normalize name: known header variants → name
+        if "name" not in item:
+            for k in list(item.keys()):
+                if _NAME_KEY_PATTERNS.match(k):
+                    item["name"] = item[k]
+                    break
 
         # Normalize LinkedIn URL: known header variants → linkedin_url
         if "linkedin_url" not in item:

@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from models import LinkedInEnrichRequest
+from config import get_applicant_name
 import db
 
 router = APIRouter(prefix="/scraper", tags=["scraper"])
@@ -133,7 +134,7 @@ async def _scrape_one(
 ) -> dict:
     """Scrape a single LinkedIn profile with retries on rate limits."""
     applicant_id = applicant["applicant_id"]
-    name = applicant.get("name", "Unknown")
+    name = get_applicant_name(applicant)
     linkedin_url = applicant.get("linkedin_url", "")
 
     async with semaphore:
