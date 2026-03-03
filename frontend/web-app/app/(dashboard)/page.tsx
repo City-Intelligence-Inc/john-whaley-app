@@ -451,6 +451,27 @@ function ApplicantCardScanner({
   );
 
   const current = sorted[currentIndex];
+
+  const goPrev = () => setCurrentIndex((i) => Math.max(0, i - 1));
+  const goNext = () => setCurrentIndex((i) => Math.min(sorted.length - 1, i + 1));
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "ArrowLeft") goPrev();
+      else if (e.key === "ArrowRight") goNext();
+      else if (e.key === "Escape") onClose();
+      else if (e.key === "1" || e.key === "2" || e.key === "3") {
+        const s = sorted[currentIndex];
+        if (!s) return;
+        const statusMap: Record<string, string> = { "1": "accepted", "2": "waitlisted", "3": "rejected" };
+        onStatusChange(s.applicant_id, statusMap[e.key]);
+        if (currentIndex < sorted.length - 1) setCurrentIndex((i) => i + 1);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  });
+
   if (!current) return null;
 
   const score = current.ai_score ? parseInt(current.ai_score) : 0;
@@ -482,29 +503,12 @@ function ApplicantCardScanner({
         ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
         : "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200";
 
-  const goPrev = () => setCurrentIndex((i) => Math.max(0, i - 1));
-  const goNext = () => setCurrentIndex((i) => Math.min(sorted.length - 1, i + 1));
-
   const handleAction = (status: string) => {
     onStatusChange(current.applicant_id, status);
     if (currentIndex < sorted.length - 1) {
       setCurrentIndex((i) => i + 1);
     }
   };
-
-  // eslint-disable-next-line react-hooks/rules-of-hooks
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "ArrowLeft") goPrev();
-      else if (e.key === "ArrowRight") goNext();
-      else if (e.key === "1") handleAction("accepted");
-      else if (e.key === "2") handleAction("waitlisted");
-      else if (e.key === "3") handleAction("rejected");
-      else if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  });
 
   return (
     <div className="space-y-4">
