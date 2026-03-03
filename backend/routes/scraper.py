@@ -213,7 +213,7 @@ async def enrich_linkedin(body: LinkedInEnrichRequest):
 
     async def event_stream():
         total = len(applicants)
-        semaphore = asyncio.Semaphore(3)
+        semaphore = asyncio.Semaphore(100)
 
         yield f"event: start\ndata: {json.dumps({'total': total})}\n\n"
 
