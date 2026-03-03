@@ -251,6 +251,40 @@ export interface SSEAdjudicationEvent {
   avg_score: number;
 }
 
+export interface LinkedInEnrichStartEvent {
+  total: number;
+}
+
+export interface LinkedInEnrichProgressEvent {
+  completed: number;
+  total: number;
+  applicant_id: string;
+  name: string;
+  linkedin_headline: string;
+}
+
+export interface LinkedInEnrichErrorEvent {
+  completed: number;
+  total: number;
+  applicant_id: string;
+  name: string;
+  error: string;
+}
+
+export interface LinkedInEnrichCompleteEvent {
+  completed: number;
+  total: number;
+  errors: number;
+  enriched: number;
+}
+
+export interface LinkedInEnrichCallbacks {
+  onStart?: (data: LinkedInEnrichStartEvent) => void;
+  onProgress?: (data: LinkedInEnrichProgressEvent) => void;
+  onError?: (data: LinkedInEnrichErrorEvent) => void;
+  onComplete?: (data: LinkedInEnrichCompleteEvent) => void;
+}
+
 export interface AnalyzeStreamCallbacks {
   onStart?: (data: SSEStartEvent) => void;
   onPhase?: (data: SSEPhaseEvent) => void;
@@ -464,4 +498,48 @@ export const api = {
 
   // Admin
   getAdminSessions: () => fetchAPI<AdminSession[]>("/admin/sessions"),
+
+  // LinkedIn Enrichment (SSE)
+  enrichLinkedInStream: async (
+    data: { session_id: string; applicant_ids?: string[] },
+    callbacks: LinkedInEnrichCallbacks,
+  ) => {
+    const res = await fetch(`${API_URL}/scraper/enrich-linkedin`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(error.detail || "Enrich request failed");
+    }
+
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      let eventType = "";
+      for (const line of lines) {
+        if (line.startsWith("event: ")) {
+          eventType = line.slice(7).trim();
+        } else if (line.startsWith("data: ") && eventType) {
+          const parsed = JSON.parse(line.slice(6));
+          if (eventType === "start") callbacks.onStart?.(parsed);
+          else if (eventType === "progress") callbacks.onProgress?.(parsed);
+          else if (eventType === "error") callbacks.onError?.(parsed);
+          else if (eventType === "complete") callbacks.onComplete?.(parsed);
+          eventType = "";
+        }
+      }
+    }
+  },
 };

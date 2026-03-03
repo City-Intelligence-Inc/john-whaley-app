@@ -98,3 +98,10 @@ class SessionCreate(BaseModel):
 class SessionUpdate(BaseModel):
     name: Optional[str] = None
     status: Optional[str] = None    # "active", "archived"
+
+
+# ── LinkedIn Enrichment ──
+
+class LinkedInEnrichRequest(BaseModel):
+    session_id: str
+    applicant_ids: Optional[list[str]] = None  # None = enrich all with linkedin_url

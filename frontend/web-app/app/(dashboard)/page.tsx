@@ -1021,6 +1021,10 @@ export default function Page() {
   } | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
 
+  // LinkedIn enrichment state
+  const [enriching, setEnriching] = useState(false);
+  const [enrichProgress, setEnrichProgress] = useState<{ completed: number; total: number; errors: number } | null>(null);
+
   // Console log state
   const [logs, setLogs] = useState<{ time: string; message: string; color?: string }[]>([]);
   const logRef = useRef<HTMLDivElement>(null);
@@ -1185,6 +1189,43 @@ export default function Page() {
       refreshApplicants();
     }
     setShowImportDialog(false);
+  };
+
+  // LinkedIn enrichment
+  const handleEnrichLinkedIn = async () => {
+    if (!activeSessionId) return;
+    setEnriching(true);
+    setEnrichProgress(null);
+
+    try {
+      await api.enrichLinkedInStream(
+        { session_id: activeSessionId },
+        {
+          onStart: (data) => {
+            setEnrichProgress({ completed: 0, total: data.total, errors: 0 });
+            toast.info(`Enriching ${data.total} LinkedIn profiles...`);
+          },
+          onProgress: (data) => {
+            setEnrichProgress({ completed: data.completed, total: data.total, errors: 0 });
+          },
+          onError: (data) => {
+            setEnrichProgress({ completed: data.completed, total: data.total, errors: data.total - data.completed });
+          },
+          onComplete: (data) => {
+            setEnrichProgress({ completed: data.completed, total: data.total, errors: data.errors });
+            toast.success(`LinkedIn enrichment complete`, {
+              description: `${data.enriched} enriched, ${data.errors} errors`,
+            });
+            refreshApplicants();
+          },
+        },
+      );
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      toast.error("LinkedIn enrichment failed", { description: msg });
+    } finally {
+      setEnriching(false);
+    }
   };
 
   // Analyze
@@ -1794,6 +1835,28 @@ export default function Page() {
             </DropdownMenu>
           )}
 
+          <Button
+            variant="outline"
+            onClick={() => {
+              if ((stats?.total ?? 0) === 0) {
+                toast.error("No applicants to enrich", { description: "Import applicants first." });
+                return;
+              }
+              handleEnrichLinkedIn();
+            }}
+            size="sm"
+            className="h-9"
+            disabled={enriching}
+          >
+            {enriching ? (
+              <Loader2 className="size-4 mr-1.5 animate-spin" />
+            ) : (
+              <Linkedin className="size-4 mr-1.5" />
+            )}
+            {enriching
+              ? `Enriching${enrichProgress ? ` ${enrichProgress.completed}/${enrichProgress.total}` : "..."}`
+              : "Enrich LinkedIn"}
+          </Button>
           <Button
             onClick={() => {
               if ((stats?.total ?? 0) === 0) {

@@ -14,6 +14,7 @@ from routes.analysis import router as analysis_router
 from routes.settings import router as settings_router
 from routes.sessions import router as sessions_router
 from routes.admin import router as admin_router
+from routes.scraper import router as scraper_router
 
 app = FastAPI(title="John Whaley Applicant Reviewer")
 
@@ -35,6 +36,7 @@ app.include_router(import_router)
 app.include_router(analysis_router)
 app.include_router(settings_router)
 app.include_router(admin_router)
+app.include_router(scraper_router)
 
 
 @app.get("/")
