@@ -1532,11 +1532,7 @@ export default function Page() {
   }, [applicants, statusFilter, searchQuery, sortBy, sortDir]);
 
   // Dynamic table columns — derived from actual applicant data
-  const HIDDEN_KEYS = new Set([
-    "applicant_id", "session_id",
-    "ai_review", "ai_reasoning", "panel_votes", "accepting_judges",
-    "linkedin_url", "linkedin_about", "linkedin_experience",
-  ]);
+  const HIDDEN_KEYS = new Set(["applicant_id", "session_id"]);
   // Priority columns shown first (if they exist in data)
   const PRIORITY_COLS = ["name", "email", "title", "company", "location", "ai_score", "status", "attendee_type"];
 
@@ -1561,7 +1557,11 @@ export default function Page() {
     name: "Name", email: "Email", title: "Title", company: "Company",
     location: "Location", ai_score: "Score", status: "Status",
     attendee_type: "Type", attendee_type_detail: "Type Detail",
-    linkedin_headline: "Headline", education: "Education",
+    linkedin_headline: "Headline", linkedin_about: "About",
+    linkedin_experience: "Experience", linkedin_url: "LinkedIn URL",
+    education: "Education", ai_review: "AI Review",
+    ai_reasoning: "AI Reasoning", panel_votes: "Panel Votes",
+    accepting_judges: "Accepting Judges",
   };
 
   const handleExportCSV = useCallback(() => {
