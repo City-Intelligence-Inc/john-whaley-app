@@ -8,6 +8,16 @@ export interface Session {
   source_detail?: string;
   applicant_count: number;
   status: string;
+  last_analysis_model?: string;
+  last_analysis_provider?: string;
+  last_analysis_prompt?: string;
+  last_analysis_criteria?: string[];
+  selection_preferences?: SelectionPreferences;
+  panel_config?: PanelConfig;
+}
+
+export interface AdminSession extends Session {
+  stats: Stats;
 }
 
 export interface Applicant {
@@ -440,4 +450,7 @@ export const api = {
     fetchAPI<{ id: string; name: string; emoji: string; specialty: string; description: string; preferred_types: string[] }[]>(
       "/settings/judge-personas"
     ),
+
+  // Admin
+  getAdminSessions: () => fetchAPI<AdminSession[]>("/admin/sessions"),
 };

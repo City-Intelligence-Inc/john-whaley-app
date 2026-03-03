@@ -13,6 +13,7 @@ from routes.import_data import router as import_router
 from routes.analysis import router as analysis_router
 from routes.settings import router as settings_router
 from routes.sessions import router as sessions_router
+from routes.admin import router as admin_router
 
 app = FastAPI(title="John Whaley Applicant Reviewer")
 
@@ -33,6 +34,7 @@ app.include_router(applicants_router)
 app.include_router(import_router)
 app.include_router(analysis_router)
 app.include_router(settings_router)
+app.include_router(admin_router)
 
 
 @app.get("/")

@@ -1,6 +1,11 @@
 "use client";
 
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+
 export function AppShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+
   return (
     <div className="min-h-screen flex flex-col">
       <header className="flex h-16 items-center border-b px-6 bg-[#8C1515]">
@@ -17,6 +22,28 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </span>
           </div>
         </div>
+        <nav className="ml-8 flex gap-1">
+          <Link
+            href="/"
+            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+              pathname === "/"
+                ? "bg-white/20 text-white"
+                : "text-white/70 hover:bg-white/10 hover:text-white"
+            }`}
+          >
+            Review
+          </Link>
+          <Link
+            href="/admin"
+            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+              pathname === "/admin"
+                ? "bg-white/20 text-white"
+                : "text-white/70 hover:bg-white/10 hover:text-white"
+            }`}
+          >
+            Admin
+          </Link>
+        </nav>
       </header>
       <main className="flex-1 overflow-auto p-6 sm:p-8">
         <div className="mx-auto max-w-7xl">{children}</div>

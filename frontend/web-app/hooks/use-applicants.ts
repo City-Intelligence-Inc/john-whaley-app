@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { api, type Applicant, type Stats, type PromptSettings, type Session } from "@/lib/api";
+import { api, type Applicant, type Stats, type PromptSettings, type Session, type AdminSession } from "@/lib/api";
 
 export function useApplicants(sessionId?: string) {
   const [applicants, setApplicants] = useState<Applicant[]>([]);
@@ -126,4 +126,29 @@ export function usePromptSettings() {
   }, [refresh]);
 
   return { settings, loading, error, refresh };
+}
+
+export function useAdminSessions() {
+  const [sessions, setSessions] = useState<AdminSession[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      setLoading(true);
+      const data = await api.getAdminSessions();
+      setSessions(data);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to fetch admin sessions");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  return { sessions, loading, error, refresh };
 }
