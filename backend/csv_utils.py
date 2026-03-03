@@ -4,6 +4,13 @@ Shared CSV parsing logic used by both CSV upload and Google Sheets import.
 
 import csv
 import io
+import re
+
+# Column names that should be normalized to "linkedin_url"
+_LINKEDIN_KEY_PATTERNS = re.compile(
+    r"^(linkedin|linkedin_url|linkedin_profile|linkedin_link|"
+    r"linkedin_profile_url|profile_url|li_url|linked_in)$"
+)
 
 
 def parse_csv_rows(text: str) -> list[dict]:
@@ -12,6 +19,8 @@ def parse_csv_rows(text: str) -> list[dict]:
     - Lowercases and snake_cases column headers
     - Strips whitespace from values
     - Auto-constructs 'name' from first_name + last_name if missing
+    - Normalizes LinkedIn URL columns (any header variant → linkedin_url)
+    - Detects linkedin.com URLs in any column and maps to linkedin_url
     - Skips empty rows
     """
     reader = csv.DictReader(io.StringIO(text))
@@ -33,6 +42,22 @@ def parse_csv_rows(text: str) -> list[dict]:
             last = item.get("last_name", "")
             if first or last:
                 item["name"] = f"{first} {last}".strip()
+
+        # Normalize LinkedIn URL: known header variants → linkedin_url
+        if "linkedin_url" not in item:
+            for k in list(item.keys()):
+                if _LINKEDIN_KEY_PATTERNS.match(k):
+                    item["linkedin_url"] = item.pop(k)
+                    break
+
+        # Fallback: detect linkedin.com URLs in any value
+        if "linkedin_url" not in item:
+            for k, v in list(item.items()):
+                if "linkedin.com/" in v:
+                    item["linkedin_url"] = v
+                    if k != "linkedin_url":
+                        del item[k]
+                    break
 
         rows.append(item)
 
