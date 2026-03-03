@@ -104,4 +104,5 @@ class SessionUpdate(BaseModel):
 
 class LinkedInEnrichRequest(BaseModel):
     session_id: str
+    scrapfly_key: str
     applicant_ids: Optional[list[str]] = None  # None = enrich all with linkedin_url

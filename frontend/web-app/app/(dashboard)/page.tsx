@@ -1031,6 +1031,8 @@ export default function Page() {
   const [showEnrichDialog, setShowEnrichDialog] = useState(false);
   const [enrichLogs, setEnrichLogs] = useState<{ time: string; message: string; color?: string }[]>([]);
   const enrichLogRef = useRef<HTMLDivElement>(null);
+  const [scrapflyKey, setScrapflyKey] = useState("");
+  const [showScrapflyKeyInput, setShowScrapflyKeyInput] = useState(false);
 
   // Console log state
   const [logs, setLogs] = useState<{ time: string; message: string; color?: string }[]>([]);
@@ -1047,6 +1049,7 @@ export default function Page() {
     setApiKey(savedKey);
     setProvider(savedProvider);
     setModel(savedModel);
+    setScrapflyKey(localStorage.getItem("scrapfly_key") || "");
     if (savedSheetUrl) {
       setSheetUrl(savedSheetUrl);
       setSheetConnected(true);
@@ -1206,6 +1209,14 @@ export default function Page() {
   // LinkedIn enrichment
   const handleEnrichLinkedIn = async () => {
     if (!activeSessionId) return;
+    if (!scrapflyKey.trim()) {
+      setShowScrapflyKeyInput(true);
+      toast.error("Scrapfly API key required", { description: "Enter your Scrapfly key to scrape LinkedIn profiles." });
+      return;
+    }
+    // Persist key
+    localStorage.setItem("scrapfly_key", scrapflyKey);
+
     setEnriching(true);
     setEnrichProgress(null);
     setEnrichLogs([]);
@@ -1220,7 +1231,7 @@ export default function Page() {
 
     try {
       await api.enrichLinkedInStream(
-        { session_id: activeSessionId },
+        { session_id: activeSessionId, scrapfly_key: scrapflyKey },
         {
           onStart: (data) => {
             setEnrichProgress({ completed: 0, total: data.total, errors: 0 });
@@ -1880,28 +1891,65 @@ export default function Page() {
             </DropdownMenu>
           )}
 
-          <Button
-            variant="outline"
-            onClick={() => {
-              if ((stats?.total ?? 0) === 0) {
-                toast.error("No applicants to enrich", { description: "Import applicants first." });
-                return;
-              }
-              handleEnrichLinkedIn();
-            }}
-            size="sm"
-            className="h-9"
-            disabled={enriching}
-          >
-            {enriching ? (
-              <Loader2 className="size-4 mr-1.5 animate-spin" />
-            ) : (
-              <Linkedin className="size-4 mr-1.5" />
-            )}
-            {enriching
-              ? `Enriching${enrichProgress ? ` ${enrichProgress.completed}/${enrichProgress.total}` : "..."}`
-              : "Enrich LinkedIn"}
-          </Button>
+          <Popover open={showScrapflyKeyInput} onOpenChange={setShowScrapflyKeyInput}>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  if ((stats?.total ?? 0) === 0) {
+                    toast.error("No applicants to enrich", { description: "Import applicants first." });
+                    return;
+                  }
+                  if (!scrapflyKey.trim()) {
+                    setShowScrapflyKeyInput(true);
+                  } else {
+                    handleEnrichLinkedIn();
+                  }
+                }}
+                size="sm"
+                className="h-9"
+                disabled={enriching}
+              >
+                {enriching ? (
+                  <Loader2 className="size-4 mr-1.5 animate-spin" />
+                ) : (
+                  <Linkedin className="size-4 mr-1.5" />
+                )}
+                {enriching
+                  ? `Enriching${enrichProgress ? ` ${enrichProgress.completed}/${enrichProgress.total}` : "..."}`
+                  : "Enrich LinkedIn"}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-80" align="end">
+              <div className="space-y-3">
+                <div>
+                  <Label className="text-sm font-medium">Scrapfly API Key</Label>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Get a key at <a href="https://scrapfly.io" target="_blank" rel="noopener noreferrer" className="underline">scrapfly.io</a>
+                  </p>
+                </div>
+                <Input
+                  type="password"
+                  placeholder="scp-live-..."
+                  value={scrapflyKey}
+                  onChange={(e) => setScrapflyKey(e.target.value)}
+                  className="h-9 font-mono text-sm"
+                />
+                <Button
+                  size="sm"
+                  className="w-full"
+                  disabled={!scrapflyKey.trim()}
+                  onClick={() => {
+                    setShowScrapflyKeyInput(false);
+                    handleEnrichLinkedIn();
+                  }}
+                >
+                  <Linkedin className="size-4 mr-1.5" />
+                  Start Enrichment
+                </Button>
+              </div>
+            </PopoverContent>
+          </Popover>
           <Button
             onClick={() => {
               if ((stats?.total ?? 0) === 0) {

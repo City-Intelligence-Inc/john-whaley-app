@@ -502,7 +502,7 @@ export const api = {
 
   // LinkedIn Enrichment (SSE)
   enrichLinkedInStream: async (
-    data: { session_id: string; applicant_ids?: string[] },
+    data: { session_id: string; scrapfly_key: string; applicant_ids?: string[] },
     callbacks: LinkedInEnrichCallbacks,
   ) => {
     const res = await fetch(`${API_URL}/scraper/enrich-linkedin`, {

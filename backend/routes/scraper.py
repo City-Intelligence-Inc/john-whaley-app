@@ -18,7 +18,6 @@ import db
 
 router = APIRouter(prefix="/scraper", tags=["scraper"])
 
-SCRAPFLY_API_KEY = "scp-live-1f7113a94c354ba6a7b48579550afc47"
 SCRAPFLY_URL = "https://api.scrapfly.io/scrape"
 
 
@@ -130,6 +129,7 @@ async def _scrape_one(
     client: httpx.AsyncClient,
     applicant: dict,
     semaphore: asyncio.Semaphore,
+    api_key: str,
 ) -> dict:
     """Scrape a single LinkedIn profile with retries on rate limits."""
     applicant_id = applicant["applicant_id"]
@@ -143,7 +143,7 @@ async def _scrape_one(
                 resp = await client.get(
                     SCRAPFLY_URL,
                     params={
-                        "key": SCRAPFLY_API_KEY,
+                        "key": api_key,
                         "url": linkedin_url,
                         "render_js": "true",
                         "asp": "true",
@@ -242,7 +242,7 @@ async def enrich_linkedin(body: LinkedInEnrichRequest):
         async with httpx.AsyncClient() as client:
             tasks = {
                 asyncio.ensure_future(
-                    _scrape_one(client, a, semaphore)
+                    _scrape_one(client, a, semaphore, body.scrapfly_key)
                 ): a
                 for a in applicants
             }
