@@ -261,6 +261,7 @@ export interface LinkedInEnrichProgressEvent {
   applicant_id: string;
   name: string;
   linkedin_headline: string;
+  retries: number;
 }
 
 export interface LinkedInEnrichErrorEvent {

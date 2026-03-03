@@ -122,69 +122,87 @@ def _parse_linkedin_markdown(md: str) -> dict[str, str]:
     return result
 
 
+MAX_RETRIES = 3
+RETRY_BACKOFF = [2, 5, 10]  # seconds between retries
+
+
 async def _scrape_one(
     client: httpx.AsyncClient,
     applicant: dict,
     semaphore: asyncio.Semaphore,
 ) -> dict:
-    """Scrape a single LinkedIn profile and save extracted fields."""
+    """Scrape a single LinkedIn profile with retries on rate limits."""
     applicant_id = applicant["applicant_id"]
     name = applicant.get("name", "Unknown")
     linkedin_url = applicant.get("linkedin_url", "")
 
     async with semaphore:
-        try:
-            resp = await client.get(
-                SCRAPFLY_URL,
-                params={
-                    "key": SCRAPFLY_API_KEY,
-                    "url": linkedin_url,
-                    "render_js": "true",
-                    "asp": "true",
-                    "country": "us",
-                    "format": "markdown",
-                },
-                timeout=60.0,
-            )
-            resp.raise_for_status()
+        last_error = ""
+        for attempt in range(MAX_RETRIES):
+            try:
+                resp = await client.get(
+                    SCRAPFLY_URL,
+                    params={
+                        "key": SCRAPFLY_API_KEY,
+                        "url": linkedin_url,
+                        "render_js": "true",
+                        "asp": "true",
+                        "country": "us",
+                        "format": "markdown",
+                    },
+                    timeout=60.0,
+                )
+                resp.raise_for_status()
 
-            data = resp.json()
-            md = data.get("result", {}).get("content", "")
-            if not md:
+                data = resp.json()
+                md = data.get("result", {}).get("content", "")
+                if not md:
+                    return {
+                        "applicant_id": applicant_id,
+                        "name": name,
+                        "error": "Empty response from Scrapfly",
+                    }
+
+                fields = _parse_linkedin_markdown(md)
+                if not fields:
+                    return {
+                        "applicant_id": applicant_id,
+                        "name": name,
+                        "error": "Could not parse any fields from profile",
+                    }
+
+                db.update_applicant_fields(applicant_id, fields)
+
                 return {
                     "applicant_id": applicant_id,
                     "name": name,
-                    "error": "Empty response from Scrapfly",
+                    "linkedin_headline": fields.get("linkedin_headline", ""),
+                    "retries": attempt,
                 }
 
-            fields = _parse_linkedin_markdown(md)
-            if not fields:
-                return {
-                    "applicant_id": applicant_id,
-                    "name": name,
-                    "error": "Could not parse any fields from profile",
-                }
+            except httpx.HTTPStatusError as e:
+                status = e.response.status_code
+                last_error = f"Scrapfly HTTP {status}"
+                # Retry on rate limit (429) or server errors (5xx)
+                if status in (429, 500, 502, 503) and attempt < MAX_RETRIES - 1:
+                    await asyncio.sleep(RETRY_BACKOFF[attempt])
+                    continue
+                break
+            except (httpx.ReadTimeout, httpx.ConnectTimeout) as e:
+                last_error = f"Timeout: {e}"
+                if attempt < MAX_RETRIES - 1:
+                    await asyncio.sleep(RETRY_BACKOFF[attempt])
+                    continue
+                break
+            except Exception as e:
+                last_error = str(e)
+                break
 
-            db.update_applicant_fields(applicant_id, fields)
-
-            return {
-                "applicant_id": applicant_id,
-                "name": name,
-                "linkedin_headline": fields.get("linkedin_headline", ""),
-            }
-
-        except httpx.HTTPStatusError as e:
-            return {
-                "applicant_id": applicant_id,
-                "name": name,
-                "error": f"Scrapfly HTTP {e.response.status_code}",
-            }
-        except Exception as e:
-            return {
-                "applicant_id": applicant_id,
-                "name": name,
-                "error": str(e),
-            }
+        return {
+            "applicant_id": applicant_id,
+            "name": name,
+            "error": f"{last_error} (after {attempt + 1} attempts)",
+        }
 
 
 @router.post("/enrich-linkedin")
@@ -238,7 +256,7 @@ async def enrich_linkedin(body: LinkedInEnrichRequest):
                     yield f"event: error\ndata: {json.dumps({'completed': completed, 'total': total, 'applicant_id': result['applicant_id'], 'name': result['name'], 'error': result['error']})}\n\n"
                 else:
                     enriched += 1
-                    yield f"event: progress\ndata: {json.dumps({'completed': completed, 'total': total, 'applicant_id': result['applicant_id'], 'name': result['name'], 'linkedin_headline': result.get('linkedin_headline', '')})}\n\n"
+                    yield f"event: progress\ndata: {json.dumps({'completed': completed, 'total': total, 'applicant_id': result['applicant_id'], 'name': result['name'], 'linkedin_headline': result.get('linkedin_headline', ''), 'retries': result.get('retries', 0)})}\n\n"
 
         yield f"event: complete\ndata: {json.dumps({'completed': completed, 'total': total, 'errors': errors, 'enriched': enriched})}\n\n"
 

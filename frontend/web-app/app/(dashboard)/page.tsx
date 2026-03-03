@@ -1028,6 +1028,9 @@ export default function Page() {
   // LinkedIn enrichment state
   const [enriching, setEnriching] = useState(false);
   const [enrichProgress, setEnrichProgress] = useState<{ completed: number; total: number; errors: number } | null>(null);
+  const [showEnrichDialog, setShowEnrichDialog] = useState(false);
+  const [enrichLogs, setEnrichLogs] = useState<{ time: string; message: string; color?: string }[]>([]);
+  const enrichLogRef = useRef<HTMLDivElement>(null);
 
   // Console log state
   const [logs, setLogs] = useState<{ time: string; message: string; color?: string }[]>([]);
@@ -1099,12 +1102,17 @@ export default function Page() {
     }
   }, [personaEdits]);
 
-  // Auto-scroll console log
+  // Auto-scroll console logs
   useEffect(() => {
     if (logRef.current) {
       logRef.current.scrollTop = logRef.current.scrollHeight;
     }
   }, [logs]);
+  useEffect(() => {
+    if (enrichLogRef.current) {
+      enrichLogRef.current.scrollTop = enrichLogRef.current.scrollHeight;
+    }
+  }, [enrichLogs]);
 
   // Google Sheets sync
   const syncGoogleSheet = useCallback(async (url?: string) => {
@@ -1200,6 +1208,15 @@ export default function Page() {
     if (!activeSessionId) return;
     setEnriching(true);
     setEnrichProgress(null);
+    setEnrichLogs([]);
+    setShowEnrichDialog(true);
+
+    const elog = (msg: string, color?: string) => {
+      const time = new Date().toLocaleTimeString("en-US", { hour12: false });
+      setEnrichLogs((prev) => [...prev, { time, message: msg, color }]);
+    };
+
+    elog("Starting LinkedIn enrichment via Scrapfly...");
 
     try {
       await api.enrichLinkedInStream(
@@ -1207,26 +1224,33 @@ export default function Page() {
         {
           onStart: (data) => {
             setEnrichProgress({ completed: 0, total: data.total, errors: 0 });
-            toast.info(`Enriching ${data.total} LinkedIn profiles...`);
+            elog(`Found ${data.total} profiles to scrape (concurrency: 100, retries: 3)`);
+            elog("═".repeat(50), "#6366f1");
           },
           onProgress: (data) => {
             setEnrichProgress({ completed: data.completed, total: data.total, errors: 0 });
+            const retryNote = data.retries > 0 ? ` (${data.retries} retries)` : "";
+            elog(`[${data.completed}/${data.total}] ${data.name}  ·  ${data.linkedin_headline || "no headline"}${retryNote}`, "#22c55e");
           },
           onError: (data) => {
-            setEnrichProgress({ completed: data.completed, total: data.total, errors: data.total - data.completed });
+            setEnrichProgress((prev) => ({
+              completed: data.completed,
+              total: data.total,
+              errors: (prev?.errors || 0) + 1,
+            }));
+            elog(`[${data.completed}/${data.total}] ${data.name}  ·  FAILED: ${data.error}`, "#ef4444");
           },
           onComplete: (data) => {
             setEnrichProgress({ completed: data.completed, total: data.total, errors: data.errors });
-            toast.success(`LinkedIn enrichment complete`, {
-              description: `${data.enriched} enriched, ${data.errors} errors`,
-            });
+            elog("═".repeat(50), "#6366f1");
+            elog(`Done: ${data.enriched} enriched, ${data.errors} errors`, data.errors > 0 ? "#eab308" : "#22c55e");
             refreshApplicants();
           },
         },
       );
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Unknown error";
-      toast.error("LinkedIn enrichment failed", { description: msg });
+      elog(`Fatal error: ${msg}`, "#ef4444");
     } finally {
       setEnriching(false);
     }
@@ -3023,6 +3047,58 @@ export default function Page() {
       </Dialog>
 
       {/* Analysis Dialog */}
+      {/* Enrichment Progress Dialog */}
+      <Dialog open={showEnrichDialog} onOpenChange={(open) => { if (!enriching) setShowEnrichDialog(open); }}>
+        <DialogContent className="max-w-[95vw] sm:max-w-2xl max-h-[90vh] overflow-y-auto" showCloseButton={!enriching}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {enriching ? (
+                <Loader2 className="size-5 animate-spin text-primary" />
+              ) : (
+                <CheckCircle2 className="size-5 text-green-500" />
+              )}
+              {enriching ? "Scraping LinkedIn Profiles..." : "LinkedIn Enrichment Complete"}
+            </DialogTitle>
+            <DialogDescription>
+              {enriching
+                ? "Scraping public LinkedIn profiles via Scrapfly. Rate-limited requests auto-retry."
+                : "All profiles have been processed."}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {enrichProgress && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">
+                    {enrichProgress.completed} of {enrichProgress.total} profiles
+                  </span>
+                  <span className="font-mono">
+                    {enrichProgress.total > 0 ? Math.round((enrichProgress.completed / enrichProgress.total) * 100) : 0}%
+                    {enrichProgress.errors > 0 && (
+                      <span className="text-red-500 ml-2">
+                        ({enrichProgress.errors} {enrichProgress.errors === 1 ? "error" : "errors"})
+                      </span>
+                    )}
+                  </span>
+                </div>
+                <Progress value={(enrichProgress.completed / enrichProgress.total) * 100} className="h-2.5" />
+              </div>
+            )}
+
+            <ConsoleLog logs={enrichLogs} logRef={enrichLogRef} />
+          </div>
+
+          {!enriching && (
+            <DialogFooter>
+              <Button onClick={() => setShowEnrichDialog(false)}>
+                Close
+              </Button>
+            </DialogFooter>
+          )}
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={showAnalysisDialog} onOpenChange={(open) => { if (!analyzing) setShowAnalysisDialog(open); }}>
         <DialogContent className="max-w-[95vw] sm:max-w-2xl max-h-[90vh] overflow-y-auto" showCloseButton={!analyzing}>
           <DialogHeader>
