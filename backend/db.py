@@ -66,10 +66,10 @@ def update_session_fields(session_id: str, fields: dict) -> dict:
 
 
 def delete_session(session_id: str) -> None:
-    """Delete a session and cascade-delete all its applicants."""
+    """Delete all applicants for a session but preserve the session record."""
     get_session_or_404(session_id)
     delete_all_applicants(session_id=session_id)
-    sessions_table.delete_item(Key={"session_id": session_id})
+    update_session_fields(session_id, {"applicant_count": 0, "status": "cleared"})
 
 
 def _update_session_count(session_id: str) -> None:

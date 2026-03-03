@@ -143,9 +143,7 @@ Rank them by score (highest first). Return ONLY the JSON, no other text."""
 
 # Pass 1: Classification only — no scoring or decisions
 _CLASSIFY_PROMPT = """
-EVENT CONTEXT: CS 224G Demo Day & Poster Session at Stanford (March 19, 2026).
-CS 224G is Stanford's course on building LLM-powered applications. The event showcases
-student projects to VCs, entrepreneurs, faculty, alumni, press, and other students.
+{event_context}
 
 Here is the applicant's information:
 
@@ -160,17 +158,17 @@ Rules:
 - "vc" = VC partner, angel investor, fund manager, investing professional
 - "entrepreneur" = Founder, CEO, CTO, startup executive actively running/building a company
 - "faculty" = Professor, researcher, academic staff, postdoc at any university
-- "alumni" = Stanford or CS 224G alumni NOT primarily a VC/founder/professor now
+- "alumni" = Alumni NOT primarily a VC/founder/professor now
 - "press" = Journalist, reporter, tech media, blogger covering technology
 - "student" = Currently enrolled student at any university
 - "other" = Everyone else (industry engineers, PMs, designers, consultants, etc.)
 
-Classify by CURRENT primary role (Stanford alum now a VC → "vc").
+Classify by CURRENT primary role (alum now a VC → "vc").
 
 For attendee_type_detail, use a BROAD role category (not a specific job title):
 - Good: "Engineer", "Product Manager", "Designer", "Data Scientist", "Consultant", "Executive", "Ops/DevOps", "Security", "Research Scientist"
 - Bad: "Senior Staff Platform Infrastructure Engineer" — too specific, just say "Engineer"
-- For non-"other" types: use a short descriptor like "Seed VC", "AI Startup Founder", "CS Professor", "CS 224G Alum", "Tech Reporter", "MS Student"
+- For non-"other" types: use a short descriptor like "Seed VC", "AI Startup Founder", "CS Professor", "Alum", "Tech Reporter", "MS Student"
 
 Return ONLY the JSON, no other text.
 """.strip()
@@ -179,8 +177,7 @@ Return ONLY the JSON, no other text.
 _SCORE_PROMPT = """
 {base_prompt}{criteria}
 
-EVENT CONTEXT: CS 224G Demo Day & Poster Session at Stanford (March 19, 2026).
-CS 224G is Stanford's course on building LLM-powered applications.
+{event_context}
 {selection_context}
 APPLICANT POOL CONTEXT — here is the current distribution of all {total} applicants:
 {pool_summary}
@@ -192,7 +189,7 @@ You are now scoring this specific applicant:
 This person was classified as: {attendee_type} ({attendee_type_detail})
 
 Score this applicant relative to the FULL POOL. Consider:
-1. How relevant is this person to a demo day showcasing LLM-powered student projects?
+1. How relevant is this person to the event?
 2. How much value would they add as an attendee (networking, feedback, investment, press coverage)?
 3. Given the pool distribution, do we need more people like them?
 
@@ -214,7 +211,7 @@ Return ONLY the JSON, no other text.
 
 # Pass 3: Overall summary prompt
 _SUMMARY_PROMPT = """
-You just finished reviewing {total} applicants for CS 224G Demo Day at Stanford.
+You just finished reviewing {total} applicants for an event.
 
 Here are the results:
 - {accepted} accepted{auto_accepted_note}
@@ -252,8 +249,7 @@ You have been allocated {seats_allocated} seats to fill from this pool. Choose w
 
 {base_prompt}{criteria}
 
-EVENT CONTEXT: CS 224G Demo Day & Poster Session at Stanford (March 19, 2026).
-CS 224G is Stanford's course on building LLM-powered applications.
+{event_context}
 {selection_context}
 APPLICANT POOL CONTEXT — {total} applicants total:
 {pool_summary}
@@ -305,6 +301,7 @@ async def _judge_score_one(
             seats_allocated=seats_allocated,
             base_prompt=body.prompt,
             criteria=_criteria_text(body.criteria, body.criteria_weights),
+            event_context=f"EVENT CONTEXT: {body.prompt}" if body.prompt else "",
             selection_context=_selection_context(body.selection_preferences),
             total=total,
             pool_summary=pool_summary,
@@ -373,7 +370,7 @@ def _selection_context(prefs: SelectionPreferences | None) -> str:
     if prefs.attendee_mix:
         type_labels = {
             "vc": "VCs / Investors", "entrepreneur": "Founders / Entrepreneurs",
-            "faculty": "Faculty / Researchers", "alumni": "Stanford Alumni",
+            "faculty": "Faculty / Researchers", "alumni": "Alumni",
             "press": "Press / Media", "student": "Students", "other": "Other",
         }
         mix_lines = [f"  - {type_labels.get(k, k)}: {v}%" for k, v in prefs.attendee_mix.items() if v > 0]
@@ -400,7 +397,10 @@ async def _classify_one(applicant: dict, body: BulkAnalyzeRequest, semaphore: as
     name = applicant.get("name", "Unknown")
 
     async with semaphore:
-        prompt = _CLASSIFY_PROMPT.format(info=_applicant_info_text(applicant))
+        prompt = _CLASSIFY_PROMPT.format(
+            event_context=f"EVENT CONTEXT: {body.prompt}" if body.prompt else "",
+            info=_applicant_info_text(applicant),
+        )
 
         try:
             raw = await call_ai_async(body.provider, body.api_key, body.model, prompt)
@@ -437,6 +437,7 @@ async def _score_one(applicant: dict, body: BulkAnalyzeRequest, pool_summary: st
         prompt = _SCORE_PROMPT.format(
             base_prompt=body.prompt,
             criteria=_criteria_text(body.criteria, body.criteria_weights),
+            event_context=f"EVENT CONTEXT: {body.prompt}" if body.prompt else "",
             selection_context=_selection_context(body.selection_preferences),
             total=total,
             pool_summary=pool_summary,
@@ -480,7 +481,7 @@ def _build_pool_summary(type_counts: dict[str, int], total: int) -> str:
         "vc": "VCs / Investors",
         "entrepreneur": "Founders / Entrepreneurs",
         "faculty": "Faculty / Researchers",
-        "alumni": "Stanford Alumni",
+        "alumni": "Alumni",
         "press": "Press / Media",
         "student": "Students",
         "other": "Other (Industry professionals)",

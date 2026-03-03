@@ -43,4 +43,4 @@ def update_session(session_id: str, body: SessionUpdate):
 @router.delete("/{session_id}")
 def delete_session(session_id: str):
     db.delete_session(session_id)
-    return {"detail": "Session and its applicants deleted"}
+    return {"detail": "Applicant data deleted. Session record preserved."}

@@ -31,7 +31,7 @@ const ATTENDEE_TYPES = [
   { key: "vc", label: "VCs / Investors" },
   { key: "entrepreneur", label: "Founders / Entrepreneurs" },
   { key: "faculty", label: "Faculty / Researchers" },
-  { key: "alumni", label: "Stanford Alumni" },
+  { key: "alumni", label: "Alumni" },
   { key: "press", label: "Press / Media" },
   { key: "student", label: "Students" },
   { key: "other", label: "Other (Industry)" },
@@ -592,7 +592,6 @@ export function SelectionWizard({
                 <h3 className="text-sm font-semibold mb-1">Auto-Accept Rules</h3>
                 <p className="text-sm text-muted-foreground">
                   Select which attendee types should be automatically accepted (score 100, skip AI scoring).
-                  Stanford affiliates are checked by default.
                 </p>
               </div>
               <div className="space-y-2">

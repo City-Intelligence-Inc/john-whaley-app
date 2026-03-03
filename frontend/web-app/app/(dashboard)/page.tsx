@@ -125,7 +125,7 @@ const ATTENDEE_TYPES: { key: string; label: string; color: string }[] = [
   { key: "vc", label: "VCs / Investors", color: "#6366f1" },
   { key: "entrepreneur", label: "Founders / Entrepreneurs", color: "#f59e0b" },
   { key: "faculty", label: "Faculty / Researchers", color: "#10b981" },
-  { key: "alumni", label: "Stanford Alumni", color: "#3b82f6" },
+  { key: "alumni", label: "Alumni", color: "#3b82f6" },
   { key: "press", label: "Press / Media", color: "#ec4899" },
   { key: "student", label: "Students", color: "#8b5cf6" },
   { key: "other", label: "Other", color: "#6b7280" },
@@ -978,6 +978,10 @@ export default function Page() {
   const [showSettingsDialog, setShowSettingsDialog] = useState(false);
   const [showAnalysisDialog, setShowAnalysisDialog] = useState(false);
 
+  // Pre-analysis wizard state
+  const [showWizard, setShowWizard] = useState(false);
+  const [wizardStep, setWizardStep] = useState(0);
+
   // Selection preferences state
   const [selectionPreferences, setSelectionPreferences] = useState<SelectionPreferences>(DEFAULT_SELECTION_PREFERENCES);
   const [panelConfig, setPanelConfig] = useState<PanelConfig>(DEFAULT_PANEL_CONFIG);
@@ -1000,13 +1004,12 @@ export default function Page() {
 
   // Criteria state
   const [prompt, setPrompt] = useState(
-    "You are evaluating Demo Day applicants for CS 224G (Building & Scaling LLM Applications) at Stanford, Winter 2026. This is a project-based course where student teams build production-ready AI applications over 10 weeks. Evaluate each applicant based on their background and potential to contribute as an attendee/judge at Demo Day on March 19, 2026."
+    "Evaluate each applicant based on their background and relevance to the event."
   );
   const [criteria, setCriteria] = useState<string[]>([
-    "Relevant AI/ML or LLM experience",
+    "Relevant experience and expertise",
     "Industry or academic standing",
-    "Potential to provide valuable feedback to student teams",
-    "Alignment with course themes (agents, RAG, reasoning models)",
+    "Potential to contribute value as an attendee",
   ]);
   const [newCriterion, setNewCriterion] = useState("");
 
@@ -1569,10 +1572,7 @@ export default function Page() {
   const handleDeleteSession = async (sessionId: string) => {
     try {
       await api.deleteSession(sessionId);
-      toast.success("Session deleted");
-      if (activeSessionId === sessionId) {
-        setActiveSessionId(undefined);
-      }
+      toast.success("Applicant data cleared. Session preserved.");
       refreshSessions();
       refreshApplicants();
       refreshStats();
@@ -1644,7 +1644,7 @@ export default function Page() {
               size="icon"
               className="size-10 text-muted-foreground hover:text-destructive"
               onClick={() => {
-                if (confirm("Delete this session and all its applicants?")) {
+                if (confirm("Clear all applicant data for this session? The session and its settings will be preserved.")) {
                   handleDeleteSession(activeSessionId);
                 }
               }}
@@ -1666,6 +1666,40 @@ export default function Page() {
         </div>
       </div>
 
+      {/* Empty-State Onboarding */}
+      {applicants.length === 0 && !loadingApplicants ? (
+        <div className="flex flex-col items-center justify-center py-16 px-4">
+          <div className="text-center mb-8">
+            <h2 className="text-2xl font-bold mb-2">Get Started</h2>
+            <p className="text-muted-foreground">Import your applicants to begin reviewing</p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-lg">
+            <button
+              onClick={() => setShowImportDialog(true)}
+              className="flex flex-col items-center gap-3 rounded-xl border-2 border-dashed border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/50 p-8 transition-colors"
+            >
+              <Upload className="size-10 text-muted-foreground" />
+              <div className="text-center">
+                <div className="font-semibold">Upload CSV File</div>
+                <div className="text-sm text-muted-foreground mt-1">Drop a CSV or click to browse</div>
+              </div>
+            </button>
+            <button
+              onClick={() => {
+                setShowImportDialog(true);
+              }}
+              className="flex flex-col items-center gap-3 rounded-xl border-2 border-dashed border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/50 p-8 transition-colors"
+            >
+              <Sheet className="size-10 text-muted-foreground" />
+              <div className="text-center">
+                <div className="font-semibold">Google Sheet</div>
+                <div className="text-sm text-muted-foreground mt-1">Paste your Sheet URL to connect</div>
+              </div>
+            </button>
+          </div>
+        </div>
+      ) : (
+      <>
       {/* Stats Cards */}
       <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 sm:gap-3">
         {[
@@ -1762,15 +1796,12 @@ export default function Page() {
 
           <Button
             onClick={() => {
-              if (!apiKey.trim()) {
-                toast.error("Add your API key first", { description: "Go to Settings to configure your AI provider and API key.", action: { label: "Open Settings", onClick: () => setShowSettingsDialog(true) } });
-                return;
-              }
               if ((stats?.total ?? 0) === 0) {
                 toast.error("No applicants to analyze", { description: "Import a CSV or connect a Google Sheet first." });
                 return;
               }
-              handleAnalyze();
+              setWizardStep(0);
+              setShowWizard(true);
             }}
             size="sm"
             className="h-9"
@@ -1959,6 +1990,9 @@ export default function Page() {
         }}
         onClose={() => setSelectedApplicantId(null)}
       />
+
+      </>
+      )}
 
       {/* Import Dialog */}
       <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>
@@ -2464,6 +2498,425 @@ export default function Page() {
             >
               Save
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Pre-Analysis Wizard */}
+      <Dialog open={showWizard} onOpenChange={setShowWizard}>
+        <DialogContent className="max-w-[95vw] sm:max-w-lg max-h-[90vh] flex flex-col overflow-hidden">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Brain className="size-5 text-primary" />
+              Run Analysis
+            </DialogTitle>
+            <DialogDescription>
+              Review your settings before starting the analysis.
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Step indicator */}
+          <div className="flex items-center justify-center gap-2 py-1">
+            {["AI Provider", "Review Mode", "Selection Rules", "Prompt & Go"].map((label, i) => (
+              <button
+                key={i}
+                onClick={() => setWizardStep(i)}
+                className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded-full transition-colors ${
+                  i === wizardStep
+                    ? "bg-primary text-primary-foreground"
+                    : i < wizardStep
+                      ? "bg-primary/20 text-primary"
+                      : "bg-muted text-muted-foreground"
+                }`}
+              >
+                <span className="font-medium">{i + 1}</span>
+                <span className="hidden sm:inline">{label}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="flex-1 overflow-y-auto min-h-0 pr-1 space-y-4">
+            {/* Step 1: AI Provider */}
+            {wizardStep === 0 && (
+              <div className="space-y-4">
+                <div>
+                  <h3 className="text-sm font-semibold mb-1">AI Provider</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Choose your AI provider and enter your API key.
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Provider</Label>
+                    <Select value={provider} onValueChange={handleProviderChange}>
+                      <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="anthropic">Anthropic</SelectItem>
+                        <SelectItem value="openai">OpenAI</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Model</Label>
+                    <Select value={model} onValueChange={setModel}>
+                      <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {models.map((m) => (
+                          <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">API Key</Label>
+                  <div className="relative">
+                    <Input
+                      type={showKey ? "text" : "password"}
+                      value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)}
+                      placeholder="Paste your API key here..."
+                      className="pr-10 h-9 text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowKey(!showKey)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    >
+                      {showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Step 2: Review Mode */}
+            {wizardStep === 1 && (
+              <div className="space-y-4">
+                <div>
+                  <h3 className="text-sm font-semibold mb-1">Review Mode</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Choose single reviewer or judge panel mode.
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => setPanelConfig((p) => ({ ...p, enabled: false }))}
+                    className={`flex flex-col items-center gap-1.5 rounded-lg border-2 p-3 transition-colors ${
+                      !panelConfig.enabled ? "border-primary bg-primary/5" : "border-muted hover:bg-muted/50"
+                    }`}
+                  >
+                    <User className="size-6 text-muted-foreground" />
+                    <span className="text-xs font-medium">Single Reviewer</span>
+                    <span className="text-[10px] text-muted-foreground text-center">One AI reviews all applicants</span>
+                  </button>
+                  <button
+                    onClick={() => setPanelConfig((p) => ({ ...p, enabled: true }))}
+                    className={`flex flex-col items-center gap-1.5 rounded-lg border-2 p-3 transition-colors ${
+                      panelConfig.enabled ? "border-primary bg-primary/5" : "border-muted hover:bg-muted/50"
+                    }`}
+                  >
+                    <Users className="size-6 text-muted-foreground" />
+                    <span className="text-xs font-medium">Judge Panel</span>
+                    <span className="text-[10px] text-muted-foreground text-center">Multiple AI judges with unique biases</span>
+                  </button>
+                </div>
+
+                {panelConfig.enabled && (
+                  <div className="space-y-3 rounded-lg border p-3">
+                    <div className="flex items-center gap-3">
+                      <Label className="text-xs whitespace-nowrap">Panel size</Label>
+                      <div className="flex gap-1.5">
+                        {PANEL_SIZES.map((size) => (
+                          <button
+                            key={size}
+                            onClick={() => setPanelConfig((p) => ({
+                              ...p,
+                              panel_size: size,
+                              judge_ids: p.judge_ids.slice(0, size),
+                            }))}
+                            className={`size-8 rounded text-xs font-medium transition-colors ${
+                              panelConfig.panel_size === size ? "bg-primary text-primary-foreground" : "border hover:bg-muted/50"
+                            }`}
+                          >
+                            {size}
+                          </button>
+                        ))}
+                      </div>
+                      <span className="text-xs text-muted-foreground ml-auto">
+                        {panelConfig.judge_ids.length}/{panelConfig.panel_size} picked
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <Label className="text-xs whitespace-nowrap">Accept if</Label>
+                      <RadioGroup
+                        value={panelConfig.adjudication_mode}
+                        onValueChange={(v) => setPanelConfig((p) => ({ ...p, adjudication_mode: v as "union" | "majority" }))}
+                        className="flex gap-3"
+                      >
+                        <label className="flex items-center gap-1.5 cursor-pointer">
+                          <RadioGroupItem value="union" />
+                          <span className="text-xs">Any judge</span>
+                        </label>
+                        <label className="flex items-center gap-1.5 cursor-pointer">
+                          <RadioGroupItem value="majority" />
+                          <span className="text-xs">Majority</span>
+                        </label>
+                      </RadioGroup>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {JUDGE_PERSONAS.map((persona) => {
+                        const isSelected = panelConfig.judge_ids.includes(persona.id);
+                        const isFull = panelConfig.judge_ids.length >= panelConfig.panel_size;
+                        const isDisabled = !isSelected && isFull;
+                        return (
+                          <button
+                            key={persona.id}
+                            onClick={() => {
+                              setPanelConfig((p) => {
+                                const has = p.judge_ids.includes(persona.id);
+                                if (has) return { ...p, judge_ids: p.judge_ids.filter((id) => id !== persona.id) };
+                                if (p.judge_ids.length >= p.panel_size) return p;
+                                return { ...p, judge_ids: [...p.judge_ids, persona.id] };
+                              });
+                            }}
+                            disabled={isDisabled}
+                            className={`flex items-center gap-2 rounded-md border p-2 text-left transition-all ${
+                              isSelected
+                                ? "border-primary bg-primary/5"
+                                : isDisabled
+                                  ? "opacity-40 cursor-not-allowed"
+                                  : "hover:bg-muted/50"
+                            }`}
+                          >
+                            <ShapedEmoji persona={persona} size="sm" />
+                            <div className="min-w-0">
+                              <div className="text-[11px] font-medium leading-tight truncate">{persona.name}</div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Step 3: Selection Rules */}
+            {wizardStep === 2 && (
+              <div className="space-y-4">
+                <div>
+                  <h3 className="text-sm font-semibold mb-1">Selection Rules</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Configure venue capacity, relevance filter, and auto-accept rules.
+                  </p>
+                </div>
+
+                {/* Venue Capacity */}
+                <div className="flex items-center gap-3">
+                  <Label className="text-xs whitespace-nowrap w-24">Venue capacity</Label>
+                  {selectionPreferences.venue_capacity === null ? (
+                    <button
+                      onClick={() => setSelectionPreferences((p) => ({ ...p, venue_capacity: 200 }))}
+                      className="text-xs text-muted-foreground hover:text-foreground underline"
+                    >
+                      No limit (click to set)
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        min={1}
+                        value={selectionPreferences.venue_capacity ?? ""}
+                        onChange={(e) => setSelectionPreferences((p) => ({ ...p, venue_capacity: e.target.value ? parseInt(e.target.value) : null }))}
+                        className="h-8 w-24 text-sm"
+                      />
+                      <button
+                        onClick={() => setSelectionPreferences((p) => ({ ...p, venue_capacity: null }))}
+                        className="text-xs text-muted-foreground hover:text-foreground underline"
+                      >
+                        Remove limit
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Relevance Filter */}
+                <div className="flex items-center gap-3">
+                  <Label className="text-xs whitespace-nowrap w-24">Relevance</Label>
+                  <Select
+                    value={selectionPreferences.relevance_filter}
+                    onValueChange={(v) => setSelectionPreferences((p) => ({ ...p, relevance_filter: v }))}
+                  >
+                    <SelectTrigger className="h-8 text-xs w-32"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="strict">Strict</SelectItem>
+                      <SelectItem value="moderate">Moderate</SelectItem>
+                      <SelectItem value="loose">Loose</SelectItem>
+                      <SelectItem value="none">None</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Auto-Accept */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Auto-accept these types</Label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {SETTINGS_ATTENDEE_TYPES.map((t) => {
+                      const checked = selectionPreferences.auto_accept_types.includes(t.key);
+                      return (
+                        <button
+                          key={t.key}
+                          onClick={() => setSelectionPreferences((p) => ({
+                            ...p,
+                            auto_accept_types: checked
+                              ? p.auto_accept_types.filter((x) => x !== t.key)
+                              : [...p.auto_accept_types, t.key],
+                          }))}
+                          className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                            checked ? "bg-primary text-primary-foreground border-primary" : "hover:bg-muted/50"
+                          }`}
+                        >
+                          {t.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Attendee Mix */}
+                <Collapsible>
+                  <CollapsibleTrigger asChild>
+                    <button className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+                      <ChevronRight className="size-3" />
+                      Target attendee mix (optional)
+                    </button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="mt-2 space-y-2">
+                    {SETTINGS_ATTENDEE_TYPES.map((t) => {
+                      const value = selectionPreferences.attendee_mix[t.key] ?? 0;
+                      return (
+                        <div key={t.key} className="flex items-center gap-2">
+                          <span className="text-xs w-20 truncate">{t.label}</span>
+                          <Slider
+                            value={[value]}
+                            min={0}
+                            max={50}
+                            step={5}
+                            onValueChange={([v]) => setSelectionPreferences((p) => ({
+                              ...p,
+                              attendee_mix: { ...p.attendee_mix, [t.key]: v },
+                            }))}
+                            className="flex-1"
+                          />
+                          <span className="text-xs font-mono w-8 text-right">{value}%</span>
+                        </div>
+                      );
+                    })}
+                  </CollapsibleContent>
+                </Collapsible>
+              </div>
+            )}
+
+            {/* Step 4: Prompt & Go */}
+            {wizardStep === 3 && (
+              <div className="space-y-4">
+                <div>
+                  <h3 className="text-sm font-semibold mb-1">Prompt & Criteria</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Describe your event and how applicants should be evaluated.
+                  </p>
+                </div>
+                <Textarea
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  rows={3}
+                  placeholder="Describe your event and ideal attendees..."
+                  className="resize-none text-sm"
+                />
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Evaluation criteria</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      value={newCriterion}
+                      onChange={(e) => setNewCriterion(e.target.value)}
+                      placeholder="Add a criterion..."
+                      className="h-8 text-xs"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") { e.preventDefault(); addCriterion(); }
+                      }}
+                    />
+                    <Button variant="outline" size="icon" onClick={addCriterion} className="h-8 w-8">
+                      <Plus className="size-3.5" />
+                    </Button>
+                  </div>
+                  {criteria.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {criteria.map((c) => (
+                        <span key={c} className="inline-flex items-center gap-1 rounded-full border bg-muted/30 px-2.5 py-1 text-xs">
+                          {c}
+                          <button onClick={() => removeCriterion(c)} className="text-muted-foreground hover:text-destructive">
+                            <X className="size-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Extra instructions (optional)</Label>
+                  <Textarea
+                    value={selectionPreferences.custom_priorities}
+                    onChange={(e) => setSelectionPreferences((p) => ({ ...p, custom_priorities: e.target.value }))}
+                    rows={2}
+                    placeholder="e.g. Prioritize people who have built AI products..."
+                    className="resize-none text-xs"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="flex-row justify-between sm:justify-between gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setWizardStep((s) => s - 1)}
+              disabled={wizardStep === 0}
+              size="sm"
+            >
+              <ChevronLeft className="size-4 mr-1" />
+              Back
+            </Button>
+            <div className="flex gap-2">
+              {wizardStep < 3 ? (
+                <Button
+                  onClick={() => setWizardStep((s) => s + 1)}
+                  size="sm"
+                  disabled={wizardStep === 0 && !apiKey.trim()}
+                >
+                  Next
+                  <ChevronRight className="size-4 ml-1" />
+                </Button>
+              ) : (
+                <Button
+                  onClick={() => {
+                    // Save settings to backend
+                    api.updatePromptSettings({ default_prompt: prompt, criteria }).catch(() => {});
+                    api.updateSelectionPreferences(selectionPreferences).catch(() => {});
+                    // Close wizard and run analysis
+                    setShowWizard(false);
+                    handleAnalyze();
+                  }}
+                  size="sm"
+                  disabled={!apiKey.trim()}
+                >
+                  <Sparkles className="size-4 mr-1.5" />
+                  Run Analysis
+                </Button>
+              )}
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
