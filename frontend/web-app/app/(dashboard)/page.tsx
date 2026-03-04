@@ -105,7 +105,7 @@ import {
 import { api, type Applicant, type SelectionPreferences, type PanelConfig, DEFAULT_SELECTION_PREFERENCES, DEFAULT_PANEL_CONFIG } from "@/lib/api";
 import { useApplicants, useStats, useSessions } from "@/hooks/use-applicants";
 import { CSVUploader } from "@/components/csv-uploader";
-import { JUDGE_PERSONAS } from "@/lib/judge-personas";
+import { RoundtableSelector } from "@/components/roundtable-selector";
 
 const ANTHROPIC_MODELS = [
   { value: "claude-sonnet-4-20250514", label: "Claude Sonnet 4" },
@@ -951,6 +951,7 @@ export default function Page() {
   // Selection preferences state
   const [selectionPreferences, setSelectionPreferences] = useState<SelectionPreferences>(DEFAULT_SELECTION_PREFERENCES);
   const [panelConfig, setPanelConfig] = useState<PanelConfig>(DEFAULT_PANEL_CONFIG);
+  const [personaEdits, setPersonaEdits] = useState<Record<string, string>>({});
   // AI config state
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
@@ -1019,6 +1020,11 @@ export default function Page() {
       const savedPanel = localStorage.getItem("panel_config");
       if (savedPanel) setPanelConfig(JSON.parse(savedPanel));
     } catch {}
+    // Persona edits from localStorage
+    try {
+      const savedEdits = localStorage.getItem("persona_edits");
+      if (savedEdits) setPersonaEdits(JSON.parse(savedEdits));
+    } catch {}
   }, []);
 
   // Load saved prompt settings + selection preferences from backend
@@ -1052,6 +1058,31 @@ export default function Page() {
   useEffect(() => {
     localStorage.setItem("panel_config", JSON.stringify(panelConfig));
   }, [panelConfig]);
+  useEffect(() => {
+    localStorage.setItem("persona_edits", JSON.stringify(personaEdits));
+  }, [personaEdits]);
+
+  // Persona edit handlers for roundtable
+  const handleToggleJudge = useCallback((judgeId: string) => {
+    setPanelConfig((p) => {
+      const has = p.judge_ids.includes(judgeId);
+      if (has) return { ...p, judge_ids: p.judge_ids.filter((id) => id !== judgeId) };
+      if (p.judge_ids.length >= p.panel_size) return p;
+      return { ...p, judge_ids: [...p.judge_ids, judgeId] };
+    });
+  }, []);
+
+  const handleUpdatePersonaEdit = useCallback((judgeId: string, text: string) => {
+    setPersonaEdits((prev) => ({ ...prev, [judgeId]: text }));
+  }, []);
+
+  const handleResetPersonaEdit = useCallback((judgeId: string) => {
+    setPersonaEdits((prev) => {
+      const next = { ...prev };
+      delete next[judgeId];
+      return next;
+    });
+  }, []);
 
   // Auto-scroll console logs
   useEffect(() => {
@@ -2358,55 +2389,15 @@ export default function Page() {
                     </RadioGroup>
                   </div>
 
-                  {/* Judge Table */}
-                  <div className="rounded-md border overflow-hidden">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="border-b bg-muted/50">
-                          <th className="w-8 p-1.5"></th>
-                          <th className="text-left p-1.5 font-medium">Judge</th>
-                          <th className="text-left p-1.5 font-medium">Specialty</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {JUDGE_PERSONAS.map((persona) => {
-                          const isSelected = panelConfig.judge_ids.includes(persona.id);
-                          const isFull = panelConfig.judge_ids.length >= panelConfig.panel_size;
-                          const isDisabled = !isSelected && isFull;
-                          return (
-                            <tr
-                              key={persona.id}
-                              onClick={() => {
-                                if (isDisabled) return;
-                                setPanelConfig((p) => {
-                                  const has = p.judge_ids.includes(persona.id);
-                                  if (has) return { ...p, judge_ids: p.judge_ids.filter((id) => id !== persona.id) };
-                                  if (p.judge_ids.length >= p.panel_size) return p;
-                                  return { ...p, judge_ids: [...p.judge_ids, persona.id] };
-                                });
-                              }}
-                              className={`border-b last:border-b-0 transition-colors ${
-                                isDisabled
-                                  ? "opacity-40 cursor-not-allowed"
-                                  : "cursor-pointer hover:bg-muted/30"
-                              } ${isSelected ? "bg-primary/5" : ""}`}
-                            >
-                              <td className="p-1.5 text-center">
-                                <Checkbox checked={isSelected} disabled={isDisabled} className="pointer-events-none" />
-                              </td>
-                              <td className="p-1.5">
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-sm">{persona.emoji}</span>
-                                  <span className="font-medium truncate">{persona.name}</span>
-                                </div>
-                              </td>
-                              <td className="p-1.5 text-muted-foreground truncate">{persona.specialty}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
+                  {/* Roundtable */}
+                  <RoundtableSelector
+                    panelSize={panelConfig.panel_size}
+                    judgeIds={panelConfig.judge_ids}
+                    personaEdits={personaEdits}
+                    onToggleJudge={handleToggleJudge}
+                    onUpdatePersonaEdit={handleUpdatePersonaEdit}
+                    onResetPersonaEdit={handleResetPersonaEdit}
+                  />
                 </div>
               )}
             </div>
@@ -2759,54 +2750,14 @@ export default function Page() {
                       </RadioGroup>
                     </div>
 
-                    <div className="rounded-md border overflow-hidden">
-                      <table className="w-full text-xs">
-                        <thead>
-                          <tr className="border-b bg-muted/50">
-                            <th className="w-8 p-1.5"></th>
-                            <th className="text-left p-1.5 font-medium">Judge</th>
-                            <th className="text-left p-1.5 font-medium">Specialty</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {JUDGE_PERSONAS.map((persona) => {
-                            const isSelected = panelConfig.judge_ids.includes(persona.id);
-                            const isFull = panelConfig.judge_ids.length >= panelConfig.panel_size;
-                            const isDisabled = !isSelected && isFull;
-                            return (
-                              <tr
-                                key={persona.id}
-                                onClick={() => {
-                                  if (isDisabled) return;
-                                  setPanelConfig((p) => {
-                                    const has = p.judge_ids.includes(persona.id);
-                                    if (has) return { ...p, judge_ids: p.judge_ids.filter((id) => id !== persona.id) };
-                                    if (p.judge_ids.length >= p.panel_size) return p;
-                                    return { ...p, judge_ids: [...p.judge_ids, persona.id] };
-                                  });
-                                }}
-                                className={`border-b last:border-b-0 transition-colors ${
-                                  isDisabled
-                                    ? "opacity-40 cursor-not-allowed"
-                                    : "cursor-pointer hover:bg-muted/30"
-                                } ${isSelected ? "bg-primary/5" : ""}`}
-                              >
-                                <td className="p-1.5 text-center">
-                                  <Checkbox checked={isSelected} disabled={isDisabled} className="pointer-events-none" />
-                                </td>
-                                <td className="p-1.5">
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="text-sm">{persona.emoji}</span>
-                                    <span className="font-medium truncate">{persona.name}</span>
-                                  </div>
-                                </td>
-                                <td className="p-1.5 text-muted-foreground truncate">{persona.specialty}</td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
+                    <RoundtableSelector
+                      panelSize={panelConfig.panel_size}
+                      judgeIds={panelConfig.judge_ids}
+                      personaEdits={personaEdits}
+                      onToggleJudge={handleToggleJudge}
+                      onUpdatePersonaEdit={handleUpdatePersonaEdit}
+                      onResetPersonaEdit={handleResetPersonaEdit}
+                    />
                   </div>
                 )}
               </div>
