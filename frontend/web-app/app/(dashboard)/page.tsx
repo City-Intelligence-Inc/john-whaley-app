@@ -41,7 +41,6 @@ import {
   Layers,
   Trash2,
   FolderOpen,
-  MoreHorizontal,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -106,7 +105,7 @@ import {
 import { api, type Applicant, type SelectionPreferences, type PanelConfig, DEFAULT_SELECTION_PREFERENCES, DEFAULT_PANEL_CONFIG } from "@/lib/api";
 import { useApplicants, useStats, useSessions } from "@/hooks/use-applicants";
 import { CSVUploader } from "@/components/csv-uploader";
-import { JUDGE_PERSONAS, type JudgePersona } from "@/lib/judge-personas";
+import { JUDGE_PERSONAS } from "@/lib/judge-personas";
 
 const ANTHROPIC_MODELS = [
   { value: "claude-sonnet-4-20250514", label: "Claude Sonnet 4" },
@@ -907,43 +906,6 @@ function ApplicantDetailPanel({
 }
 
 
-/* ── Shaped Emoji for Judge Personas ── */
-
-function ShapedEmoji({ persona, size = "lg" }: { persona: JudgePersona; size?: "sm" | "lg" }) {
-  const dim = size === "lg" ? "size-9" : "size-7";
-  const textSize = size === "lg" ? "text-xl" : "text-base";
-  const shapeClasses: Record<string, string> = {
-    circle: "rounded-full",
-    square: "rounded-sm",
-    rounded: "rounded-xl",
-    pill: "rounded-full px-3",
-  };
-  if (persona.shape === "diamond") {
-    return (
-      <div className={`${dim} flex items-center justify-center`}>
-        <div className={`${dim} ${persona.color} flex items-center justify-center rotate-45 rounded-sm`}>
-          <span className={`${textSize} -rotate-45 leading-none`}>{persona.emoji}</span>
-        </div>
-      </div>
-    );
-  }
-  if (persona.shape === "hexagon") {
-    return (
-      <div
-        className={`${dim} ${persona.color} flex items-center justify-center`}
-        style={{ clipPath: "polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)" }}
-      >
-        <span className={`${textSize} leading-none`}>{persona.emoji}</span>
-      </div>
-    );
-  }
-  return (
-    <div className={`${dim} ${persona.color} ${shapeClasses[persona.shape] || "rounded-full"} flex items-center justify-center`}>
-      <span className={`${textSize} leading-none`}>{persona.emoji}</span>
-    </div>
-  );
-}
-
 const SETTINGS_ATTENDEE_TYPES = [
   { key: "vc", label: "VCs / Investors" },
   { key: "entrepreneur", label: "Founders" },
@@ -989,8 +951,6 @@ export default function Page() {
   // Selection preferences state
   const [selectionPreferences, setSelectionPreferences] = useState<SelectionPreferences>(DEFAULT_SELECTION_PREFERENCES);
   const [panelConfig, setPanelConfig] = useState<PanelConfig>(DEFAULT_PANEL_CONFIG);
-  const [personaEdits, setPersonaEdits] = useState<Record<string, string>>({});
-
   // AI config state
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
@@ -1054,14 +1014,10 @@ export default function Page() {
       setSheetUrl(savedSheetUrl);
       setSheetConnected(true);
     }
-    // Panel config + persona edits from localStorage
+    // Panel config from localStorage
     try {
       const savedPanel = localStorage.getItem("panel_config");
       if (savedPanel) setPanelConfig(JSON.parse(savedPanel));
-    } catch {}
-    try {
-      const savedEdits = localStorage.getItem("persona_edits");
-      if (savedEdits) setPersonaEdits(JSON.parse(savedEdits));
     } catch {}
   }, []);
 
@@ -1096,14 +1052,6 @@ export default function Page() {
   useEffect(() => {
     localStorage.setItem("panel_config", JSON.stringify(panelConfig));
   }, [panelConfig]);
-
-  useEffect(() => {
-    if (Object.keys(personaEdits).length > 0) {
-      localStorage.setItem("persona_edits", JSON.stringify(personaEdits));
-    } else {
-      localStorage.removeItem("persona_edits");
-    }
-  }, [personaEdits]);
 
   // Auto-scroll console logs
   useEffect(() => {
@@ -2410,82 +2358,54 @@ export default function Page() {
                     </RadioGroup>
                   </div>
 
-                  {/* Judge Grid */}
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {JUDGE_PERSONAS.map((persona) => {
-                      const isSelected = panelConfig.judge_ids.includes(persona.id);
-                      const isFull = panelConfig.judge_ids.length >= panelConfig.panel_size;
-                      const isDisabled = !isSelected && isFull;
-                      const editedDesc = personaEdits[persona.id];
-                      const displayDesc = editedDesc !== undefined ? editedDesc : persona.description;
-                      return (
-                        <div
-                          key={persona.id}
-                          className={`relative flex items-start gap-2 rounded-md border p-2 transition-all ${
-                            isSelected
-                              ? "border-primary bg-primary/5"
-                              : isDisabled
-                                ? "opacity-40"
-                                : "hover:bg-muted/50"
-                          }`}
-                        >
-                          <button
-                            onClick={() => {
-                              setPanelConfig((p) => {
-                                const has = p.judge_ids.includes(persona.id);
-                                if (has) return { ...p, judge_ids: p.judge_ids.filter((id) => id !== persona.id) };
-                                if (p.judge_ids.length >= p.panel_size) return p;
-                                return { ...p, judge_ids: [...p.judge_ids, persona.id] };
-                              });
-                            }}
-                            disabled={isDisabled}
-                            className={`flex items-start gap-2 flex-1 text-left ${isDisabled ? "cursor-not-allowed" : ""}`}
-                          >
-                            <ShapedEmoji persona={persona} size="sm" />
-                            <div className="min-w-0">
-                              <div className="text-[11px] font-medium leading-tight truncate">{persona.name}</div>
-                              <div className="text-[9px] text-muted-foreground leading-snug line-clamp-2">{displayDesc}</div>
-                            </div>
-                          </button>
-                          <Popover>
-                            <PopoverTrigger asChild>
-                              <button
-                                onClick={(e) => e.stopPropagation()}
-                                className="shrink-0 p-0.5 rounded hover:bg-muted/80 text-muted-foreground hover:text-foreground"
-                              >
-                                <MoreHorizontal className="size-3" />
-                              </button>
-                            </PopoverTrigger>
-                            <PopoverContent side="right" align="start" className="w-64 p-3" onClick={(e) => e.stopPropagation()}>
-                              <div className="space-y-2">
-                                <div className="flex items-center gap-2">
-                                  <ShapedEmoji persona={persona} size="lg" />
-                                  <div>
-                                    <h4 className="text-sm font-semibold">{persona.name}</h4>
-                                    <p className="text-[10px] text-muted-foreground">{persona.specialty}</p>
-                                  </div>
+                  {/* Judge Table */}
+                  <div className="rounded-md border overflow-hidden">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b bg-muted/50">
+                          <th className="w-8 p-1.5"></th>
+                          <th className="text-left p-1.5 font-medium">Judge</th>
+                          <th className="text-left p-1.5 font-medium">Specialty</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {JUDGE_PERSONAS.map((persona) => {
+                          const isSelected = panelConfig.judge_ids.includes(persona.id);
+                          const isFull = panelConfig.judge_ids.length >= panelConfig.panel_size;
+                          const isDisabled = !isSelected && isFull;
+                          return (
+                            <tr
+                              key={persona.id}
+                              onClick={() => {
+                                if (isDisabled) return;
+                                setPanelConfig((p) => {
+                                  const has = p.judge_ids.includes(persona.id);
+                                  if (has) return { ...p, judge_ids: p.judge_ids.filter((id) => id !== persona.id) };
+                                  if (p.judge_ids.length >= p.panel_size) return p;
+                                  return { ...p, judge_ids: [...p.judge_ids, persona.id] };
+                                });
+                              }}
+                              className={`border-b last:border-b-0 transition-colors ${
+                                isDisabled
+                                  ? "opacity-40 cursor-not-allowed"
+                                  : "cursor-pointer hover:bg-muted/30"
+                              } ${isSelected ? "bg-primary/5" : ""}`}
+                            >
+                              <td className="p-1.5 text-center">
+                                <Checkbox checked={isSelected} disabled={isDisabled} className="pointer-events-none" />
+                              </td>
+                              <td className="p-1.5">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-sm">{persona.emoji}</span>
+                                  <span className="font-medium truncate">{persona.name}</span>
                                 </div>
-                                <Label className="text-xs text-muted-foreground">Persona prompt</Label>
-                                <Textarea
-                                  value={editedDesc !== undefined ? editedDesc : persona.description}
-                                  onChange={(e) => setPersonaEdits((prev) => ({ ...prev, [persona.id]: e.target.value }))}
-                                  rows={3}
-                                  className="text-xs resize-none"
-                                />
-                                {editedDesc !== undefined && editedDesc !== persona.description && (
-                                  <button
-                                    onClick={() => setPersonaEdits((prev) => { const n = { ...prev }; delete n[persona.id]; return n; })}
-                                    className="text-[10px] text-muted-foreground hover:text-foreground underline"
-                                  >
-                                    Reset to default
-                                  </button>
-                                )}
-                              </div>
-                            </PopoverContent>
-                          </Popover>
-                        </div>
-                      );
-                    })}
+                              </td>
+                              <td className="p-1.5 text-muted-foreground truncate">{persona.specialty}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               )}
@@ -2839,38 +2759,53 @@ export default function Page() {
                       </RadioGroup>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {JUDGE_PERSONAS.map((persona) => {
-                        const isSelected = panelConfig.judge_ids.includes(persona.id);
-                        const isFull = panelConfig.judge_ids.length >= panelConfig.panel_size;
-                        const isDisabled = !isSelected && isFull;
-                        return (
-                          <button
-                            key={persona.id}
-                            onClick={() => {
-                              setPanelConfig((p) => {
-                                const has = p.judge_ids.includes(persona.id);
-                                if (has) return { ...p, judge_ids: p.judge_ids.filter((id) => id !== persona.id) };
-                                if (p.judge_ids.length >= p.panel_size) return p;
-                                return { ...p, judge_ids: [...p.judge_ids, persona.id] };
-                              });
-                            }}
-                            disabled={isDisabled}
-                            className={`flex items-center gap-2 rounded-md border p-2 text-left transition-all ${
-                              isSelected
-                                ? "border-primary bg-primary/5"
-                                : isDisabled
-                                  ? "opacity-40 cursor-not-allowed"
-                                  : "hover:bg-muted/50"
-                            }`}
-                          >
-                            <ShapedEmoji persona={persona} size="sm" />
-                            <div className="min-w-0">
-                              <div className="text-[11px] font-medium leading-tight truncate">{persona.name}</div>
-                            </div>
-                          </button>
-                        );
-                      })}
+                    <div className="rounded-md border overflow-hidden">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-b bg-muted/50">
+                            <th className="w-8 p-1.5"></th>
+                            <th className="text-left p-1.5 font-medium">Judge</th>
+                            <th className="text-left p-1.5 font-medium">Specialty</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {JUDGE_PERSONAS.map((persona) => {
+                            const isSelected = panelConfig.judge_ids.includes(persona.id);
+                            const isFull = panelConfig.judge_ids.length >= panelConfig.panel_size;
+                            const isDisabled = !isSelected && isFull;
+                            return (
+                              <tr
+                                key={persona.id}
+                                onClick={() => {
+                                  if (isDisabled) return;
+                                  setPanelConfig((p) => {
+                                    const has = p.judge_ids.includes(persona.id);
+                                    if (has) return { ...p, judge_ids: p.judge_ids.filter((id) => id !== persona.id) };
+                                    if (p.judge_ids.length >= p.panel_size) return p;
+                                    return { ...p, judge_ids: [...p.judge_ids, persona.id] };
+                                  });
+                                }}
+                                className={`border-b last:border-b-0 transition-colors ${
+                                  isDisabled
+                                    ? "opacity-40 cursor-not-allowed"
+                                    : "cursor-pointer hover:bg-muted/30"
+                                } ${isSelected ? "bg-primary/5" : ""}`}
+                              >
+                                <td className="p-1.5 text-center">
+                                  <Checkbox checked={isSelected} disabled={isDisabled} className="pointer-events-none" />
+                                </td>
+                                <td className="p-1.5">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-sm">{persona.emoji}</span>
+                                    <span className="font-medium truncate">{persona.name}</span>
+                                  </div>
+                                </td>
+                                <td className="p-1.5 text-muted-foreground truncate">{persona.specialty}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 )}
