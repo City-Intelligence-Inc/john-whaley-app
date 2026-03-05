@@ -15,6 +15,7 @@ from routes.settings import router as settings_router
 from routes.sessions import router as sessions_router
 from routes.admin import router as admin_router
 from routes.scraper import router as scraper_router
+from routes.linkedin import router as linkedin_router
 
 app = FastAPI(title="John Whaley Applicant Reviewer")
 
@@ -22,7 +23,10 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
         "https://*.vercel.app",
+        "null",  # file:// origin
     ],
     allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
@@ -37,6 +41,7 @@ app.include_router(analysis_router)
 app.include_router(settings_router)
 app.include_router(admin_router)
 app.include_router(scraper_router)
+app.include_router(linkedin_router)
 
 
 @app.get("/")

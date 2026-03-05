@@ -258,17 +258,21 @@ export interface LinkedInEnrichStartEvent {
 export interface LinkedInEnrichProgressEvent {
   completed: number;
   total: number;
-  applicant_id: string;
-  name: string;
-  linkedin_headline: string;
-  retries: number;
+  applicant_id?: string;
+  name?: string;
+  linkedin_headline?: string;
+  headline?: string;
+  url?: string;
+  image?: string;
+  error?: string | null;
+  retries?: number;
 }
 
 export interface LinkedInEnrichErrorEvent {
   completed: number;
   total: number;
-  applicant_id: string;
-  name: string;
+  applicant_id?: string;
+  name?: string;
   error: string;
 }
 
@@ -284,6 +288,24 @@ export interface LinkedInEnrichCallbacks {
   onProgress?: (data: LinkedInEnrichProgressEvent) => void;
   onError?: (data: LinkedInEnrichErrorEvent) => void;
   onComplete?: (data: LinkedInEnrichCompleteEvent) => void;
+}
+
+// New native scraper (no Scrapfly needed)
+export interface LinkedInScrapeResult {
+  url: string;
+  name: string | null;
+  headline: string | null;
+  image: string | null;
+  error: string | null;
+}
+
+export interface LinkedInJobStatus {
+  job_id: string;
+  status: "queued" | "running" | "done";
+  total: number;
+  completed: number;
+  results: LinkedInScrapeResult[];
+  invalid: string[];
 }
 
 export interface AnalyzeStreamCallbacks {
@@ -500,25 +522,39 @@ export const api = {
   // Admin
   getAdminSessions: () => fetchAPI<AdminSession[]>("/admin/sessions"),
 
-  // LinkedIn Enrichment (SSE)
+  // LinkedIn Enrichment — native scraper (no Scrapfly key needed)
   enrichLinkedInStream: async (
-    data: { session_id: string; scrapfly_key: string; applicant_ids?: string[] },
+    data: { session_id: string; scrapfly_key?: string; applicant_ids?: string[]; li_at?: string; urls?: string[] },
     callbacks: LinkedInEnrichCallbacks,
   ) => {
-    const res = await fetch(`${API_URL}/scraper/enrich-linkedin`, {
+    // Resolve URLs: if provided directly use them, otherwise fetch from session
+    let urls = data.urls || [];
+    if (!urls.length && data.session_id) {
+      const applicants: Applicant[] = await fetchAPI(`/applicants?session_id=${data.session_id}`);
+      urls = applicants
+        .filter((a) => a.linkedin_url && (!data.applicant_ids || data.applicant_ids.includes(a.applicant_id)))
+        .map((a) => a.linkedin_url!);
+    }
+    if (!urls.length) throw new Error("No LinkedIn URLs to enrich");
+
+    // Submit job
+    const jobRes = await fetchAPI<{ job_id: string; total: number; message: string }>("/linkedin/enrich", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
+      body: JSON.stringify({ urls, li_at: data.li_at || undefined, max_retries: 6, session_id: data.session_id }),
     });
 
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(error.detail || "Enrich request failed");
-    }
+    const { job_id, total } = jobRes;
+    callbacks.onStart?.({ total });
 
-    const reader = res.body!.getReader();
+    // Stream results via SSE
+    const stream = await fetch(`${API_URL}/linkedin/stream/${job_id}`);
+    if (!stream.ok) throw new Error("Stream failed");
+
+    const reader = stream.body!.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    let completed = 0;
+    let errors = 0;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -532,15 +568,41 @@ export const api = {
       for (const line of lines) {
         if (line.startsWith("event: ")) {
           eventType = line.slice(7).trim();
-        } else if (line.startsWith("data: ") && eventType) {
+        } else if (line.startsWith("data: ")) {
           const parsed = JSON.parse(line.slice(6));
-          if (eventType === "start") callbacks.onStart?.(parsed);
-          else if (eventType === "progress") callbacks.onProgress?.(parsed);
-          else if (eventType === "error") callbacks.onError?.(parsed);
-          else if (eventType === "complete") callbacks.onComplete?.(parsed);
+          if (eventType === "done") {
+            callbacks.onComplete?.({ completed, total, errors, enriched: completed - errors });
+          } else {
+            // Regular result
+            completed++;
+            if (parsed.error) {
+              errors++;
+              callbacks.onError?.({ completed, total, name: parsed.name || parsed.url, error: parsed.error });
+            } else {
+              callbacks.onProgress?.({
+                completed,
+                total,
+                name: parsed.name,
+                headline: parsed.headline,
+                linkedin_headline: parsed.headline,
+                url: parsed.url,
+                image: parsed.photo_url || parsed.image,
+              });
+            }
+          }
           eventType = "";
         }
       }
     }
   },
+
+  // Direct LinkedIn scrape (returns job for polling)
+  scrapeLinkedIn: (urls: string[], li_at?: string) =>
+    fetchAPI<{ job_id: string; total: number; message: string }>("/linkedin/enrich", {
+      method: "POST",
+      body: JSON.stringify({ urls, li_at, max_retries: 6 }),
+    }),
+
+  getLinkedInJob: (job_id: string) =>
+    fetchAPI<import("./api").LinkedInJobStatus>(`/linkedin/jobs/${job_id}`),
 };

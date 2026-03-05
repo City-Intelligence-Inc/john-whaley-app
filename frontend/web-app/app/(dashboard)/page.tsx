@@ -992,8 +992,8 @@ export default function Page() {
   const [showEnrichDialog, setShowEnrichDialog] = useState(false);
   const [enrichLogs, setEnrichLogs] = useState<{ time: string; message: string; color?: string }[]>([]);
   const enrichLogRef = useRef<HTMLDivElement>(null);
-  const [scrapflyKey, setScrapflyKey] = useState("");
-  const [showScrapflyKeyInput, setShowScrapflyKeyInput] = useState(false);
+  const [liAtCookie, setLiAtCookie] = useState("");
+  const [showLiAtInput, setShowLiAtInput] = useState(false);
 
   // Console log state
   const [logs, setLogs] = useState<{ time: string; message: string; color?: string }[]>([]);
@@ -1010,7 +1010,7 @@ export default function Page() {
     setApiKey(savedKey);
     setProvider(savedProvider);
     setModel(savedModel);
-    setScrapflyKey(localStorage.getItem("scrapfly_key") || "");
+    setLiAtCookie(localStorage.getItem("li_at_cookie") || "");
     if (savedSheetUrl) {
       setSheetUrl(savedSheetUrl);
       setSheetConnected(true);
@@ -1188,39 +1188,40 @@ export default function Page() {
   // LinkedIn enrichment
   const handleEnrichLinkedIn = async () => {
     if (!activeSessionId) return;
-    if (!scrapflyKey.trim()) {
-      setShowScrapflyKeyInput(true);
-      toast.error("Scrapfly API key required", { description: "Enter your Scrapfly key to scrape LinkedIn profiles." });
-      return;
+
+    // Persist cookie if provided
+    if (liAtCookie.trim()) {
+      localStorage.setItem("li_at_cookie", liAtCookie);
     }
-    // Persist key
-    localStorage.setItem("scrapfly_key", scrapflyKey);
 
     setEnriching(true);
     setEnrichProgress(null);
     setEnrichLogs([]);
     setShowEnrichDialog(true);
+    setShowLiAtInput(false);
 
     const elog = (msg: string, color?: string) => {
       const time = new Date().toLocaleTimeString("en-US", { hour12: false });
       setEnrichLogs((prev) => [...prev, { time, message: msg, color }]);
     };
 
-    elog("Starting LinkedIn enrichment via Scrapfly...");
+    elog("Starting LinkedIn enrichment (native scraper, no API key needed)...");
 
     try {
       await api.enrichLinkedInStream(
-        { session_id: activeSessionId, scrapfly_key: scrapflyKey },
+        {
+          session_id: activeSessionId,
+          li_at: liAtCookie.trim() || undefined,
+        },
         {
           onStart: (data) => {
             setEnrichProgress({ completed: 0, total: data.total, errors: 0 });
-            elog(`Found ${data.total} profiles to scrape (concurrency: 100, retries: 3)`);
+            elog(`Scraping ${data.total} LinkedIn profiles (auto-retry on rate limits)...`);
             elog("═".repeat(50), "#6366f1");
           },
           onProgress: (data) => {
             setEnrichProgress({ completed: data.completed, total: data.total, errors: 0 });
-            const retryNote = data.retries > 0 ? ` (${data.retries} retries)` : "";
-            elog(`[${data.completed}/${data.total}] ${data.name}  ·  ${data.linkedin_headline || "no headline"}${retryNote}`, "#22c55e");
+            elog(`[${data.completed}/${data.total}] ${data.name}  ·  ${data.linkedin_headline || data.headline || "no headline"}`, "#22c55e");
           },
           onError: (data) => {
             setEnrichProgress((prev) => ({
@@ -1228,7 +1229,7 @@ export default function Page() {
               total: data.total,
               errors: (prev?.errors || 0) + 1,
             }));
-            elog(`[${data.completed}/${data.total}] ${data.name}  ·  FAILED: ${data.error}`, "#ef4444");
+            elog(`[${data.completed}/${data.total}] ${data.name || "unknown"}  ·  ${data.error}`, "#ef4444");
           },
           onComplete: (data) => {
             setEnrichProgress({ completed: data.completed, total: data.total, errors: data.errors });
@@ -1870,7 +1871,7 @@ export default function Page() {
             </DropdownMenu>
           )}
 
-          <Popover open={showScrapflyKeyInput} onOpenChange={setShowScrapflyKeyInput}>
+          <Popover open={showLiAtInput} onOpenChange={setShowLiAtInput}>
             <PopoverTrigger asChild>
               <Button
                 variant="outline"
@@ -1879,11 +1880,7 @@ export default function Page() {
                     toast.error("No applicants to enrich", { description: "Import applicants first." });
                     return;
                   }
-                  if (!scrapflyKey.trim()) {
-                    setShowScrapflyKeyInput(true);
-                  } else {
-                    handleEnrichLinkedIn();
-                  }
+                  handleEnrichLinkedIn();
                 }}
                 size="sm"
                 className="h-9"
@@ -1902,26 +1899,26 @@ export default function Page() {
             <PopoverContent className="w-80" align="end">
               <div className="space-y-3">
                 <div>
-                  <Label className="text-sm font-medium">Scrapfly API Key</Label>
+                  <Label className="text-sm font-medium">LinkedIn Session Cookie (optional)</Label>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Get a key at <a href="https://scrapfly.io" target="_blank" rel="noopener noreferrer" className="underline">scrapfly.io</a>
+                    Paste your <code className="font-mono">li_at</code> cookie for better results on private profiles.
+                    Leave blank to scrape public profiles.
                   </p>
                 </div>
                 <Input
                   type="password"
-                  placeholder="scp-live-..."
-                  value={scrapflyKey}
-                  onChange={(e) => setScrapflyKey(e.target.value)}
+                  placeholder="AQEDAVpt7is..."
+                  value={liAtCookie}
+                  onChange={(e) => setLiAtCookie(e.target.value)}
                   className="h-9 font-mono text-sm"
                 />
+                <p className="text-xs text-muted-foreground">
+                  DevTools → Application → Cookies → linkedin.com → <code>li_at</code>
+                </p>
                 <Button
                   size="sm"
                   className="w-full"
-                  disabled={!scrapflyKey.trim()}
-                  onClick={() => {
-                    setShowScrapflyKeyInput(false);
-                    handleEnrichLinkedIn();
-                  }}
+                  onClick={handleEnrichLinkedIn}
                 >
                   <Linkedin className="size-4 mr-1.5" />
                   Start Enrichment

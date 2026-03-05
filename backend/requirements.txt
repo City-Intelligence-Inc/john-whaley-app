@@ -6,3 +6,6 @@ python-multipart
 anthropic
 openai
 httpx
+requests
+beautifulsoup4
+lxml
