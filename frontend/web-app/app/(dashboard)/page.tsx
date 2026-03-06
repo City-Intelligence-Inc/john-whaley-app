@@ -996,6 +996,19 @@ export default function Page() {
   const [showLiAtInput, setShowLiAtInput] = useState(false);
   const enrichJobIdRef = useRef<string | null>(null);
 
+  // Whitelist / Blacklist state
+  const [whitelist, setWhitelist] = useState("");
+  const [blacklist, setBlacklist] = useState("");
+  const [listsLoaded, setListsLoaded] = useState(false);
+
+  // Luma state
+  const [lumaKey, setLumaKey] = useState("");
+  const [lumaHasKey, setLumaHasKey] = useState(false);
+  const [lumaEvents, setLumaEvents] = useState<{ api_id: string; name: string; start_at: string }[]>([]);
+  const [lumaLoading, setLumaLoading] = useState(false);
+  const [lumaSyncing, setLumaSyncing] = useState(false);
+  const [lumaSyncPreview, setLumaSyncPreview] = useState<{ guest_id: string; name: string; status: string }[] | null>(null);
+
   // Console log state
   const [logs, setLogs] = useState<{ time: string; message: string; color?: string }[]>([]);
   const logRef = useRef<HTMLDivElement>(null);
@@ -1041,6 +1054,11 @@ export default function Page() {
         if (prefs) setSelectionPreferences(prefs);
       })
       .catch(() => {});
+    // Load whitelist/blacklist
+    api.getWhitelist().then((d) => { setWhitelist((d.emails || []).join("\n")); setListsLoaded(true); }).catch(() => setListsLoaded(true));
+    api.getBlacklist().then((d) => setBlacklist((d.emails || []).join("\n"))).catch(() => {});
+    // Load Luma key status
+    api.getLumaKey().then((d) => setLumaHasKey(!!d?.has_key)).catch(() => {});
   }, []);
 
   // Persist session + AI config
@@ -2235,9 +2253,20 @@ export default function Page() {
                           (a.title && a.company ? `${a.title} @ ${a.company}` : null) ||
                           a.company ||
                           "Unknown";
+                        const photoUrl = (a.image || a.photo_url) as string | undefined;
+                        const initials = String(displayName).split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
                         return (
-                          <TableCell key={key} className="font-medium max-w-[200px] truncate">
-                            {displayName}
+                          <TableCell key={key} className="font-medium max-w-[240px]">
+                            <div className="flex items-center gap-2">
+                              {photoUrl ? (
+                                <img src={photoUrl} alt="" className="size-7 rounded-full object-cover shrink-0" />
+                              ) : (
+                                <div className="size-7 rounded-full bg-muted flex items-center justify-center text-[10px] font-medium text-muted-foreground shrink-0">
+                                  {initials}
+                                </div>
+                              )}
+                              <span className="truncate">{displayName}</span>
+                            </div>
                           </TableCell>
                         );
                       }
@@ -2600,34 +2629,73 @@ export default function Page() {
             <div className="space-y-3">
               <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Selection Rules</h3>
 
-              {/* Venue Capacity */}
-              <div className="flex items-center gap-3">
-                <Label className="text-xs whitespace-nowrap w-24">Venue capacity</Label>
-                {selectionPreferences.venue_capacity === null ? (
-                  <button
-                    onClick={() => setSelectionPreferences((p) => ({ ...p, venue_capacity: 200 }))}
-                    className="text-xs text-muted-foreground hover:text-foreground underline"
-                  >
-                    No limit (click to set)
-                  </button>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <Input
-                      type="number"
-                      min={1}
-                      value={selectionPreferences.venue_capacity ?? ""}
-                      onChange={(e) => setSelectionPreferences((p) => ({ ...p, venue_capacity: e.target.value ? parseInt(e.target.value) : null }))}
-                      className="h-8 w-24 text-sm"
-                    />
+              {/* Venue Capacity — split when attendance_mode data exists */}
+              {applicants.some((a) => a.attendance_mode) ? (
+                <div className="space-y-2">
+                  <Label className="text-xs">Venue capacity (split by attendance mode)</Label>
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-muted-foreground">In-person:</span>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={selectionPreferences.pool_capacity?.in_person ?? ""}
+                        onChange={(e) => setSelectionPreferences((p) => ({
+                          ...p,
+                          pool_capacity: { in_person: e.target.value ? parseInt(e.target.value) : null, virtual: p.pool_capacity?.virtual ?? null },
+                        }))}
+                        className="h-8 w-20 text-sm"
+                        placeholder="No limit"
+                      />
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-muted-foreground">Virtual:</span>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={selectionPreferences.pool_capacity?.virtual ?? ""}
+                        onChange={(e) => setSelectionPreferences((p) => ({
+                          ...p,
+                          pool_capacity: { in_person: p.pool_capacity?.in_person ?? null, virtual: e.target.value ? parseInt(e.target.value) : null },
+                        }))}
+                        className="h-8 w-20 text-sm"
+                        placeholder="No limit"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">
+                    {applicants.filter((a) => a.attendance_mode === "in_person").length} in-person, {applicants.filter((a) => a.attendance_mode === "virtual").length} virtual registered
+                  </p>
+                </div>
+              ) : (
+                <div className="flex items-center gap-3">
+                  <Label className="text-xs whitespace-nowrap w-24">Venue capacity</Label>
+                  {selectionPreferences.venue_capacity === null ? (
                     <button
-                      onClick={() => setSelectionPreferences((p) => ({ ...p, venue_capacity: null }))}
+                      onClick={() => setSelectionPreferences((p) => ({ ...p, venue_capacity: 200 }))}
                       className="text-xs text-muted-foreground hover:text-foreground underline"
                     >
-                      Remove limit
+                      No limit (click to set)
                     </button>
-                  </div>
-                )}
-              </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        min={1}
+                        value={selectionPreferences.venue_capacity ?? ""}
+                        onChange={(e) => setSelectionPreferences((p) => ({ ...p, venue_capacity: e.target.value ? parseInt(e.target.value) : null }))}
+                        className="h-8 w-24 text-sm"
+                      />
+                      <button
+                        onClick={() => setSelectionPreferences((p) => ({ ...p, venue_capacity: null }))}
+                        className="text-xs text-muted-foreground hover:text-foreground underline"
+                      >
+                        Remove limit
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Relevance Filter */}
               <div className="flex items-center gap-3">
@@ -2761,6 +2829,185 @@ export default function Page() {
                 />
               </div>
             </div>
+
+            <Separator />
+
+            {/* ── Whitelist / Blacklist ── */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Whitelist / Blacklist</h3>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Always accept (one email per line)</Label>
+                  <Textarea
+                    value={whitelist}
+                    onChange={(e) => setWhitelist(e.target.value)}
+                    rows={3}
+                    placeholder={"vip@example.com\npartner@firm.com"}
+                    className="resize-none text-xs font-mono"
+                  />
+                  <p className="text-[10px] text-muted-foreground">{whitelist.split("\n").filter((e) => e.trim()).length} emails</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Always reject (one email per line)</Label>
+                  <Textarea
+                    value={blacklist}
+                    onChange={(e) => setBlacklist(e.target.value)}
+                    rows={3}
+                    placeholder={"spam@example.com\nunwanted@test.com"}
+                    className="resize-none text-xs font-mono"
+                  />
+                  <p className="text-[10px] text-muted-foreground">{blacklist.split("\n").filter((e) => e.trim()).length} emails</p>
+                </div>
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* ── Luma Integration ── */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Luma Integration</h3>
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  <Input
+                    type="password"
+                    value={lumaKey}
+                    onChange={(e) => setLumaKey(e.target.value)}
+                    placeholder={lumaHasKey ? "API key saved (enter new to replace)" : "Paste Luma API key..."}
+                    className="h-9 text-sm font-mono"
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-9"
+                    disabled={!lumaKey.trim()}
+                    onClick={async () => {
+                      try {
+                        await api.setLumaKey(lumaKey);
+                        setLumaHasKey(true);
+                        setLumaKey("");
+                        toast.success("Luma API key saved");
+                      } catch { toast.error("Failed to save key"); }
+                    }}
+                  >
+                    Save Key
+                  </Button>
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  Find your key at lu.ma → Settings → Developer → API Keys
+                </p>
+
+                {lumaHasKey && (
+                  <div className="space-y-2 rounded-lg border p-3">
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 text-xs"
+                        disabled={lumaLoading}
+                        onClick={async () => {
+                          setLumaLoading(true);
+                          try {
+                            const data = await api.listLumaEvents();
+                            setLumaEvents((data.entries || []).map((e: Record<string, unknown>) => {
+                              const evt = (e.event || e) as Record<string, unknown>;
+                              return { api_id: String(evt.api_id || e.api_id), name: String(evt.name || e.name || "Untitled"), start_at: String(evt.start_at || e.start_at || "") };
+                            }));
+                          } catch { toast.error("Failed to load events"); }
+                          setLumaLoading(false);
+                        }}
+                      >
+                        {lumaLoading ? <Loader2 className="size-3.5 animate-spin mr-1" /> : <RefreshCw className="size-3.5 mr-1" />}
+                        Load Events
+                      </Button>
+                      {activeSessionId && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 text-xs"
+                          disabled={lumaSyncing}
+                          onClick={async () => {
+                            setLumaSyncing(true);
+                            try {
+                              const preview = await api.syncToLuma(activeSessionId, true);
+                              setLumaSyncPreview(preview.updates);
+                              toast.info(`Preview: ${preview.count} updates ready`);
+                            } catch { toast.error("Sync preview failed"); }
+                            setLumaSyncing(false);
+                          }}
+                        >
+                          {lumaSyncing ? <Loader2 className="size-3.5 animate-spin mr-1" /> : <ArrowRightLeft className="size-3.5 mr-1" />}
+                          Sync to Luma
+                        </Button>
+                      )}
+                    </div>
+
+                    {lumaEvents.length > 0 && (
+                      <div className="space-y-1 max-h-40 overflow-y-auto">
+                        {lumaEvents.map((evt) => (
+                          <div key={evt.api_id} className="flex items-center justify-between rounded border px-2 py-1.5 text-xs">
+                            <div>
+                              <span className="font-medium">{evt.name}</span>
+                              {evt.start_at && <span className="text-muted-foreground ml-2">{new Date(evt.start_at).toLocaleDateString()}</span>}
+                            </div>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-[10px]"
+                              onClick={async () => {
+                                try {
+                                  const result = await api.importFromLuma(evt.api_id, activeSessionId || undefined);
+                                  toast.success(`Imported ${result.count} guests from "${evt.name}"`);
+                                  if (result.session_id && !activeSessionId) setActiveSessionId(result.session_id);
+                                  refreshApplicants();
+                                  refreshStats();
+                                  refreshSessions();
+                                } catch { toast.error("Import failed"); }
+                              }}
+                            >
+                              Import
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {lumaSyncPreview && lumaSyncPreview.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-xs font-medium">Sync preview ({lumaSyncPreview.length} updates):</p>
+                        <div className="max-h-32 overflow-y-auto space-y-0.5">
+                          {lumaSyncPreview.slice(0, 20).map((u, i) => (
+                            <div key={i} className="flex items-center gap-2 text-xs px-2 py-1 rounded bg-muted/30">
+                              <span className="truncate flex-1">{u.name}</span>
+                              <span className={`font-medium ${u.status === "approved" ? "text-green-600" : u.status === "declined" ? "text-red-600" : "text-yellow-600"}`}>{u.status}</span>
+                            </div>
+                          ))}
+                          {lumaSyncPreview.length > 20 && <p className="text-[10px] text-muted-foreground">...and {lumaSyncPreview.length - 20} more</p>}
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={async () => {
+                              try {
+                                const result = await api.syncToLuma(activeSessionId!, false);
+                                const succeeded = result.updates.filter((u: Record<string, unknown>) => u.success).length;
+                                toast.success(`Synced ${succeeded} decisions to Luma`);
+                                setLumaSyncPreview(null);
+                              } catch { toast.error("Sync failed"); }
+                            }}
+                          >
+                            Confirm & Push
+                          </Button>
+                          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setLumaSyncPreview(null)}>
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
 
           <DialogFooter>
@@ -2768,6 +3015,11 @@ export default function Page() {
               onClick={() => {
                 api.updatePromptSettings({ default_prompt: prompt, criteria }).catch(() => {});
                 api.updateSelectionPreferences(selectionPreferences).catch(() => {});
+                // Save whitelist/blacklist
+                const wEmails = whitelist.split("\n").map((e) => e.trim()).filter(Boolean);
+                const bEmails = blacklist.split("\n").map((e) => e.trim()).filter(Boolean);
+                api.updateWhitelist(wEmails).catch(() => {});
+                api.updateBlacklist(bEmails).catch(() => {});
                 toast.success("Settings saved");
                 setShowSettingsDialog(false);
               }}
@@ -2793,7 +3045,7 @@ export default function Page() {
 
           {/* Step indicator */}
           <div className="flex items-center justify-center gap-2 py-1">
-            {["AI Provider", "Review Mode", "Selection Rules", "Prompt & Go"].map((label, i) => (
+            {["AI Provider", "Review Mode", "Prompt & Go"].map((label, i) => (
               <button
                 key={i}
                 onClick={() => setWizardStep(i)}
@@ -2956,123 +3208,8 @@ export default function Page() {
             )}
 
             {/* Step 3: Selection Rules */}
+            {/* Step 3: Prompt & Go */}
             {wizardStep === 2 && (
-              <div className="space-y-4">
-                <div>
-                  <h3 className="text-sm font-semibold mb-1">Selection Rules</h3>
-                  <p className="text-sm text-muted-foreground">
-                    Configure venue capacity, relevance filter, and auto-accept rules.
-                  </p>
-                </div>
-
-                {/* Venue Capacity */}
-                <div className="flex items-center gap-3">
-                  <Label className="text-xs whitespace-nowrap w-24">Venue capacity</Label>
-                  {selectionPreferences.venue_capacity === null ? (
-                    <button
-                      onClick={() => setSelectionPreferences((p) => ({ ...p, venue_capacity: 200 }))}
-                      className="text-xs text-muted-foreground hover:text-foreground underline"
-                    >
-                      No limit (click to set)
-                    </button>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      <Input
-                        type="number"
-                        min={1}
-                        value={selectionPreferences.venue_capacity ?? ""}
-                        onChange={(e) => setSelectionPreferences((p) => ({ ...p, venue_capacity: e.target.value ? parseInt(e.target.value) : null }))}
-                        className="h-8 w-24 text-sm"
-                      />
-                      <button
-                        onClick={() => setSelectionPreferences((p) => ({ ...p, venue_capacity: null }))}
-                        className="text-xs text-muted-foreground hover:text-foreground underline"
-                      >
-                        Remove limit
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {/* Relevance Filter */}
-                <div className="flex items-center gap-3">
-                  <Label className="text-xs whitespace-nowrap w-24">Relevance</Label>
-                  <Select
-                    value={selectionPreferences.relevance_filter}
-                    onValueChange={(v) => setSelectionPreferences((p) => ({ ...p, relevance_filter: v }))}
-                  >
-                    <SelectTrigger className="h-8 text-xs w-32"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="strict">Strict</SelectItem>
-                      <SelectItem value="moderate">Moderate</SelectItem>
-                      <SelectItem value="loose">Loose</SelectItem>
-                      <SelectItem value="none">None</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Auto-Accept */}
-                <div className="space-y-1.5">
-                  <Label className="text-xs">Auto-accept these types</Label>
-                  <div className="flex flex-wrap gap-1.5">
-                    {SETTINGS_ATTENDEE_TYPES.map((t) => {
-                      const checked = selectionPreferences.auto_accept_types.includes(t.key);
-                      return (
-                        <button
-                          key={t.key}
-                          onClick={() => setSelectionPreferences((p) => ({
-                            ...p,
-                            auto_accept_types: checked
-                              ? p.auto_accept_types.filter((x) => x !== t.key)
-                              : [...p.auto_accept_types, t.key],
-                          }))}
-                          className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
-                            checked ? "bg-primary text-primary-foreground border-primary" : "hover:bg-muted/50"
-                          }`}
-                        >
-                          {t.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Attendee Mix */}
-                <Collapsible>
-                  <CollapsibleTrigger asChild>
-                    <button className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-                      <ChevronRight className="size-3" />
-                      Target attendee mix (optional)
-                    </button>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent className="mt-2 space-y-2">
-                    {SETTINGS_ATTENDEE_TYPES.map((t) => {
-                      const value = selectionPreferences.attendee_mix[t.key] ?? 0;
-                      return (
-                        <div key={t.key} className="flex items-center gap-2">
-                          <span className="text-xs w-20 truncate">{t.label}</span>
-                          <Slider
-                            value={[value]}
-                            min={0}
-                            max={50}
-                            step={5}
-                            onValueChange={([v]) => setSelectionPreferences((p) => ({
-                              ...p,
-                              attendee_mix: { ...p.attendee_mix, [t.key]: v },
-                            }))}
-                            className="flex-1"
-                          />
-                          <span className="text-xs font-mono w-8 text-right">{value}%</span>
-                        </div>
-                      );
-                    })}
-                  </CollapsibleContent>
-                </Collapsible>
-              </div>
-            )}
-
-            {/* Step 4: Prompt & Go */}
-            {wizardStep === 3 && (
               <div className="space-y-4">
                 <div>
                   <h3 className="text-sm font-semibold mb-1">Prompt & Criteria</h3>
@@ -3126,6 +3263,13 @@ export default function Page() {
                     className="resize-none text-xs"
                   />
                 </div>
+                <button
+                  onClick={() => { setShowWizard(false); setShowSettingsDialog(true); }}
+                  className="text-xs text-blue-500 hover:underline flex items-center gap-1"
+                >
+                  <Settings2 className="size-3" />
+                  Edit selection rules, whitelist & Luma in Settings
+                </button>
               </div>
             )}
           </div>
@@ -3141,7 +3285,7 @@ export default function Page() {
               Back
             </Button>
             <div className="flex gap-2">
-              {wizardStep < 3 ? (
+              {wizardStep < 2 ? (
                 <Button
                   onClick={() => setWizardStep((s) => s + 1)}
                   size="sm"
