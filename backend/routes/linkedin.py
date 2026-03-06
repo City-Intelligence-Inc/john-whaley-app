@@ -33,8 +33,8 @@ import uuid
 from typing import Optional
 
 from bs4 import BeautifulSoup
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel
 import json
 
@@ -64,6 +64,8 @@ class ProfileData(BaseModel):
     photo_url: Optional[str] = None
     location: Optional[str] = None
     connections: Optional[str] = None
+    company: Optional[str] = None
+    education: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -331,14 +333,131 @@ async def _scrape_with_playwright(url: str, li_at: str | None, user_agent: str |
         return ProfileData(url=url, error=str(e)[:200])
 
 
-# ─── Requests-based scraper (sync, fallback) ─────────────────────────────────
+# ─── Extract data from authenticated LinkedIn HTML page ───────────────────────
+def _parse_authed_html(url: str, text: str) -> dict | None:
+    """
+    Parse the React SPA served when li_at cookie is present.
+    LinkedIn now embeds profile JSON as HTML-entity-encoded data.
+    Anchors on publicIdentifier (URL slug) to find the right profile block.
+    Returns None if we can't extract a name.
+    """
+    import html as _html
+
+    # Extract slug from URL (e.g. "weidatan" from /in/weidatan/)
+    slug_m = re.search(r"linkedin\.com/(?:in|company)/([^/?&#\s]+)", url)
+    if not slug_m:
+        return None
+    slug = slug_m.group(1).rstrip("/")
+
+    # Unescape HTML entities — LinkedIn embeds JSON as &quot; etc.
+    decoded = _html.unescape(text)
+
+    # Find the publicIdentifier anchor — try URL slug first, fall back to least-frequent
+    pid_pat = f'"publicIdentifier":"{slug}"'
+    pid_idx = decoded.find(pid_pat)
+    if pid_idx < 0:
+        pid_idx = decoded.lower().find(pid_pat.lower())
+    if pid_idx < 0:
+        # Slug may differ from actual publicIdentifier (e.g. old vanity URL)
+        # Find all publicIdentifiers; the logged-in user's appears most often
+        all_pids = re.findall(r'"publicIdentifier":"([^"]+)"', decoded)
+        if not all_pids:
+            return None
+        from collections import Counter
+        counts = Counter(all_pids)
+        # Take the least-frequent one that isn't the most common (logged-in user)
+        most_common = counts.most_common()[0][0]
+        candidates = [p for p in counts if p != most_common]
+        if not candidates:
+            return None
+        target_slug = candidates[0]
+        pid_idx = decoded.find(f'"publicIdentifier":"{target_slug}"')
+        if pid_idx < 0:
+            return None
+
+    # Search a window around the anchor for profile fields
+    window_start = max(0, pid_idx - 6000)
+    window_end = min(len(decoded), pid_idx + 6000)
+    chunk = decoded[window_start:window_end]
+
+    # Name: firstName + lastName come AFTER publicIdentifier in the JSON object.
+    # Only search forward to avoid picking up the logged-in user's data which appears earlier.
+    forward = decoded[pid_idx: pid_idx + 6000]
+    fn_matches = re.findall(r'"firstName":"([^"]+)"', forward)
+    ln_matches = re.findall(r'"lastName":"([^"]+)"', forward)
+    if not fn_matches or not ln_matches:
+        return None
+    fn = fn_matches[0]
+    ln = ln_matches[0]
+    name = f"{fn} {ln}".strip()
+    if not name:
+        return None
+
+    # Headline: skip type URNs (start with "com." or "urn:")
+    headline = None
+    for m in re.finditer(r'"headline":"([^"]{5,250})"', chunk):
+        val = m.group(1)
+        if not re.match(r"^(com\.|urn:|https?://)", val):
+            headline = val
+            break
+
+    # Location
+    location = None
+    loc_m = re.search(r'"geoLocationName":"([^"]+)"', chunk)
+    if not loc_m:
+        loc_m = re.search(r'"locationName":"([^"]+)"', chunk)
+    if loc_m:
+        location = loc_m.group(1)
+
+    # Connections
+    connections = None
+    conn_m = re.search(r"([\d,]+\+?)\s*connections", chunk, re.I)
+    if conn_m:
+        connections = conn_m.group(1)
+
+    # Photo: artifacts (fileIdentifyingUrlPathSegment) appear BEFORE rootUrl in the JSON.
+    # Find rootUrl for a displayphoto (not background) then look backward for segments.
+    photo_url = None
+    for root_m in re.finditer(r'"rootUrl":"(https://media\.licdn\.com/dms/image/[^"]+profile-displayphoto[^"]*)"', chunk):
+        root = root_m.group(1)
+        before = chunk[max(0, root_m.start() - 2000): root_m.start()]
+        segs = re.findall(r'"fileIdentifyingUrlPathSegment":"([^"]+)"', before)
+        if segs:
+            # prefer 200x200, else take the first
+            seg = next((s for s in segs if "200_200" in s), segs[0])
+            photo_url = root + seg
+            break
+    if not photo_url:
+        # Fallback: look before publicIdentifier in a wider window
+        pre_chunk = decoded[max(0, pid_idx - 300000): pid_idx + 6000]
+        for root_m in re.finditer(r'"rootUrl":"(https://media\.licdn\.com/dms/image/[^"]+profile-displayphoto[^"]*)"', pre_chunk):
+            root = root_m.group(1)
+            before = pre_chunk[max(0, root_m.start() - 2000): root_m.start()]
+            segs = re.findall(r'"fileIdentifyingUrlPathSegment":"([^"]+)"', before)
+            if segs:
+                seg = next((s for s in segs if "200_200" in s), segs[0])
+                photo_url = root + seg
+                break
+
+    return {"url": url, "name": name, "headline": headline, "photo_url": photo_url,
+            "location": location, "connections": connections,
+            "company": None, "education": None, "error": None}
+
+
+# ─── Requests-based scraper (sync) ────────────────────────────────────────────
 def _scrape_url_blocking(
     url: str,
     session: "requests.Session",  # type: ignore[name-defined]
     max_retries: int,
 ) -> dict:
-    """Scrape one URL with automatic retry on rate limiting."""
+    """
+    Scrape one URL.
+    - If session has li_at: parse authenticated SPA HTML for full headline + photo.
+    - If no li_at: parse public page OG tags (name + company + photo).
+    """
     import requests
+
+    li_at = session.cookies.get("li_at")
 
     backoff = 30
     last_err = "Unknown error"
@@ -372,11 +491,49 @@ def _scrape_url_blocking(
                         "location": None, "connections": None,
                         "error": "Auth wall — profile may be private"}
 
+            # Authenticated page: LinkedIn serves React SPA — extract headline.
+            # Then fetch the public page (no cookie) for og:image (auth tokens are 403).
+            if li_at:
+                parsed = _parse_authed_html(url, resp.text)
+                if parsed:
+                    # Fetch public page for photo + location + connections
+                    try:
+                        pub_session = session.__class__()
+                        pub_session.headers.update(session.headers)
+                        pub_resp = pub_session.get(url, timeout=10, allow_redirects=True)
+                        if pub_resp.status_code == 200:
+                            pub_soup = BeautifulSoup(pub_resp.text, "lxml")
+                            og_image = _meta(pub_soup, "og:image")
+                            if og_image:
+                                parsed["photo_url"] = og_image
+                            pub_desc = _meta(pub_soup, "og:description") or _meta(pub_soup, "description") or ""
+                            if pub_desc:
+                                loc_m = re.search(r"Location:\s*([^·\n]+)", pub_desc)
+                                if loc_m:
+                                    parsed["location"] = loc_m.group(1).strip()
+                                conn_m = re.search(r"([\d,]+\+?)\s+connections", pub_desc, re.I)
+                                if conn_m:
+                                    parsed["connections"] = conn_m.group(1)
+                                exp_m = re.search(r"Experience:\s*([^·\n]+)", pub_desc)
+                                if exp_m:
+                                    parsed["company"] = exp_m.group(1).strip()
+                                edu_m = re.search(r"Education:\s*([^·\n]+)", pub_desc)
+                                if edu_m:
+                                    parsed["education"] = edu_m.group(1).strip()
+                    except Exception:
+                        pass
+                    return parsed
+                last_err = "No profile data in authenticated page"
+                time.sleep(3)
+                continue
+
+            # Public page: parse OG tags
             soup = BeautifulSoup(resp.text, "lxml")
-            name = headline = image = None
+            name = headline = image = location = connections = company = education = None
 
             og_title = _meta(soup, "og:title")
             og_image = _meta(soup, "og:image")
+            og_desc  = _meta(soup, "og:description") or _meta(soup, "description") or ""
 
             if og_title:
                 clean = re.sub(r"\s*\|\s*LinkedIn\s*$", "", og_title).strip()
@@ -388,6 +545,23 @@ def _scrape_url_blocking(
                     name = clean
             if og_image:
                 image = og_image
+
+            # Parse description: "Experience: X · Education: Y · Location: Z · N+ connections"
+            if og_desc:
+                loc_m = re.search(r"Location:\s*([^·\n]+)", og_desc)
+                if loc_m:
+                    location = loc_m.group(1).strip()
+                conn_m = re.search(r"([\d,]+\+?)\s+connections", og_desc, re.I)
+                if conn_m:
+                    connections = conn_m.group(1)
+                exp_m = re.search(r"Experience:\s*([^·\n]+)", og_desc)
+                if exp_m:
+                    company = exp_m.group(1).strip()
+                    if not headline:
+                        headline = company
+                edu_m = re.search(r"Education:\s*([^·\n]+)", og_desc)
+                if edu_m:
+                    education = edu_m.group(1).strip()
 
             if not name:
                 title_tag = soup.find("title")
@@ -401,25 +575,8 @@ def _scrape_url_blocking(
                     else:
                         name = clean or None
 
-            if not headline and name:
-                text = resp.text
-                ri = text.find("window.__como_rehydration__")
-                if ri >= 0:
-                    end = text.find("</script>", ri)
-                    chunk = text[ri:end] if end > ri else text[ri: ri + 500_000]
-                    ni = chunk.find(name)
-                    if ni >= 0:
-                        after = chunk[ni: ni + 4000]
-                        matches = re.findall(r'children\\\":\[\\\"([^\"\\]{5,200})\\\"\\]', after)
-                        for m in matches:
-                            if m != name and "|" not in m and "<" not in m and "LinkedIn" not in m:
-                                headline = m
-                                break
-
             if not image:
-                imgs = re.findall(
-                    r"https://media\.licdn\.com/dms/image/[^\s\"'\\]+", resp.text
-                )
+                imgs = re.findall(r"https://media\.licdn\.com/dms/image/[^\s\"'\\]+", resp.text)
                 if imgs:
                     image = imgs[0].split("\\")[0]
 
@@ -429,7 +586,8 @@ def _scrape_url_blocking(
                 continue
 
             return {"url": url, "name": name, "headline": headline, "photo_url": image,
-                    "location": None, "connections": None, "error": None}
+                    "location": location, "connections": connections,
+                    "company": company, "education": education, "error": None}
 
         except Exception as e:
             last_err = str(e)[:100]
@@ -501,10 +659,21 @@ async def _run_job(job_id: str, urls: list[str], li_at: str | None, user_agent: 
 
     loop = asyncio.get_event_loop()
     for i, url in enumerate(urls):
+        if job.get("cancelled"):
+            job["status"] = "cancelled"
+            _emit(job, "cancelled", {"message": "Job cancelled by user", "completed": job["completed"], "total": job["total"]})
+            return
+
         result_dict = await loop.run_in_executor(
             None, _scrape_url_blocking, url, session, max_retries,
         )
         await _process_result(result_dict)
+        # Persist every result (success or failure) to DynamoDB
+        try:
+            import db as _db
+            _db.save_linkedin_scrape(result_dict)
+        except Exception:
+            pass  # best-effort, never block the stream
         job["results"].append(result_dict)
         job["completed"] = i + 1
         job["events"].append(result_dict)
@@ -586,6 +755,7 @@ async def enrich(body: EnrichRequest):
         "invalid": invalid,
         "events": [],
         "created_at": time.time(),
+        "cancelled": False,
     }
 
     asyncio.create_task(_run_job(job_id, valid, body.li_at, body.user_agent, body.max_retries, body.session_id))
@@ -599,6 +769,14 @@ async def enrich(body: EnrichRequest):
             f"Poll GET /linkedin/jobs/{job_id} or stream GET /linkedin/stream/{job_id}"
         ),
     )
+
+
+@router.post("/jobs/{job_id}/cancel", summary="Cancel a running enrichment job")
+async def cancel_job(job_id: str):
+    if job_id not in _jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    _jobs[job_id]["cancelled"] = True
+    return {"detail": "Cancellation requested"}
 
 
 @router.get("/jobs/{job_id}", summary="Poll batch enrichment job status")
@@ -616,6 +794,39 @@ async def get_job(job_id: str):
         "results": job["results"],
         "invalid": job["invalid"],
     }
+
+
+@router.get("/database", summary="List all records in the linkedin-scrapes table")
+async def get_database():
+    """Return all scraped profiles from DynamoDB, sorted by scraped_at desc."""
+    import db as _db
+    from config import linkedin_scrapes_table
+    response = linkedin_scrapes_table.scan()
+    items = response.get("Items", [])
+    while "LastEvaluatedKey" in response:
+        response = linkedin_scrapes_table.scan(ExclusiveStartKey=response["LastEvaluatedKey"])
+        items.extend(response.get("Items", []))
+    items.sort(key=lambda x: x.get("scraped_at", ""), reverse=True)
+    return {"items": items, "count": len(items)}
+
+
+@router.get("/proxy-image", summary="Proxy a LinkedIn CDN image to bypass CORS")
+async def proxy_image(url: str = Query(..., description="LinkedIn CDN image URL to proxy")):
+    """Fetch a LinkedIn CDN image server-side and return it, bypassing browser CORS restrictions."""
+    import requests as _req
+    if "licdn.com" not in url and "linkedin.com" not in url:
+        raise HTTPException(status_code=400, detail="Only LinkedIn CDN URLs are allowed")
+    try:
+        resp = _req.get(url, timeout=10, headers={
+            "User-Agent": DEFAULT_UA,
+            "Referer": "https://www.linkedin.com/",
+        })
+        if resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code, detail="Image fetch failed")
+        ct = resp.headers.get("content-type", "image/jpeg")
+        return Response(content=resp.content, media_type=ct)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
 
 
 @router.get("/stream/{job_id}", summary="SSE stream of batch enrichment results")

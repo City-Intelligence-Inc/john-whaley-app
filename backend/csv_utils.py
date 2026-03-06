@@ -19,6 +19,36 @@ _LINKEDIN_KEY_PATTERNS = re.compile(
     r"linkedin_profile_url|profile_url|li_url|linked_in)$"
 )
 
+# Column names that should be normalized to status
+_STATUS_KEY_PATTERNS = re.compile(
+    r"^(status|approval_status|approved|approval|decision|rsvp_status|registration_status)$"
+)
+
+# Map CSV status values to internal statuses
+STATUS_VALUE_MAP = {
+    "approved": "accepted", "accepted": "accepted", "yes": "accepted",
+    "accept": "accepted", "confirmed": "accepted",
+    "declined": "rejected", "rejected": "rejected", "no": "rejected",
+    "deny": "rejected", "denied": "rejected",
+    "waitlisted": "waitlisted", "waitlist": "waitlisted",
+    "maybe": "waitlisted", "pending_review": "waitlisted",
+    "pending": "pending", "new": "pending", "": "pending",
+}
+
+# Column names that should be normalized to attendance_mode
+_ATTENDANCE_KEY_PATTERNS = re.compile(
+    r"^(ticket_type|attendance_mode|attendance|joining|"
+    r"will_you_be_joining_in_person_or_remote\??|"
+    r"in_person_or_remote|rsvp_type|event_type)$"
+)
+
+_ATTENDANCE_VALUE_MAP = {
+    "in person": "in_person", "in-person": "in_person", "in_person": "in_person",
+    "onsite": "in_person", "physical": "in_person", "offline": "in_person",
+    "remote": "virtual", "virtual": "virtual", "online": "virtual",
+    "zoom": "virtual", "livestream": "virtual",
+}
+
 
 def parse_csv_rows(text: str) -> list[dict]:
     """
@@ -71,6 +101,20 @@ def parse_csv_rows(text: str) -> list[dict]:
                     item["linkedin_url"] = v
                     if k != "linkedin_url":
                         del item[k]
+                    break
+
+        # Normalize status column → _csv_status (import route decides how to use it)
+        for k in list(item.keys()):
+            if _STATUS_KEY_PATTERNS.match(k):
+                item["_csv_status"] = item.pop(k) if k != "status" else item.pop("status")
+                break
+
+        # Normalize attendance mode
+        if "attendance_mode" not in item:
+            for k in list(item.keys()):
+                if _ATTENDANCE_KEY_PATTERNS.match(k):
+                    raw_val = item[k].strip().lower()
+                    item["attendance_mode"] = _ATTENDANCE_VALUE_MAP.get(raw_val, raw_val)
                     break
 
         rows.append(item)

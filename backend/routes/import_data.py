@@ -11,7 +11,7 @@ import httpx
 
 from config import AI_FIELDS
 from models import GoogleSheetImport
-from csv_utils import parse_csv_rows
+from csv_utils import parse_csv_rows, STATUS_VALUE_MAP
 import db
 
 router = APIRouter(prefix="/applicants", tags=["import"])
@@ -38,7 +38,8 @@ async def upload_csv(file: UploadFile = File(...), session_id: str | None = Quer
 
     items = []
     for row in rows:
-        row["status"] = "pending"
+        csv_status = row.pop("_csv_status", "").strip().lower()
+        row["status"] = STATUS_VALUE_MAP.get(csv_status, "pending")
         row["session_id"] = session_id
         item = db.create_applicant_item(row)
         items.append(item)

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend,
 } from "recharts";
@@ -994,6 +994,7 @@ export default function Page() {
   const enrichLogRef = useRef<HTMLDivElement>(null);
   const [liAtCookie, setLiAtCookie] = useState("");
   const [showLiAtInput, setShowLiAtInput] = useState(false);
+  const enrichJobIdRef = useRef<string | null>(null);
 
   // Console log state
   const [logs, setLogs] = useState<{ time: string; message: string; color?: string }[]>([]);
@@ -1199,6 +1200,7 @@ export default function Page() {
     setEnrichLogs([]);
     setShowEnrichDialog(true);
     setShowLiAtInput(false);
+    enrichJobIdRef.current = null;
 
     const elog = (msg: string, color?: string) => {
       const time = new Date().toLocaleTimeString("en-US", { hour12: false });
@@ -1215,6 +1217,7 @@ export default function Page() {
         },
         {
           onStart: (data) => {
+            if (data.job_id) enrichJobIdRef.current = data.job_id;
             setEnrichProgress({ completed: 0, total: data.total, errors: 0 });
             elog(`Scraping ${data.total} LinkedIn profiles (auto-retry on rate limits)...`);
             elog("═".repeat(50), "#6366f1");
@@ -1547,26 +1550,56 @@ export default function Page() {
   }, [applicants, statusFilter, searchQuery, sortBy, sortDir]);
 
   // Dynamic table columns — derived from actual applicant data
-  const HIDDEN_KEYS = new Set(["applicant_id", "session_id"]);
+  const HIDDEN_KEYS = new Set([
+    "applicant_id", "session_id",
+    "user_override_attendee_type", "user_override_attendee_type_detail",
+    "luma_guest_id", "luma_status",
+  ]);
+  // Low-value columns hidden by default (common in Luma CSVs)
+  const DEFAULT_HIDDEN = new Set([
+    "amount", "amount_discount", "tax", "currency", "created_at",
+    "event_id", "order_id", "payment_id", "coupon_code",
+    "checkout_custom_questions", "utm_source", "utm_medium", "utm_campaign",
+    "investor_professional",
+  ]);
   // Priority columns shown first (if they exist in data)
   const PRIORITY_COLS = ["name", "email", "title", "company", "location", "ai_score", "status", "attendee_type"];
 
-  const tableColumns = useMemo(() => {
+  const [userToggledColumns, setUserToggledColumns] = useState<Record<string, boolean>>({});
+
+  const { allColumns, tableColumns } = useMemo(() => {
     const seen = new Set<string>();
+    const allEmpty = new Set<string>();
+    // Gather all non-hidden keys
     for (const a of applicants) {
       for (const key of Object.keys(a)) {
-        if (!HIDDEN_KEYS.has(key) && a[key] !== undefined && a[key] !== null && a[key] !== "") {
-          seen.add(key);
-        }
+        if (!HIDDEN_KEYS.has(key)) seen.add(key);
       }
     }
-    // Order: priority keys first (that exist), then remaining alphabetically
+    // Detect columns that are empty/zero across all rows
+    for (const key of seen) {
+      const isEmpty = applicants.every((a) => {
+        const v = a[key];
+        return v === undefined || v === null || v === "" || v === "0" || v === 0;
+      });
+      if (isEmpty) allEmpty.add(key);
+    }
+    // Filter: auto-hide empty + default-hidden, but respect user toggles
+    const visible = [...seen].filter((key) => {
+      if (key in userToggledColumns) return userToggledColumns[key];
+      if (allEmpty.has(key)) return false;
+      if (DEFAULT_HIDDEN.has(key)) return false;
+      return true;
+    });
     const ordered = [
-      ...PRIORITY_COLS.filter((k) => seen.has(k)),
-      ...[...seen].filter((k) => !PRIORITY_COLS.includes(k)).sort(),
+      ...PRIORITY_COLS.filter((k) => visible.includes(k)),
+      ...visible.filter((k) => !PRIORITY_COLS.includes(k)).sort(),
     ];
-    return ordered;
-  }, [applicants]);
+    return { allColumns: [...seen].sort(), tableColumns: ordered };
+  }, [applicants, userToggledColumns]);
+
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [scoreCutoff, setScoreCutoff] = useState(50);
 
   const COLUMN_LABELS: Record<string, string> = {
     name: "Name", email: "Email", title: "Title", company: "Company",
@@ -1849,6 +1882,53 @@ export default function Page() {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          {/* Column visibility dropdown (T8) */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="h-9">
+                <Eye className="size-4 mr-1.5" />
+                Columns
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-56 max-h-72 overflow-y-auto" align="end">
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-muted-foreground mb-2">Toggle columns</p>
+                {allColumns.map((col) => (
+                  <label key={col} className="flex items-center gap-2 py-0.5 cursor-pointer text-sm">
+                    <Checkbox
+                      checked={tableColumns.includes(col)}
+                      onCheckedChange={(checked) =>
+                        setUserToggledColumns((prev) => ({ ...prev, [col]: !!checked }))
+                      }
+                    />
+                    <span className="truncate">
+                      {COLUMN_LABELS[col] || col.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          {/* Expand/collapse all (T7) */}
+          {applicants.some((a) => a.ai_reasoning) && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9"
+              onClick={() => {
+                if (expandedRows.size > 0) {
+                  setExpandedRows(new Set());
+                } else {
+                  setExpandedRows(new Set(filteredApplicants.map((a) => a.applicant_id)));
+                }
+              }}
+            >
+              {expandedRows.size > 0 ? <ChevronUp className="size-4 mr-1.5" /> : <ChevronDown className="size-4 mr-1.5" />}
+              {expandedRows.size > 0 ? "Collapse" : "Expand"}
+            </Button>
+          )}
+
           {selectedIds.size > 0 && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -1957,6 +2037,59 @@ export default function Page() {
         </div>
       </div>
 
+      {/* Post-analysis score threshold (T6) */}
+      {applicants.some((a) => Number(a.ai_score) > 0) && (
+        <Card className="border-dashed">
+          <CardContent className="py-3 px-4">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <Sparkles className="size-4 text-muted-foreground shrink-0" />
+                <span className="text-sm font-medium whitespace-nowrap">Score Cutoff</span>
+                <Slider
+                  value={[scoreCutoff]}
+                  onValueChange={([v]) => setScoreCutoff(v)}
+                  min={0}
+                  max={100}
+                  step={5}
+                  className="w-48"
+                />
+                <span className="text-sm font-bold tabular-nums w-8">{scoreCutoff}</span>
+              </div>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="text-green-600 font-medium">
+                  {applicants.filter((a) => Number(a.ai_score) >= scoreCutoff && Number(a.ai_score) > 0).length} accept
+                </span>
+                <span>/</span>
+                <span className="text-red-600 font-medium">
+                  {applicants.filter((a) => Number(a.ai_score) > 0 && Number(a.ai_score) < scoreCutoff).length} reject
+                </span>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs"
+                onClick={async () => {
+                  const toAccept = applicants.filter((a) => Number(a.ai_score) >= scoreCutoff && Number(a.ai_score) > 0);
+                  const toReject = applicants.filter((a) => Number(a.ai_score) > 0 && Number(a.ai_score) < scoreCutoff);
+                  if (toAccept.length + toReject.length === 0) return;
+                  try {
+                    if (toAccept.length > 0) await api.batchUpdateStatus(toAccept.map((a) => a.applicant_id), "accepted");
+                    if (toReject.length > 0) await api.batchUpdateStatus(toReject.map((a) => a.applicant_id), "rejected");
+                    toast.success(`Applied cutoff: ${toAccept.length} accepted, ${toReject.length} rejected`);
+                    refreshApplicants();
+                    refreshStats();
+                  } catch {
+                    toast.error("Failed to apply cutoff");
+                  }
+                }}
+              >
+                Apply Cutoff
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Card Scanner Mode */}
       {showCardScanner ? (
         <ApplicantCardScanner
@@ -2029,8 +2162,8 @@ export default function Page() {
                   : "text-muted-foreground";
 
                 return (
+                  <React.Fragment key={a.applicant_id}>
                   <TableRow
-                    key={a.applicant_id}
                     className="cursor-pointer"
                     onClick={() => setSelectedApplicantId(a.applicant_id)}
                     data-state={selectedIds.has(a.applicant_id) ? "selected" : undefined}
@@ -2041,8 +2174,23 @@ export default function Page() {
                         onCheckedChange={() => toggleSelect(a.applicant_id)}
                       />
                     </TableCell>
-                    <TableCell className="text-muted-foreground font-mono text-sm">
-                      {i + 1}
+                    <TableCell className="text-muted-foreground font-mono text-sm" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        className="hover:text-foreground transition-colors"
+                        onClick={() => {
+                          setExpandedRows((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(a.applicant_id)) next.delete(a.applicant_id);
+                            else next.add(a.applicant_id);
+                            return next;
+                          });
+                        }}
+                      >
+                        {expandedRows.has(a.applicant_id)
+                          ? <ChevronUp className="size-3.5 inline mr-0.5" />
+                          : <ChevronDown className="size-3.5 inline mr-0.5" />}
+                        {i + 1}
+                      </button>
                     </TableCell>
                     {tableColumns.map((key) => {
                       const val = a[key];
@@ -2122,6 +2270,43 @@ export default function Page() {
                       </DropdownMenu>
                     </TableCell>
                   </TableRow>
+                  {expandedRows.has(a.applicant_id) && (
+                    <TableRow className="bg-muted/30 hover:bg-muted/30">
+                      <TableCell colSpan={tableColumns.length + 3} className="py-3 px-6">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                          {a.ai_reasoning && (
+                            <div>
+                              <span className="font-medium text-xs text-muted-foreground uppercase tracking-wide">AI Reasoning</span>
+                              <p className="mt-1 text-foreground whitespace-pre-wrap">{String(a.ai_reasoning)}</p>
+                            </div>
+                          )}
+                          {a.attendee_type && (
+                            <div className="space-y-2">
+                              <div>
+                                <span className="font-medium text-xs text-muted-foreground uppercase tracking-wide">Classification</span>
+                                <div className="mt-1 flex flex-wrap gap-1.5">
+                                  <Badge variant="outline">{String(a.attendee_type)}</Badge>
+                                  {a.attendee_type_detail && a.attendee_type_detail !== a.attendee_type && (
+                                    <Badge variant="secondary">{String(a.attendee_type_detail)}</Badge>
+                                  )}
+                                  {a.investor_level && (
+                                    <Badge variant="secondary" className="text-xs">Investor: {String(a.investor_level)}</Badge>
+                                  )}
+                                </div>
+                              </div>
+                              {a.panel_votes && (
+                                <div>
+                                  <span className="font-medium text-xs text-muted-foreground uppercase tracking-wide">Panel Votes</span>
+                                  <p className="mt-1">{String(a.panel_votes)}</p>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  </React.Fragment>
                 );
               })}
             </TableBody>
@@ -2294,7 +2479,17 @@ export default function Page() {
                 </div>
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs">API Key</Label>
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs">API Key</Label>
+                  <a
+                    href={provider === "openai" ? "https://platform.openai.com/api-keys" : "https://console.anthropic.com/settings/keys"}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[10px] text-blue-500 hover:underline"
+                  >
+                    Get your {provider === "openai" ? "OpenAI" : "Anthropic"} key ↗
+                  </a>
+                </div>
                 <div className="relative">
                   <Input
                     type={showKey ? "text" : "password"}
@@ -3020,13 +3215,31 @@ export default function Page() {
             <ConsoleLog logs={enrichLogs} logRef={enrichLogRef} />
           </div>
 
-          {!enriching && (
-            <DialogFooter>
+          <DialogFooter>
+            {enriching ? (
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={async () => {
+                  if (enrichJobIdRef.current) {
+                    try {
+                      await api.cancelLinkedInJob(enrichJobIdRef.current);
+                      toast.info("Cancellation requested");
+                    } catch {
+                      toast.error("Failed to cancel");
+                    }
+                  }
+                }}
+              >
+                <X className="size-4 mr-1.5" />
+                Cancel
+              </Button>
+            ) : (
               <Button onClick={() => setShowEnrichDialog(false)}>
                 Close
               </Button>
-            </DialogFooter>
-          )}
+            )}
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -3068,7 +3281,17 @@ export default function Page() {
               </div>
             )}
 
-            <ConsoleLog logs={logs} logRef={logRef} />
+            <Collapsible defaultOpen>
+              <CollapsibleTrigger asChild>
+                <Button variant="ghost" size="sm" className="text-xs text-muted-foreground gap-1.5 w-full justify-start">
+                  <Terminal className="size-3.5" />
+                  Console Log
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <ConsoleLog logs={logs} logRef={logRef} />
+              </CollapsibleContent>
+            </Collapsible>
           </div>
 
           {!analyzing && (

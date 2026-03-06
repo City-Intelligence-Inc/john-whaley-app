@@ -35,8 +35,14 @@ class GoogleSheetImport(BaseModel):
 
 # ── Selection Preferences ──
 
+class PoolCapacity(BaseModel):
+    in_person: Optional[int] = None
+    virtual: Optional[int] = None
+
+
 class SelectionPreferences(BaseModel):
     venue_capacity: Optional[int] = None          # null = no limit
+    pool_capacity: Optional[PoolCapacity] = None  # per-pool capacity (in_person/virtual)
     attendee_mix: dict[str, int] = {}             # type -> target %
     auto_accept_types: list[str] = []             # types to auto-accept
     relevance_filter: str = "moderate"            # strict|moderate|loose|none
@@ -73,6 +79,33 @@ class BulkAnalyzeRequest(BaseModel):
     session_id: Optional[str] = None
     selection_preferences: Optional[SelectionPreferences] = None
     panel_config: Optional[PanelConfig] = None
+
+
+class EnrichRequest(BaseModel):
+    api_key: str
+    model: str = "claude-sonnet-4-20250514"
+    provider: str = "anthropic"
+    prompt: str = ""
+    session_id: Optional[str] = None
+
+
+class SelectRequest(BaseModel):
+    api_key: str
+    model: str = "claude-sonnet-4-20250514"
+    provider: str = "anthropic"
+    prompt: str
+    criteria: list[str] = []
+    criteria_weights: Optional[list[str]] = None
+    session_id: Optional[str] = None
+    selection_preferences: Optional[SelectionPreferences] = None
+    panel_config: Optional[PanelConfig] = None
+
+
+class ReallocateRequest(BaseModel):
+    session_id: str
+    venue_capacity: Optional[int] = None
+    attendee_mix: dict[str, int] = {}
+    auto_accept_types: list[str] = []
 
 
 # ── Settings ──
