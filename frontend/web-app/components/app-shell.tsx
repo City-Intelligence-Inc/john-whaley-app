@@ -43,6 +43,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           >
             Admin
           </Link>
+          <Link
+            href="/linkedin"
+            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+              pathname === "/linkedin"
+                ? "bg-white/20 text-white"
+                : "text-white/70 hover:bg-white/10 hover:text-white"
+            }`}
+          >
+            LinkedIn
+          </Link>
         </nav>
       </header>
       <main className="flex-1 overflow-auto p-6 sm:p-8">

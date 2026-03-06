@@ -76,6 +76,11 @@ def update_applicant(applicant_id: str, body: ApplicantUpdate):
     if body.extra:
         fields.update(body.extra)
 
+    # Track user overrides for AI-managed fields
+    for field in ("attendee_type", "attendee_type_detail"):
+        if field in fields:
+            fields[f"user_override_{field}"] = True
+
     return db.update_applicant_fields(applicant_id, fields)
 
 

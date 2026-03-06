@@ -52,6 +52,28 @@ resource "aws_dynamodb_table" "sessions" {
   }
 }
 
+resource "aws_dynamodb_table" "linkedin_scrapes" {
+  name         = "linkedin-scrapes"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "url"
+
+  attribute {
+    name = "url"
+    type = "S"
+  }
+
+  # scraped_at lets you query by time per URL (sort key not needed at top level,
+  # but useful if you ever want per-run history via a GSI)
+  ttl {
+    attribute_name = "expires_at"
+    enabled        = true
+  }
+
+  tags = {
+    Project = "john-whaley-app"
+  }
+}
+
 resource "aws_dynamodb_table" "settings" {
   name         = "john-whaley-settings"
   billing_mode = "PAY_PER_REQUEST"
@@ -146,6 +168,7 @@ resource "aws_iam_policy" "dynamodb_access" {
         "${aws_dynamodb_table.applicants.arn}/index/*",
         aws_dynamodb_table.settings.arn,
         aws_dynamodb_table.sessions.arn,
+        aws_dynamodb_table.linkedin_scrapes.arn,
       ]
     }]
   })

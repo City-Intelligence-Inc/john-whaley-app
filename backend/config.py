@@ -9,10 +9,17 @@ dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
 applicants_table = dynamodb.Table("john-whaley-applicants")
 sessions_table = dynamodb.Table("john-whaley-sessions")
 settings_table = dynamodb.Table("john-whaley-settings")
+linkedin_scrapes_table = dynamodb.Table("linkedin-scrapes")
 
 VALID_STATUSES = {"pending", "accepted", "rejected", "waitlisted"}
 
-AI_FIELDS = {"ai_review", "ai_score", "ai_reasoning", "attendee_type", "attendee_type_detail", "panel_votes", "accepting_judges"}
+AI_FIELDS = {
+    "ai_review", "ai_score", "ai_reasoning",
+    "attendee_type", "attendee_type_detail",
+    "investor_level", "investor_professional",
+    "panel_votes", "accepting_judges",
+    "user_override_attendee_type", "user_override_attendee_type_detail",
+}
 
 _NAME_FALLBACK_KEYS = [
     "name", "full_name", "applicant_name", "person_name", "contact_name",

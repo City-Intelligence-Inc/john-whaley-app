@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 from boto3.dynamodb.conditions import Key as DDBKey
 from fastapi import HTTPException
-from config import applicants_table, sessions_table, settings_table
+from config import applicants_table, sessions_table, settings_table, linkedin_scrapes_table
 
 
 # ── Generic helpers ──
@@ -191,6 +191,29 @@ def scan_existing_emails(session_id: str | None = None) -> dict[str, str]:
         for item in items
         if item.get("email")
     }
+
+
+# ── LinkedIn scrape operations ──
+
+def save_linkedin_scrape(result: dict) -> None:
+    """
+    Upsert a LinkedIn scrape result into the linkedin-scrapes table.
+    Called after every profile attempt (success or failure).
+    """
+    url = result.get("url")
+    if not url:
+        return
+
+    item: dict = {"url": url, "scraped_at": datetime.now(timezone.utc).isoformat()}
+
+    # Store all available fields, skip Nones
+    for field in ("name", "headline", "photo_url", "location", "connections",
+                  "company", "education", "error"):
+        val = result.get(field)
+        if val is not None:
+            item[field] = val
+
+    linkedin_scrapes_table.put_item(Item=item)
 
 
 # ── Settings operations ──

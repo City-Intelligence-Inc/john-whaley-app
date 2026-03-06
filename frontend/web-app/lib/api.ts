@@ -46,6 +46,11 @@ export interface Applicant {
   ai_reasoning?: string;
   attendee_type?: string;
   attendee_type_detail?: string;
+  investor_level?: string;
+  investor_professional?: boolean;
+  attendance_mode?: string;
+  user_override_attendee_type?: boolean;
+  user_override_attendee_type_detail?: boolean;
   panel_votes?: string;
   accepting_judges?: string;
   [key: string]: unknown;
@@ -64,8 +69,14 @@ export interface PromptSettings {
   criteria: string[];
 }
 
+export interface PoolCapacity {
+  in_person: number | null;
+  virtual: number | null;
+}
+
 export interface SelectionPreferences {
   venue_capacity: number | null;
+  pool_capacity?: PoolCapacity | null;
   attendee_mix: Record<string, number>;
   auto_accept_types: string[];
   relevance_filter: string;
@@ -253,6 +264,7 @@ export interface SSEAdjudicationEvent {
 
 export interface LinkedInEnrichStartEvent {
   total: number;
+  job_id?: string;
 }
 
 export interface LinkedInEnrichProgressEvent {
@@ -544,7 +556,7 @@ export const api = {
     });
 
     const { job_id, total } = jobRes;
-    callbacks.onStart?.({ total });
+    callbacks.onStart?.({ total, job_id });
 
     // Stream results via SSE
     const stream = await fetch(`${API_URL}/linkedin/stream/${job_id}`);
@@ -605,4 +617,124 @@ export const api = {
 
   getLinkedInJob: (job_id: string) =>
     fetchAPI<import("./api").LinkedInJobStatus>(`/linkedin/jobs/${job_id}`),
+
+  cancelLinkedInJob: (job_id: string) =>
+    fetchAPI<{ detail: string }>(`/linkedin/jobs/${job_id}/cancel`, { method: "POST" }),
+
+  // Enrich-only (classification, no scoring)
+  enrichStream: async (data: { api_key: string; model: string; provider: string; prompt?: string; session_id?: string }, callbacks: AnalyzeStreamCallbacks) => {
+    const res = await fetch(`${API_URL}/applicants/enrich-stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(error.detail || "Enrich stream failed");
+    }
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      let eventType = "";
+      for (const line of lines) {
+        if (line.startsWith("event: ")) eventType = line.slice(7).trim();
+        else if (line.startsWith("data: ") && eventType) {
+          const d = JSON.parse(line.slice(6));
+          if (eventType === "start") callbacks.onStart?.(d);
+          else if (eventType === "phase") callbacks.onPhase?.(d);
+          else if (eventType === "classify") callbacks.onClassify?.(d);
+          else if (eventType === "classify_error") callbacks.onClassifyError?.(d);
+          else if (eventType === "complete") callbacks.onComplete?.(d);
+          eventType = "";
+        }
+      }
+    }
+  },
+
+  // Select-only (scoring, requires prior enrichment)
+  selectStream: async (data: BulkAnalyzeRequest, callbacks: AnalyzeStreamCallbacks) => {
+    const res = await fetch(`${API_URL}/applicants/select-stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(error.detail || "Select stream failed");
+    }
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      let eventType = "";
+      for (const line of lines) {
+        if (line.startsWith("event: ")) eventType = line.slice(7).trim();
+        else if (line.startsWith("data: ") && eventType) {
+          const d = JSON.parse(line.slice(6));
+          if (eventType === "start") callbacks.onStart?.(d);
+          else if (eventType === "phase") callbacks.onPhase?.(d);
+          else if (eventType === "auto_accept") callbacks.onAutoAccept?.(d);
+          else if (eventType === "progress") callbacks.onProgress?.(d);
+          else if (eventType === "error") callbacks.onError?.(d);
+          else if (eventType === "complete") callbacks.onComplete?.(d);
+          else if (eventType === "summary") callbacks.onSummary?.(d);
+          eventType = "";
+        }
+      }
+    }
+  },
+
+  // Reallocate (no AI, re-apply selection rules to cached scores)
+  reallocate: (data: { session_id: string; venue_capacity?: number | null; attendee_mix?: Record<string, number>; auto_accept_types?: string[] }) =>
+    fetchAPI<{ accepted: number; waitlisted: number; type_counts: Record<string, number> }>("/applicants/reallocate", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  // Whitelist / Blacklist
+  getWhitelist: () => fetchAPI<{ emails: string[] }>("/settings/whitelist"),
+  updateWhitelist: (emails: string[]) =>
+    fetchAPI<{ emails: string[] }>("/settings/whitelist", { method: "PUT", body: JSON.stringify({ emails }) }),
+  getBlacklist: () => fetchAPI<{ emails: string[] }>("/settings/blacklist"),
+  updateBlacklist: (emails: string[]) =>
+    fetchAPI<{ emails: string[] }>("/settings/blacklist", { method: "PUT", body: JSON.stringify({ emails }) }),
+
+  // Personas
+  getPersonas: () =>
+    fetchAPI<{ id: string; name: string; emoji: string; specialty: string; description: string; preferred_types: string[]; bias?: string; scoring_modifiers?: string }[]>(
+      "/settings/personas"
+    ),
+  updatePersona: (id: string, data: Record<string, unknown>) =>
+    fetchAPI<{ detail: string }>(`/settings/personas/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deletePersona: (id: string) =>
+    fetchAPI<{ detail: string }>(`/settings/personas/${id}`, { method: "DELETE" }),
+
+  // Luma
+  getLumaKey: () => fetchAPI<{ has_key: boolean }>("/settings/luma-key"),
+  setLumaKey: (api_key: string) =>
+    fetchAPI<{ detail: string }>("/settings/luma-key", { method: "PUT", body: JSON.stringify({ api_key }) }),
+  listLumaEvents: (api_key?: string) =>
+    fetchAPI<{ entries: { api_id: string; name: string; start_at: string; cover_url?: string }[] }>(`/luma/events${api_key ? `?api_key=${api_key}` : ""}`),
+  importFromLuma: (event_id: string, session_id?: string, api_key?: string) => {
+    const params = new URLSearchParams({ event_id });
+    if (session_id) params.set("session_id", session_id);
+    if (api_key) params.set("api_key", api_key);
+    return fetchAPI<{ count: number; session_id: string }>(`/luma/import?${params}`, { method: "POST" });
+  },
+  syncToLuma: (session_id: string, dry_run = true, api_key?: string) => {
+    const params = new URLSearchParams({ session_id, dry_run: String(dry_run) });
+    if (api_key) params.set("api_key", api_key);
+    return fetchAPI<{ dry_run: boolean; updates: { guest_id: string; name: string; status: string; success?: boolean }[]; count: number }>(`/luma/sync?${params}`, { method: "POST" });
+  },
 };
