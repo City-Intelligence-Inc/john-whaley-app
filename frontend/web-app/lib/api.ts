@@ -1,5 +1,18 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+let _getToken: (() => Promise<string | null>) | null = null;
+
+export function setAuthTokenGetter(getter: () => Promise<string | null>) {
+  _getToken = getter;
+}
+
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  if (!_getToken) return {};
+  const token = await _getToken();
+  if (!token) return {};
+  return { Authorization: `Bearer ${token}` };
+}
+
 export interface Session {
   session_id: string;
   name: string;
@@ -341,7 +354,8 @@ async function fetchAPI<T>(
   path: string,
   options?: RequestInit
 ): Promise<T> {
-  const headers: Record<string, string> = { ...options?.headers as Record<string, string> };
+  const authHeaders = await getAuthHeaders();
+  const headers: Record<string, string> = { ...authHeaders, ...options?.headers as Record<string, string> };
   if (!(options?.body instanceof FormData)) {
     headers["Content-Type"] = "application/json";
   }
@@ -422,8 +436,10 @@ export const api = {
     const formData = new FormData();
     formData.append("file", file);
     const qs = sessionId ? `?session_id=${sessionId}` : "";
+    const authHeaders = await getAuthHeaders();
     const res = await fetch(`${API_URL}/applicants/upload-csv${qs}`, {
       method: "POST",
+      headers: authHeaders,
       body: formData,
     });
     if (!res.ok) {
@@ -460,9 +476,10 @@ export const api = {
 
   // Streaming Bulk AI Analysis (SSE)
   analyzeAllStream: async (data: BulkAnalyzeRequest, callbacks: AnalyzeStreamCallbacks) => {
+    const authHeaders = await getAuthHeaders();
     const res = await fetch(`${API_URL}/applicants/analyze-all-stream`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders },
       body: JSON.stringify(data),
     });
 
@@ -559,7 +576,8 @@ export const api = {
     callbacks.onStart?.({ total, job_id });
 
     // Stream results via SSE
-    const stream = await fetch(`${API_URL}/linkedin/stream/${job_id}`);
+    const streamAuthHeaders = await getAuthHeaders();
+    const stream = await fetch(`${API_URL}/linkedin/stream/${job_id}`, { headers: streamAuthHeaders });
     if (!stream.ok) throw new Error("Stream failed");
 
     const reader = stream.body!.getReader();
@@ -623,9 +641,10 @@ export const api = {
 
   // Enrich-only (classification, no scoring)
   enrichStream: async (data: { api_key: string; model: string; provider: string; prompt?: string; session_id?: string }, callbacks: AnalyzeStreamCallbacks) => {
+    const authHeaders = await getAuthHeaders();
     const res = await fetch(`${API_URL}/applicants/enrich-stream`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders },
       body: JSON.stringify(data),
     });
     if (!res.ok) {
@@ -659,9 +678,10 @@ export const api = {
 
   // Select-only (scoring, requires prior enrichment)
   selectStream: async (data: BulkAnalyzeRequest, callbacks: AnalyzeStreamCallbacks) => {
+    const authHeaders = await getAuthHeaders();
     const res = await fetch(`${API_URL}/applicants/select-stream`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders },
       body: JSON.stringify(data),
     });
     if (!res.ok) {

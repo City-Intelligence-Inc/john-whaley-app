@@ -5,9 +5,10 @@ Run locally:  uvicorn main:app --reload
 Production:   uvicorn main:app --host 0.0.0.0 --port 8000
 """
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from auth import require_auth
 from routes.applicants import router as applicants_router
 from routes.import_data import router as import_router
 from routes.analysis import router as analysis_router
@@ -36,15 +37,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(sessions_router)
-app.include_router(applicants_router)
-app.include_router(import_router)
-app.include_router(analysis_router)
-app.include_router(settings_router)
-app.include_router(admin_router)
-app.include_router(scraper_router)
-app.include_router(linkedin_router)
-app.include_router(luma_router)
+# All routers require auth
+auth_dep = [Depends(require_auth)]
+
+app.include_router(sessions_router, dependencies=auth_dep)
+app.include_router(applicants_router, dependencies=auth_dep)
+app.include_router(import_router, dependencies=auth_dep)
+app.include_router(analysis_router, dependencies=auth_dep)
+app.include_router(settings_router, dependencies=auth_dep)
+app.include_router(admin_router, dependencies=auth_dep)
+app.include_router(scraper_router, dependencies=auth_dep)
+app.include_router(linkedin_router, dependencies=auth_dep)
+app.include_router(luma_router, dependencies=auth_dep)
 
 
 @app.get("/")

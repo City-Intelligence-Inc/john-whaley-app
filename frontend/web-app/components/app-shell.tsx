@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { UserButton } from "@clerk/nextjs";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -54,6 +55,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             LinkedIn
           </Link>
         </nav>
+        <div className="ml-auto">
+          <UserButton />
+        </div>
       </header>
       <main className="flex-1 overflow-auto p-6 sm:p-8">
         <div className="mx-auto max-w-7xl">{children}</div>

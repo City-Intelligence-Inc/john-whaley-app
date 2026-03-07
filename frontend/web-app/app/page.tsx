@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { auth } from "@clerk/nextjs/server";
+import { UserButton } from "@clerk/nextjs";
 import {
   Users,
   Brain,
@@ -16,7 +18,10 @@ import {
   Target,
 } from "lucide-react";
 
-export default function LandingPage() {
+export default async function LandingPage() {
+  const { userId } = await auth();
+  const isSignedIn = !!userId;
+
   return (
     <div className="min-h-screen bg-white text-gray-900">
       {/* Nav */}
@@ -33,12 +38,34 @@ export default function LandingPage() {
             <a href="#how-it-works" className="hover:text-gray-900 transition-colors">How It Works</a>
             <a href="#pricing" className="hover:text-gray-900 transition-colors">Pricing</a>
           </nav>
-          <Link
-            href="/dashboard"
-            className="rounded-lg bg-[#1e293b] px-4 py-2 text-sm font-medium text-white hover:bg-[#334155] transition-colors"
-          >
-            Open Dashboard
-          </Link>
+          <div className="flex items-center gap-3">
+            {!isSignedIn ? (
+              <>
+                <Link
+                  href="/sign-in"
+                  className="rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors"
+                >
+                  Sign In
+                </Link>
+                <Link
+                  href="/sign-up"
+                  className="rounded-lg bg-[#1e293b] px-4 py-2 text-sm font-medium text-white hover:bg-[#334155] transition-colors"
+                >
+                  Get Started
+                </Link>
+              </>
+            ) : (
+              <>
+                <Link
+                  href="/dashboard"
+                  className="rounded-lg bg-[#1e293b] px-4 py-2 text-sm font-medium text-white hover:bg-[#334155] transition-colors"
+                >
+                  Open Dashboard
+                </Link>
+                <UserButton  />
+              </>
+            )}
+          </div>
         </div>
       </header>
 
