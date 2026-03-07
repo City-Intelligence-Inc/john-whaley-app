@@ -24,9 +24,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
         <nav className="ml-8 flex gap-1">
           <Link
-            href="/dashboard"
+            href="/"
             className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-              pathname === "/dashboard"
+              pathname === "/"
                 ? "bg-white/20 text-white"
                 : "text-white/70 hover:bg-white/10 hover:text-white"
             }`}
@@ -34,9 +34,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             Review
           </Link>
           <Link
-            href="/dashboard/admin"
+            href="/admin"
             className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-              pathname === "/dashboard/admin"
+              pathname === "/admin"
                 ? "bg-white/20 text-white"
                 : "text-white/70 hover:bg-white/10 hover:text-white"
             }`}
@@ -44,9 +44,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             Admin
           </Link>
           <Link
-            href="/dashboard/linkedin"
+            href="/linkedin"
             className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-              pathname === "/dashboard/linkedin"
+              pathname === "/linkedin"
                 ? "bg-white/20 text-white"
                 : "text-white/70 hover:bg-white/10 hover:text-white"
             }`}
