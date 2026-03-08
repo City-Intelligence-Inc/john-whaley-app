@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
+import { CalendarDays } from "lucide-react";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -23,7 +24,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </span>
           </div>
         </div>
-        <nav className="ml-8 flex gap-1">
+        <nav className="ml-8 flex items-center gap-1">
+          <Link
+            href="/dashboard/calendar"
+            className={`rounded-md p-1.5 transition-colors ${
+              pathname === "/dashboard/calendar"
+                ? "bg-white/20 text-white"
+                : "text-white/70 hover:bg-white/10 hover:text-white"
+            }`}
+            title="Calendar"
+          >
+            <CalendarDays className="size-5" />
+          </Link>
           <Link
             href="/dashboard"
             className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
