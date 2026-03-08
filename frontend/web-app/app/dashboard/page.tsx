@@ -1618,6 +1618,32 @@ export default function Page() {
 
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [scoreCutoff, setScoreCutoff] = useState(50);
+  const [applyingCutoff, setApplyingCutoff] = useState(false);
+  const cutoffTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const applyCutoffLive = useCallback(async (cutoff: number) => {
+    const toAccept = applicants.filter((a) => Number(a.ai_score) >= cutoff && Number(a.ai_score) > 0);
+    const toReject = applicants.filter((a) => Number(a.ai_score) > 0 && Number(a.ai_score) < cutoff);
+    if (toAccept.length + toReject.length === 0) return;
+    setApplyingCutoff(true);
+    try {
+      if (toAccept.length > 0) await api.batchUpdateStatus(toAccept.map((a) => a.applicant_id), "accepted");
+      if (toReject.length > 0) await api.batchUpdateStatus(toReject.map((a) => a.applicant_id), "rejected");
+      toast.success(`Cutoff ${cutoff}: ${toAccept.length} accepted, ${toReject.length} rejected`);
+      refreshApplicants();
+      refreshStats();
+    } catch {
+      toast.error("Failed to apply cutoff");
+    } finally {
+      setApplyingCutoff(false);
+    }
+  }, [applicants, refreshApplicants, refreshStats]);
+
+  const handleCutoffChange = useCallback(([v]: number[]) => {
+    setScoreCutoff(v);
+    if (cutoffTimerRef.current) clearTimeout(cutoffTimerRef.current);
+    cutoffTimerRef.current = setTimeout(() => applyCutoffLive(v), 500);
+  }, [applyCutoffLive]);
 
   const COLUMN_LABELS: Record<string, string> = {
     name: "Name", email: "Email", title: "Title", company: "Company",
@@ -2055,7 +2081,7 @@ export default function Page() {
         </div>
       </div>
 
-      {/* Post-analysis score threshold (T6) */}
+      {/* Post-analysis score threshold (T6) — live slider */}
       {applicants.some((a) => Number(a.ai_score) > 0) && (
         <Card className="border-dashed">
           <CardContent className="py-3 px-4">
@@ -2065,7 +2091,7 @@ export default function Page() {
                 <span className="text-sm font-medium whitespace-nowrap">Score Cutoff</span>
                 <Slider
                   value={[scoreCutoff]}
-                  onValueChange={([v]) => setScoreCutoff(v)}
+                  onValueChange={handleCutoffChange}
                   min={0}
                   max={100}
                   step={5}
@@ -2081,28 +2107,8 @@ export default function Page() {
                 <span className="text-red-600 font-medium">
                   {applicants.filter((a) => Number(a.ai_score) > 0 && Number(a.ai_score) < scoreCutoff).length} reject
                 </span>
+                {applyingCutoff && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 text-xs"
-                onClick={async () => {
-                  const toAccept = applicants.filter((a) => Number(a.ai_score) >= scoreCutoff && Number(a.ai_score) > 0);
-                  const toReject = applicants.filter((a) => Number(a.ai_score) > 0 && Number(a.ai_score) < scoreCutoff);
-                  if (toAccept.length + toReject.length === 0) return;
-                  try {
-                    if (toAccept.length > 0) await api.batchUpdateStatus(toAccept.map((a) => a.applicant_id), "accepted");
-                    if (toReject.length > 0) await api.batchUpdateStatus(toReject.map((a) => a.applicant_id), "rejected");
-                    toast.success(`Applied cutoff: ${toAccept.length} accepted, ${toReject.length} rejected`);
-                    refreshApplicants();
-                    refreshStats();
-                  } catch {
-                    toast.error("Failed to apply cutoff");
-                  }
-                }}
-              >
-                Apply Cutoff
-              </Button>
             </div>
           </CardContent>
         </Card>
@@ -2116,22 +2122,22 @@ export default function Page() {
           onClose={() => setShowCardScanner(false)}
         />
       ) : (
-        /* Main Table */
-        <div className="rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-10">
+        /* Airtable-style Grid View */
+        <div className="rounded-lg border overflow-auto max-h-[calc(100vh-280px)]">
+          <table className="w-full border-collapse text-sm">
+            <thead className="sticky top-0 z-10">
+              <tr className="bg-gray-50 dark:bg-gray-900 border-b-2 border-gray-200 dark:border-gray-700">
+                <th className="sticky left-0 z-20 bg-gray-50 dark:bg-gray-900 w-10 px-3 py-2 border-r border-gray-200 dark:border-gray-700">
                   <Checkbox
                     checked={filteredApplicants.length > 0 && selectedIds.size === filteredApplicants.length}
                     onCheckedChange={toggleSelectAll}
                   />
-                </TableHead>
-                <TableHead className="w-10">#</TableHead>
+                </th>
+                <th className="w-10 px-2 py-2 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider border-r border-gray-200 dark:border-gray-700">#</th>
                 {tableColumns.map((key) => (
-                  <TableHead
+                  <th
                     key={key}
-                    className={`${key === "ai_score" ? "w-20 text-center" : key === "status" ? "w-28" : ""} cursor-pointer select-none hover:text-foreground transition-colors`}
+                    className={`px-3 py-2 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider border-r border-gray-200 dark:border-gray-700 cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors whitespace-nowrap ${key === "ai_score" ? "text-center" : ""}`}
                     onClick={() => {
                       if (sortBy === key) {
                         setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -2144,32 +2150,30 @@ export default function Page() {
                     <span className="inline-flex items-center gap-1">
                       {COLUMN_LABELS[key] || key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
                       {sortBy === key ? (
-                        sortDir === "asc" ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />
-                      ) : (
-                        <ChevronDown className="size-3.5 opacity-0 group-hover:opacity-30" />
-                      )}
+                        sortDir === "asc" ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />
+                      ) : null}
                     </span>
-                  </TableHead>
+                  </th>
                 ))}
-                <TableHead className="w-28 text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+                <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
               {loadingApplicants && (
-                <TableRow>
-                  <TableCell colSpan={tableColumns.length + 3} className="text-center py-12">
+                <tr>
+                  <td colSpan={tableColumns.length + 3} className="text-center py-12">
                     <Loader2 className="size-6 animate-spin mx-auto text-muted-foreground" />
-                  </TableCell>
-                </TableRow>
+                  </td>
+                </tr>
               )}
               {!loadingApplicants && filteredApplicants.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={tableColumns.length + 3} className="text-center py-12 text-muted-foreground">
+                <tr>
+                  <td colSpan={tableColumns.length + 3} className="text-center py-12 text-muted-foreground">
                     {applicants.length === 0
                       ? "No applicants yet. Click Import above to upload a CSV."
                       : `No ${statusFilter !== "all" ? statusFilter : ""} applicants match your search.`.trim()}
-                  </TableCell>
-                </TableRow>
+                  </td>
+                </tr>
               )}
               {!loadingApplicants && filteredApplicants.map((a, i) => {
                 const score = a.ai_score ? parseInt(a.ai_score) : 0;
@@ -2178,21 +2182,25 @@ export default function Page() {
                   : score >= 40 ? "text-yellow-600 dark:text-yellow-400"
                   : score > 0 ? "text-red-600 dark:text-red-400"
                   : "text-muted-foreground";
+                const rowStatusBg =
+                  a.status === "accepted" ? "bg-green-50/60 dark:bg-green-950/20"
+                  : a.status === "rejected" ? "bg-red-50/60 dark:bg-red-950/20"
+                  : a.status === "waitlisted" ? "bg-yellow-50/60 dark:bg-yellow-950/20"
+                  : "";
 
                 return (
                   <React.Fragment key={a.applicant_id}>
-                  <TableRow
-                    className="cursor-pointer"
+                  <tr
+                    className={`border-b border-gray-100 dark:border-gray-800 cursor-pointer hover:bg-blue-50/50 dark:hover:bg-blue-950/20 transition-colors ${rowStatusBg} ${selectedIds.has(a.applicant_id) ? "bg-blue-100/60 dark:bg-blue-900/30" : ""}`}
                     onClick={() => setSelectedApplicantId(a.applicant_id)}
-                    data-state={selectedIds.has(a.applicant_id) ? "selected" : undefined}
                   >
-                    <TableCell onClick={(e) => e.stopPropagation()}>
+                    <td className="sticky left-0 z-[5] px-3 py-1.5 border-r border-gray-200 dark:border-gray-700 bg-inherit" onClick={(e) => e.stopPropagation()}>
                       <Checkbox
                         checked={selectedIds.has(a.applicant_id)}
                         onCheckedChange={() => toggleSelect(a.applicant_id)}
                       />
-                    </TableCell>
-                    <TableCell className="text-muted-foreground font-mono text-sm" onClick={(e) => e.stopPropagation()}>
+                    </td>
+                    <td className="px-2 py-1.5 text-muted-foreground font-mono text-xs border-r border-gray-200 dark:border-gray-700" onClick={(e) => e.stopPropagation()}>
                       <button
                         className="hover:text-foreground transition-colors"
                         onClick={() => {
@@ -2205,37 +2213,36 @@ export default function Page() {
                         }}
                       >
                         {expandedRows.has(a.applicant_id)
-                          ? <ChevronUp className="size-3.5 inline mr-0.5" />
-                          : <ChevronDown className="size-3.5 inline mr-0.5" />}
+                          ? <ChevronUp className="size-3 inline mr-0.5" />
+                          : <ChevronDown className="size-3 inline mr-0.5" />}
                         {i + 1}
                       </button>
-                    </TableCell>
+                    </td>
                     {tableColumns.map((key) => {
                       const val = a[key];
-                      // Special rendering for known column types
                       if (key === "ai_score") {
                         return (
-                          <TableCell key={key} className="text-center">
+                          <td key={key} className="px-3 py-1.5 text-center border-r border-gray-100 dark:border-gray-800">
                             {score > 0 ? (
                               <span className={`font-bold tabular-nums ${scoreColorClass}`}>{score}</span>
                             ) : (
                               <span className="text-muted-foreground">—</span>
                             )}
-                          </TableCell>
+                          </td>
                         );
                       }
                       if (key === "status") {
                         return (
-                          <TableCell key={key}>
+                          <td key={key} className="px-3 py-1.5 border-r border-gray-100 dark:border-gray-800">
                             <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${statusColor(String(val || "pending"))}`}>
                               {String(val || "pending").charAt(0).toUpperCase() + String(val || "pending").slice(1)}
                             </span>
-                          </TableCell>
+                          </td>
                         );
                       }
                       if (key === "attendee_type") {
                         return (
-                          <TableCell key={key}>
+                          <td key={key} className="px-3 py-1.5 border-r border-gray-100 dark:border-gray-800">
                             {val ? (
                               <Badge variant="outline" className="text-xs font-normal">
                                 {String(a.attendee_type_detail || val)}
@@ -2243,7 +2250,7 @@ export default function Page() {
                             ) : (
                               <span className="text-muted-foreground text-xs">—</span>
                             )}
-                          </TableCell>
+                          </td>
                         );
                       }
                       if (key === "name") {
@@ -2256,31 +2263,30 @@ export default function Page() {
                         const photoUrl = (a.image || a.photo_url) as string | undefined;
                         const initials = String(displayName).split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
                         return (
-                          <TableCell key={key} className="font-medium max-w-[240px]">
+                          <td key={key} className="px-3 py-1.5 font-medium max-w-[240px] border-r border-gray-100 dark:border-gray-800">
                             <div className="flex items-center gap-2">
                               {photoUrl ? (
-                                <img src={photoUrl} alt="" className="size-7 rounded-full object-cover shrink-0" />
+                                <img src={photoUrl} alt="" className="size-6 rounded-full object-cover shrink-0" />
                               ) : (
-                                <div className="size-7 rounded-full bg-muted flex items-center justify-center text-[10px] font-medium text-muted-foreground shrink-0">
+                                <div className="size-6 rounded-full bg-muted flex items-center justify-center text-[9px] font-medium text-muted-foreground shrink-0">
                                   {initials}
                                 </div>
                               )}
                               <span className="truncate">{displayName}</span>
                             </div>
-                          </TableCell>
+                          </td>
                         );
                       }
-                      // Generic text cell
                       return (
-                        <TableCell key={key} className="max-w-[200px] truncate text-muted-foreground">
+                        <td key={key} className="px-3 py-1.5 max-w-[200px] truncate text-muted-foreground border-r border-gray-100 dark:border-gray-800">
                           {val != null && val !== "" ? String(val) : "—"}
-                        </TableCell>
+                        </td>
                       );
                     })}
-                    <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                    <td className="px-3 py-1.5 text-right" onClick={(e) => e.stopPropagation()}>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="outline" size="sm" className="h-8 text-xs">
+                          <Button variant="ghost" size="sm" className="h-7 text-xs px-2">
                             <ArrowRightLeft className="size-3.5 mr-1" />
                             Move
                           </Button>
@@ -2297,11 +2303,11 @@ export default function Page() {
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
+                    </td>
+                  </tr>
                   {expandedRows.has(a.applicant_id) && (
-                    <TableRow className="bg-muted/30 hover:bg-muted/30">
-                      <TableCell colSpan={tableColumns.length + 3} className="py-3 px-6">
+                    <tr className="bg-muted/30">
+                      <td colSpan={tableColumns.length + 3} className="py-3 px-6">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                           {a.ai_reasoning && (
                             <div>
@@ -2332,14 +2338,14 @@ export default function Page() {
                             </div>
                           )}
                         </div>
-                      </TableCell>
-                    </TableRow>
+                      </td>
+                    </tr>
                   )}
                   </React.Fragment>
                 );
               })}
-            </TableBody>
-          </Table>
+            </tbody>
+          </table>
         </div>
       )}
 
