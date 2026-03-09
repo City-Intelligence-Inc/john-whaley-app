@@ -22,25 +22,32 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen flex">
-      {/* Sidebar */}
-      <aside className="w-56 shrink-0 bg-[#0b1120] border-r border-white/[0.06] flex flex-col">
+      {/* Sidebar — Klarity-inspired navy */}
+      <aside className="w-60 shrink-0 bg-[#1a2236] flex flex-col">
         {/* Logo / Brand */}
-        <div className="px-4 py-5 flex items-center gap-3">
-          <div className="flex size-9 items-center justify-center rounded-lg bg-indigo-500/20 text-indigo-400 text-sm font-bold">
+        <div className="px-5 pt-6 pb-8 flex items-center gap-3">
+          <div className="flex size-10 items-center justify-center rounded-xl bg-[#488CFF] text-white text-sm font-bold shadow-md shadow-[#488CFF]/25">
             ER
           </div>
           <div className="flex flex-col">
-            <span className="text-sm font-semibold leading-tight text-white">
+            <span className="text-[15px] font-semibold leading-tight text-white tracking-tight">
               Event Review
             </span>
-            <span className="text-[11px] text-white/40">
+            <span className="text-[11px] text-[#7B8DB5] font-medium">
               AI Applicant Review
             </span>
           </div>
         </div>
 
+        {/* Section label */}
+        <div className="px-5 pb-2">
+          <span className="text-[10px] font-semibold uppercase tracking-widest text-[#4A5A7A]">
+            Navigation
+          </span>
+        </div>
+
         {/* Nav */}
-        <nav className="flex-1 px-3 py-2 space-y-0.5">
+        <nav className="flex-1 px-3 space-y-1">
           {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
             const active =
               href === "/dashboard"
@@ -50,13 +57,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <Link
                 key={href}
                 href={href}
-                className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                className={`group flex items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] font-medium transition-all ${
                   active
-                    ? "bg-white/[0.08] text-white"
-                    : "text-white/50 hover:bg-white/[0.04] hover:text-white/80"
+                    ? "bg-[#488CFF]/15 text-[#6AABFF] shadow-sm shadow-[#488CFF]/10"
+                    : "text-[#7B8DB5] hover:bg-white/[0.04] hover:text-[#B0BFD8]"
                 }`}
               >
-                <Icon className="size-4 shrink-0" />
+                <Icon
+                  className={`size-[18px] shrink-0 transition-colors ${
+                    active
+                      ? "text-[#488CFF]"
+                      : "text-[#4A5A7A] group-hover:text-[#7B8DB5]"
+                  }`}
+                />
                 {label}
               </Link>
             );
@@ -64,7 +77,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </nav>
 
         {/* User */}
-        <div className="px-4 py-4 border-t border-white/[0.06]">
+        <div className="px-5 py-5 border-t border-[#253256]">
           <UserButton
             appearance={{
               elements: {
@@ -76,7 +89,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-auto bg-[#0f172a]">
+      <main className="flex-1 overflow-auto bg-[#111827]">
         <div className="p-6 sm:p-8 max-w-7xl mx-auto">{children}</div>
       </main>
     </div>
