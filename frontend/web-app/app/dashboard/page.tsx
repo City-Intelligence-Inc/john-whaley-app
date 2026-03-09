@@ -41,6 +41,12 @@ import {
   Layers,
   Trash2,
   FolderOpen,
+  HelpCircle,
+  Ban,
+  Flag,
+  UserPlus,
+  Thermometer,
+  Scale,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -102,6 +108,12 @@ import {
   PopoverTrigger,
   PopoverContent,
 } from "@/components/ui/popover";
+import {
+  Tooltip as UITooltip,
+  TooltipTrigger as UITooltipTrigger,
+  TooltipContent as UITooltipContent,
+  TooltipProvider,
+} from "@/components/ui/tooltip";
 import { api, type Applicant, type SelectionPreferences, type PanelConfig, DEFAULT_SELECTION_PREFERENCES, DEFAULT_PANEL_CONFIG } from "@/lib/api";
 import { useApplicants, useStats, useSessions } from "@/hooks/use-applicants";
 import { CSVUploader } from "@/components/csv-uploader";
@@ -1103,6 +1115,22 @@ export default function Page() {
     });
   }, []);
 
+  const handleSaveCustomJudge = useCallback(async (judgeId: string, description: string) => {
+    try {
+      await api.updatePersona(judgeId, { description });
+      toast.success("Custom judge persona saved");
+    } catch {
+      toast.error("Failed to save custom judge persona");
+    }
+  }, []);
+
+  const handleUpdateTemperature = useCallback((judgeId: string, temp: number) => {
+    setPanelConfig((p) => ({
+      ...p,
+      judge_temperatures: { ...(p.judge_temperatures || {}), [judgeId]: temp },
+    }));
+  }, []);
+
   // Auto-scroll console logs
   useEffect(() => {
     if (logRef.current) {
@@ -1310,9 +1338,17 @@ export default function Page() {
       await api.updatePromptSettings({ default_prompt: prompt, criteria });
       log("Saved prompt settings.");
 
+      // Build criteria weights array (matching criteria order)
+      const weightsArr = criteria.map((c) => {
+        const w = criteriaWeights[c] ?? 1;
+        return w === 1 ? "normal" : w === 0.5 ? "low" : w === 1.5 ? "high" : w === 2 ? "critical" : "normal";
+      });
+      const hasWeights = weightsArr.some((w) => w !== "normal");
+
       await api.analyzeAllStream(
         {
           api_key: apiKey, model, provider, prompt, criteria,
+          criteria_weights: hasWeights ? weightsArr : undefined,
           session_id: activeSessionId, selection_preferences: prefs,
           panel_config: isPanelMode ? pc : undefined,
         },
@@ -1620,6 +1656,20 @@ export default function Page() {
   const [scoreCutoff, setScoreCutoff] = useState(50);
   const [applyingCutoff, setApplyingCutoff] = useState(false);
   const cutoffTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [showPostAnalysisMix, setShowPostAnalysisMix] = useState(false);
+  const [postMix, setPostMix] = useState<Record<string, number>>({});
+  const [postCapacity, setPostCapacity] = useState<number | null>(null);
+  const [reallocating, setReallocating] = useState(false);
+
+  // Criteria weights state
+  const [criteriaWeights, setCriteriaWeights] = useState<Record<string, number>>({});
+
+  // Multi-player state
+  const [organizers, setOrganizers] = useState<{ email: string; role: string }[]>([]);
+  const [newOrganizerEmail, setNewOrganizerEmail] = useState("");
+
+  // Flagged for review state
+  const [flaggedIds, setFlaggedIds] = useState<Set<string>>(new Set());
 
   const applyCutoffLive = useCallback(async (cutoff: number) => {
     const toAccept = applicants.filter((a) => Number(a.ai_score) >= cutoff && Number(a.ai_score) > 0);
@@ -1644,6 +1694,35 @@ export default function Page() {
     if (cutoffTimerRef.current) clearTimeout(cutoffTimerRef.current);
     cutoffTimerRef.current = setTimeout(() => applyCutoffLive(v), 500);
   }, [applyCutoffLive]);
+
+  const handleReallocate = useCallback(async () => {
+    if (!activeSessionId) return;
+    setReallocating(true);
+    try {
+      const result = await api.reallocate({
+        session_id: activeSessionId,
+        venue_capacity: postCapacity,
+        attendee_mix: postMix,
+        auto_accept_types: selectionPreferences.auto_accept_types,
+      });
+      toast.success(`Reallocated: ${result.accepted} accepted, ${result.waitlisted} waitlisted`);
+      refreshApplicants();
+      refreshStats();
+    } catch {
+      toast.error("Failed to reallocate");
+    } finally {
+      setReallocating(false);
+    }
+  }, [activeSessionId, postCapacity, postMix, selectionPreferences.auto_accept_types, refreshApplicants, refreshStats]);
+
+  const toggleFlag = useCallback((id: string) => {
+    setFlaggedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   const COLUMN_LABELS: Record<string, string> = {
     name: "Name", email: "Email", title: "Title", company: "Company",
@@ -2114,6 +2193,88 @@ export default function Page() {
         </Card>
       )}
 
+      {/* Post-analysis attendee mix adjustment */}
+      {applicants.some((a) => a.attendee_type) && (
+        <Collapsible open={showPostAnalysisMix} onOpenChange={(open) => {
+          setShowPostAnalysisMix(open);
+          if (open && Object.keys(postMix).length === 0) {
+            setPostMix({ ...selectionPreferences.attendee_mix });
+            setPostCapacity(selectionPreferences.venue_capacity);
+          }
+        }}>
+          <CollapsibleTrigger asChild>
+            <Button variant="ghost" size="sm" className="text-xs text-muted-foreground gap-1.5">
+              <Scale className="size-3.5" />
+              {showPostAnalysisMix ? "Hide" : "Adjust"} Attendee Mix
+              {showPostAnalysisMix ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <Card className="border-dashed mt-2">
+              <CardContent className="py-3 px-4 space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  Adjust attendee mix and capacity to reallocate decisions without re-running analysis.
+                </p>
+                <div className="flex items-center gap-3 mb-2">
+                  <span className="text-xs font-medium w-20">Capacity</span>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={postCapacity ?? ""}
+                    onChange={(e) => setPostCapacity(e.target.value ? parseInt(e.target.value) : null)}
+                    className="h-7 w-24 text-xs"
+                    placeholder="No limit"
+                  />
+                </div>
+                {ATTENDEE_TYPES.map((t) => {
+                  const value = postMix[t.key] ?? 0;
+                  return (
+                    <div key={t.key} className="flex items-center gap-2">
+                      <span className="text-xs w-28 truncate">{t.label}</span>
+                      <Slider
+                        value={[value]}
+                        min={0}
+                        max={100}
+                        step={5}
+                        onValueChange={([v]) => {
+                          const total = Object.values(postMix).reduce((a, b) => a + b, 0) - (postMix[t.key] ?? 0) + v;
+                          if (total > 100) {
+                            toast.error("Audience distribution must total 100%.");
+                            return;
+                          }
+                          setPostMix((prev) => ({ ...prev, [t.key]: v }));
+                        }}
+                        className="flex-1"
+                      />
+                      <span className="text-xs font-mono w-8 text-right">{value}%</span>
+                    </div>
+                  );
+                })}
+                {(() => {
+                  const total = Object.values(postMix).reduce((a, b) => a + b, 0);
+                  return (
+                    <div className="flex items-center justify-between pt-1">
+                      <span className={`text-xs font-medium ${total > 100 ? "text-red-500" : total === 100 ? "text-green-600" : "text-muted-foreground"}`}>
+                        Total: {total}%
+                      </span>
+                      <Button
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={handleReallocate}
+                        disabled={reallocating}
+                      >
+                        {reallocating ? <Loader2 className="size-3.5 animate-spin mr-1" /> : <ArrowRightLeft className="size-3.5 mr-1" />}
+                        Reallocate
+                      </Button>
+                    </div>
+                  );
+                })()}
+              </CardContent>
+            </Card>
+          </CollapsibleContent>
+        </Collapsible>
+      )}
+
       {/* Card Scanner Mode */}
       {showCardScanner ? (
         <ApplicantCardScanner
@@ -2273,6 +2434,9 @@ export default function Page() {
                                 </div>
                               )}
                               <span className="truncate">{displayName}</span>
+                              {flaggedIds.has(a.applicant_id) && (
+                                <Flag className="size-3 text-orange-500 fill-orange-500 shrink-0" />
+                              )}
                             </div>
                           </td>
                         );
@@ -2301,6 +2465,32 @@ export default function Page() {
                           <DropdownMenuItem onClick={() => handleStatusChange(a.applicant_id, "rejected")}>
                             <XCircle className="size-4 mr-2 text-red-500" />Reject
                           </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => {
+                              toggleFlag(a.applicant_id);
+                              toast.success(flaggedIds.has(a.applicant_id) ? "Flag removed" : "Flagged for review");
+                            }}
+                          >
+                            <Flag className={`size-4 mr-2 ${flaggedIds.has(a.applicant_id) ? "text-orange-500 fill-orange-500" : "text-orange-500"}`} />
+                            {flaggedIds.has(a.applicant_id) ? "Unflag" : "Flag for Review"}
+                          </DropdownMenuItem>
+                          {a.email && (
+                            <DropdownMenuItem
+                              onClick={() => {
+                                const email = a.email!.toLowerCase();
+                                setBlacklist((prev) => {
+                                  const emails = prev.split("\n").map((e) => e.trim()).filter(Boolean);
+                                  if (emails.includes(email)) return prev;
+                                  return [...emails, email].join("\n");
+                                });
+                                handleStatusChange(a.applicant_id, "rejected");
+                                api.updateBlacklist([...blacklist.split("\n").map((e) => e.trim()).filter(Boolean), email]).catch(() => {});
+                                toast.success(`${a.name || email} added to blacklist`);
+                              }}
+                            >
+                              <Ban className="size-4 mr-2 text-red-700" />Blacklist
+                            </DropdownMenuItem>
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </td>
@@ -2621,9 +2811,12 @@ export default function Page() {
                     panelSize={panelConfig.panel_size}
                     judgeIds={panelConfig.judge_ids}
                     personaEdits={personaEdits}
+                    judgeTemperatures={panelConfig.judge_temperatures}
                     onToggleJudge={handleToggleJudge}
                     onUpdatePersonaEdit={handleUpdatePersonaEdit}
                     onResetPersonaEdit={handleResetPersonaEdit}
+                    onSaveCustomJudge={handleSaveCustomJudge}
+                    onUpdateTemperature={handleUpdateTemperature}
                   />
                 </div>
               )}
@@ -2638,7 +2831,19 @@ export default function Page() {
               {/* Venue Capacity — split when attendance_mode data exists */}
               {applicants.some((a) => a.attendance_mode) ? (
                 <div className="space-y-2">
-                  <Label className="text-xs">Venue capacity (split by attendance mode)</Label>
+                  <div className="flex items-center gap-1.5">
+                    <Label className="text-xs">Venue capacity (split by attendance mode)</Label>
+                    <TooltipProvider>
+                      <UITooltip>
+                        <UITooltipTrigger asChild>
+                          <HelpCircle className="size-3.5 text-muted-foreground cursor-help" />
+                        </UITooltipTrigger>
+                        <UITooltipContent side="right" className="max-w-[220px]">
+                          Venue capacity refers to in-person attendees only. Virtual participants are not counted against this limit. Go to Settings to set a virtual cap if needed.
+                        </UITooltipContent>
+                      </UITooltip>
+                    </TooltipProvider>
+                  </div>
                   <div className="flex items-center gap-3">
                     <div className="flex items-center gap-1.5">
                       <span className="text-xs text-muted-foreground">In-person:</span>
@@ -2670,12 +2875,24 @@ export default function Page() {
                     </div>
                   </div>
                   <p className="text-[10px] text-muted-foreground">
-                    {applicants.filter((a) => a.attendance_mode === "in_person").length} in-person, {applicants.filter((a) => a.attendance_mode === "virtual").length} virtual registered
+                    {applicants.filter((a) => a.attendance_mode === "in_person").length} in-person, {applicants.filter((a) => a.attendance_mode === "virtual").length} virtual registered. No limit on virtual participants by default.
                   </p>
                 </div>
               ) : (
                 <div className="flex items-center gap-3">
-                  <Label className="text-xs whitespace-nowrap w-24">Venue capacity</Label>
+                  <div className="flex items-center gap-1.5">
+                    <Label className="text-xs whitespace-nowrap w-24">Venue capacity</Label>
+                    <TooltipProvider>
+                      <UITooltip>
+                        <UITooltipTrigger asChild>
+                          <HelpCircle className="size-3.5 text-muted-foreground cursor-help" />
+                        </UITooltipTrigger>
+                        <UITooltipContent side="right" className="max-w-[220px]">
+                          The maximum number of in-person attendees your venue can hold. This helps the AI be more selective when space is limited.
+                        </UITooltipContent>
+                      </UITooltip>
+                    </TooltipProvider>
+                  </div>
                   {selectionPreferences.venue_capacity === null ? (
                     <button
                       onClick={() => setSelectionPreferences((p) => ({ ...p, venue_capacity: 200 }))}
@@ -2705,7 +2922,19 @@ export default function Page() {
 
               {/* Relevance Filter */}
               <div className="flex items-center gap-3">
-                <Label className="text-xs whitespace-nowrap w-24">Relevance</Label>
+                <div className="flex items-center gap-1.5">
+                  <Label className="text-xs whitespace-nowrap w-24">Relevance</Label>
+                  <TooltipProvider>
+                    <UITooltip>
+                      <UITooltipTrigger asChild>
+                        <HelpCircle className="size-3.5 text-muted-foreground cursor-help" />
+                      </UITooltipTrigger>
+                      <UITooltipContent side="right" className="max-w-[220px]">
+                        Controls how strictly the AI filters applicants by their relevance to your event topic. Stricter = fewer but more on-topic attendees.
+                      </UITooltipContent>
+                    </UITooltip>
+                  </TooltipProvider>
+                </div>
                 <Select
                   value={selectionPreferences.relevance_filter}
                   onValueChange={(v) => setSelectionPreferences((p) => ({ ...p, relevance_filter: v }))}
@@ -2724,7 +2953,10 @@ export default function Page() {
               <div className="space-y-1.5">
                 <Label className="text-xs">Auto-accept these types (skip AI scoring)</Label>
                 <div className="flex flex-wrap gap-1.5">
-                  {SETTINGS_ATTENDEE_TYPES.map((t) => {
+                  {[
+                    ...SETTINGS_ATTENDEE_TYPES,
+                    ...(selectionPreferences.custom_categories || []).map((c) => ({ key: c, label: c })),
+                  ].map((t) => {
                     const checked = selectionPreferences.auto_accept_types.includes(t.key);
                     return (
                       <button
@@ -2744,37 +2976,88 @@ export default function Page() {
                     );
                   })}
                 </div>
+                <div className="flex gap-2 mt-1.5">
+                  <Input
+                    placeholder="Add custom role to auto-accept..."
+                    className="h-7 text-xs"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        const val = (e.target as HTMLInputElement).value.trim();
+                        if (!val) return;
+                        setSelectionPreferences((p) => ({
+                          ...p,
+                          custom_categories: [...(p.custom_categories || []).filter((c) => c.toLowerCase() !== val.toLowerCase()), val],
+                          auto_accept_types: [...p.auto_accept_types, val],
+                        }));
+                        (e.target as HTMLInputElement).value = "";
+                      }
+                    }}
+                  />
+                </div>
               </div>
 
-              {/* Attendee Mix */}
+              {/* Attendee Demographic Constraints */}
               <Collapsible>
                 <CollapsibleTrigger asChild>
                   <button className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
                     <ChevronRight className="size-3" />
-                    Target attendee mix (optional)
+                    Attendee Demographic Constraints (optional)
                   </button>
                 </CollapsibleTrigger>
                 <CollapsibleContent className="mt-2 space-y-2">
-                  {SETTINGS_ATTENDEE_TYPES.map((t) => {
-                    const value = selectionPreferences.attendee_mix[t.key] ?? 0;
+                  {(() => {
+                    const mixTotal = Object.values(selectionPreferences.attendee_mix).reduce((a, b) => a + b, 0);
                     return (
-                      <div key={t.key} className="flex items-center gap-2">
-                        <span className="text-xs w-20 truncate">{t.label}</span>
-                        <Slider
-                          value={[value]}
-                          min={0}
-                          max={50}
-                          step={5}
-                          onValueChange={([v]) => setSelectionPreferences((p) => ({
-                            ...p,
-                            attendee_mix: { ...p.attendee_mix, [t.key]: v },
-                          }))}
-                          className="flex-1"
-                        />
-                        <span className="text-xs font-mono w-8 text-right">{value}%</span>
-                      </div>
+                      <>
+                        {SETTINGS_ATTENDEE_TYPES.map((t) => {
+                          const value = selectionPreferences.attendee_mix[t.key] ?? 0;
+                          return (
+                            <div key={t.key} className="flex items-center gap-2">
+                              <span className="text-xs w-20 truncate">{t.label}</span>
+                              <Slider
+                                value={[value]}
+                                min={0}
+                                max={100}
+                                step={5}
+                                onValueChange={([v]) => {
+                                  const newTotal = mixTotal - (selectionPreferences.attendee_mix[t.key] ?? 0) + v;
+                                  if (newTotal > 100) {
+                                    toast.error("Audience distribution must total 100%.");
+                                    return;
+                                  }
+                                  setSelectionPreferences((p) => ({
+                                    ...p,
+                                    attendee_mix: { ...p.attendee_mix, [t.key]: v },
+                                  }));
+                                }}
+                                className="flex-1"
+                              />
+                              <span className="text-xs font-mono w-8 text-right">{value}%</span>
+                            </div>
+                          );
+                        })}
+                        <div className="flex items-center justify-between pt-1">
+                          <span className={`text-xs font-medium ${mixTotal > 100 ? "text-red-500" : mixTotal === 100 ? "text-green-600" : "text-muted-foreground"}`}>
+                            Total: {mixTotal}%{mixTotal > 100 && " — Audience distribution must total 100%."}
+                          </span>
+                        </div>
+                        <TooltipProvider>
+                          <UITooltip>
+                            <UITooltipTrigger asChild>
+                              <p className="text-[10px] text-muted-foreground cursor-help flex items-center gap-1">
+                                <HelpCircle className="size-3 shrink-0" />
+                                How are individuals with multiple categories handled?
+                              </p>
+                            </UITooltipTrigger>
+                            <UITooltipContent side="bottom" className="max-w-[260px]">
+                              Individuals may qualify for multiple categories. Each person will only be counted once and will be allocated to a category with available capacity.
+                            </UITooltipContent>
+                          </UITooltip>
+                        </TooltipProvider>
+                      </>
                     );
-                  })}
+                  })()}
                 </CollapsibleContent>
               </Collapsible>
             </div>
@@ -2794,7 +3077,19 @@ export default function Page() {
 
               {/* Criteria */}
               <div className="space-y-1.5">
-                <Label className="text-xs">Evaluation criteria</Label>
+                <div className="flex items-center gap-1.5">
+                  <Label className="text-xs">Evaluation criteria</Label>
+                  <TooltipProvider>
+                    <UITooltip>
+                      <UITooltipTrigger asChild>
+                        <HelpCircle className="size-3.5 text-muted-foreground cursor-help" />
+                      </UITooltipTrigger>
+                      <UITooltipContent side="right" className="max-w-[260px]">
+                        Evaluation criteria are the specific dimensions the AI uses to score each applicant (e.g. experience, expertise). Review mode determines how many AI judges evaluate each applicant and how their votes are combined.
+                      </UITooltipContent>
+                    </UITooltip>
+                  </TooltipProvider>
+                </div>
                 <div className="flex gap-2">
                   <Input
                     value={newCriterion}
@@ -2810,14 +3105,28 @@ export default function Page() {
                   </Button>
                 </div>
                 {criteria.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="space-y-1">
                     {criteria.map((c) => (
-                      <span key={c} className="inline-flex items-center gap-1 rounded-full border bg-muted/30 px-2.5 py-1 text-xs">
-                        {c}
-                        <button onClick={() => removeCriterion(c)} className="text-muted-foreground hover:text-destructive">
+                      <div key={c} className="flex items-center gap-2 rounded border bg-muted/30 px-2.5 py-1.5">
+                        <span className="text-xs flex-1 truncate">{c}</span>
+                        <Select
+                          value={String(criteriaWeights[c] ?? 1)}
+                          onValueChange={(v) => setCriteriaWeights((prev) => ({ ...prev, [c]: parseFloat(v) }))}
+                        >
+                          <SelectTrigger className="h-6 w-20 text-[10px] border-0 bg-transparent px-1">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="0.5">Low</SelectItem>
+                            <SelectItem value="1">Normal</SelectItem>
+                            <SelectItem value="1.5">High</SelectItem>
+                            <SelectItem value="2">Critical</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <button onClick={() => removeCriterion(c)} className="text-muted-foreground hover:text-destructive shrink-0">
                           <X className="size-3" />
                         </button>
-                      </span>
+                      </div>
                     ))}
                   </div>
                 )}
@@ -3014,6 +3323,70 @@ export default function Page() {
                 )}
               </div>
             </div>
+
+            <Separator />
+
+            {/* ── Organizers (Multi-player) ── */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Organizers</h3>
+              <p className="text-xs text-muted-foreground">
+                Invite other organizers to collaborate on reviewing applicants. They can view, flag, and update applicant statuses.
+              </p>
+              {organizers.length > 0 && (
+                <div className="space-y-1">
+                  {organizers.map((org, i) => (
+                    <div key={i} className="flex items-center gap-2 rounded border px-2.5 py-1.5 text-xs">
+                      <UserPlus className="size-3.5 text-muted-foreground shrink-0" />
+                      <span className="flex-1 truncate">{org.email}</span>
+                      <Badge variant="outline" className="text-[10px]">{org.role}</Badge>
+                      <button
+                        onClick={() => setOrganizers((prev) => prev.filter((_, j) => j !== i))}
+                        className="text-muted-foreground hover:text-destructive"
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <Input
+                  type="email"
+                  value={newOrganizerEmail}
+                  onChange={(e) => setNewOrganizerEmail(e.target.value)}
+                  placeholder="organizer@example.com"
+                  className="h-8 text-xs flex-1"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      const email = newOrganizerEmail.trim();
+                      if (!email) return;
+                      if (organizers.some((o) => o.email === email)) return;
+                      setOrganizers((prev) => [...prev, { email, role: "reviewer" }]);
+                      setNewOrganizerEmail("");
+                    }
+                  }}
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs"
+                  onClick={() => {
+                    const email = newOrganizerEmail.trim();
+                    if (!email) return;
+                    if (organizers.some((o) => o.email === email)) return;
+                    setOrganizers((prev) => [...prev, { email, role: "reviewer" }]);
+                    setNewOrganizerEmail("");
+                  }}
+                >
+                  <UserPlus className="size-3.5 mr-1" />
+                  Add
+                </Button>
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                Reviewers can flag applicants for your review. Admins can change settings and run analysis.
+              </p>
+            </div>
           </div>
 
           <DialogFooter>
@@ -3103,7 +3476,18 @@ export default function Page() {
                   </div>
                 </div>
                 <div className="space-y-1.5">
-                  <Label className="text-xs">API Key</Label>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs">API Key</Label>
+                    <a
+                      href={provider === "openai" ? "https://platform.openai.com/api-keys" : "https://console.anthropic.com/settings/keys"}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[10px] text-blue-500 hover:underline flex items-center gap-0.5"
+                    >
+                      Get your {provider === "openai" ? "OpenAI" : "Anthropic"} key
+                      <ExternalLink className="size-2.5" />
+                    </a>
+                  </div>
                   <div className="relative">
                     <Input
                       type={showKey ? "text" : "password"}
@@ -3204,9 +3588,11 @@ export default function Page() {
                       panelSize={panelConfig.panel_size}
                       judgeIds={panelConfig.judge_ids}
                       personaEdits={personaEdits}
+                      judgeTemperatures={panelConfig.judge_temperatures}
                       onToggleJudge={handleToggleJudge}
                       onUpdatePersonaEdit={handleUpdatePersonaEdit}
                       onResetPersonaEdit={handleResetPersonaEdit}
+                      onUpdateTemperature={handleUpdateTemperature}
                     />
                   </div>
                 )}

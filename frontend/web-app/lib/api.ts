@@ -133,6 +133,7 @@ export interface PanelConfig {
   panel_size: 3 | 6 | 9 | 12;
   judge_ids: string[];
   adjudication_mode: "union" | "majority";
+  judge_temperatures?: Record<string, number>;
 }
 
 export const DEFAULT_PANEL_CONFIG: PanelConfig = {

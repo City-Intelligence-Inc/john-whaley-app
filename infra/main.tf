@@ -199,6 +199,10 @@ resource "aws_apprunner_service" "backend" {
 
       image_configuration {
         port = "8000"
+        runtime_environment_variables = {
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = "pk_test_bm92ZWwtZ2FubmV0LTk1LmNsZXJrLmFjY291bnRzLmRldiQ"
+          CLERK_SECRET_KEY                 = "sk_test_DNMiNSUzPHd8FbAhiVqISzW0r2EgRqVDzyQVnfoVGv"
+        }
       }
     }
 

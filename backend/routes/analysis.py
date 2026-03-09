@@ -298,6 +298,7 @@ async def _judge_score_one(
     pool_summary: str,
     total: int,
     semaphore: asyncio.Semaphore,
+    temperature: float | None = None,
 ) -> dict:
     """Score a single applicant through a judge's lens."""
     applicant_id = applicant["applicant_id"]
@@ -325,7 +326,7 @@ async def _judge_score_one(
         )
 
         try:
-            raw = await call_ai_async(body.provider, body.api_key, body.model, prompt)
+            raw = await call_ai_async(body.provider, body.api_key, body.model, prompt, temperature=temperature)
             result = parse_json_response(raw)
             return {
                 "applicant_id": applicant_id,
@@ -679,9 +680,10 @@ async def analyze_all_stream(body: BulkAnalyzeRequest):
                 yield f"event: judge_start\ndata: {json.dumps({'judge_id': judge['id'], 'judge_name': judge['name'], 'judge_emoji': judge['emoji'], 'judge_index': judge_idx, 'total_judges': len(judges), 'seats_remaining': seats})}\n\n"
 
                 # Score ALL applicants concurrently for this judge
+                judge_temp = panel.judge_temperatures.get(judge["id"]) if panel.judge_temperatures else None
                 judge_tasks = {
                     asyncio.ensure_future(
-                        _judge_score_one(a, body, judge, seats, pool_summary, total, semaphore)
+                        _judge_score_one(a, body, judge, seats, pool_summary, total, semaphore, temperature=judge_temp)
                     ): a
                     for a in applicants_refreshed
                 }

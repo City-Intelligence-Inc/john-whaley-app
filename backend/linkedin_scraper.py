@@ -37,46 +37,84 @@ DELAY_BETWEEN_REQUESTS = 3.0  # seconds — be polite to LinkedIn
 
 
 # ─── URL CLEANER ──────────────────────────────────────────────────────────────
-def normalize_url(raw: str) -> str | None:
-    """Normalize a raw LinkedIn URL. Returns None if invalid."""
+def normalize_url(raw: str) -> tuple[str | None, str | None]:
+    """Normalize a raw LinkedIn URL.
+
+    Returns (normalized_url, error_reason).
+    - (url, None)    = valid URL
+    - (None, reason) = invalid URL with explanation
+    """
     url = raw.strip()
 
     # Skip garbage
-    if not url or url.startswith("@") or url.startswith("#") or " " in url:
-        return None
+    if not url:
+        return None, "Empty URL"
+    if url.startswith("@") or url.startswith("#"):
+        return None, f"Not a URL: '{url}'"
+    if " " in url and "linkedin.com" not in url:
+        return None, f"Not a URL: '{url}'"
     if url.startswith("https://x.com") or url.startswith("http://x.com"):
-        return None
+        return None, "Twitter/X URL, not LinkedIn"
     if url in ("https://www.linkedin.com", "https://linkedin.com"):
-        return None
+        return None, "LinkedIn homepage, not a profile URL"
+
+    # ── Common typo fixes ──
+    # linked.com → linkedin.com
+    if "linked.com/" in url and "linkedin.com" not in url:
+        fixed = url.replace("linked.com/", "linkedin.com/")
+        # Try the fixed version
+        result, _ = _try_normalize(fixed)
+        if result:
+            return result, None
+        return None, f"Typo domain 'linked.com' — could not fix: '{url}'"
+
+    # Missing /in/ prefix (bare username)
+    if not url.startswith("http") and "/" not in url and len(url) > 2:
+        guess = f"https://www.linkedin.com/in/{url}/"
+        return guess, None  # best guess for bare username
 
     # Add scheme if missing
     for prefix in ("linkedin.com/", "www.linkedin.com/"):
         if url.startswith(prefix):
             url = "https://www." + url.lstrip("www.")
             break
-    if url.startswith("linked.com/"):
-        return None  # wrong domain, unfixable
 
+    return _try_normalize(url)
+
+
+def _try_normalize(url: str) -> tuple[str | None, str | None]:
+    """Inner normalization logic."""
     # Must be http/https by now
     if not url.startswith("http"):
-        return None
+        return None, f"Not a valid URL: '{url}'"
 
     # Enforce linkedin.com domain
     try:
         parsed = urlparse(url)
     except Exception:
-        return None
+        return None, f"Cannot parse URL: '{url}'"
     if "linkedin.com" not in parsed.netloc:
-        return None
+        return None, f"Not a LinkedIn URL (domain: {parsed.netloc})"
+
+    # LinkedIn URL missing /in/ path (e.g. linkedin.com/sergey-q-630639160)
+    # Try to fix by inserting /in/
+    if "/in/" not in parsed.path and "/company/" not in parsed.path:
+        path_parts = [p for p in parsed.path.split("/") if p]
+        if path_parts:
+            # Could be a profile slug without /in/
+            slug = path_parts[0]
+            if len(slug) > 2 and not slug.startswith("pub"):
+                return f"https://www.linkedin.com/in/{slug}/", None
+        return None, f"LinkedIn URL but no profile path: '{url}'"
 
     # Must have /in/ or /company/ path
     match = re.search(r"linkedin\.com/(in|company)/([^/?&#\s]+)", url)
     if not match:
-        return None
+        return None, f"Cannot extract profile ID from: '{url}'"
 
     profile_type = match.group(1)
     profile_id = match.group(2).rstrip("/")
-    return f"https://www.linkedin.com/{profile_type}/{profile_id}/"
+    return f"https://www.linkedin.com/{profile_type}/{profile_id}/", None
 
 
 # ─── SCRAPER ──────────────────────────────────────────────────────────────────
@@ -300,12 +338,12 @@ def main():
     valid, invalid = [], []
     seen = set()
     for raw in RAW_URLS:
-        normalized = normalize_url(raw)
+        normalized, err_reason = normalize_url(raw)
         if normalized and normalized not in seen:
             seen.add(normalized)
             valid.append(normalized)
         else:
-            invalid.append(_err(raw.strip(), "Invalid / unparseable URL"))
+            invalid.append(_err(raw.strip(), err_reason or "Invalid / unparseable URL"))
 
     print(f"✅  Valid URLs:   {len(valid)}")
     print(f"❌  Invalid URLs: {len(invalid)}")

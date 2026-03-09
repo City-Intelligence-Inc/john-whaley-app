@@ -57,6 +57,7 @@ class PanelConfig(BaseModel):
     panel_size: Literal[3, 6, 9, 12] = 3
     judge_ids: list[str] = []
     adjudication_mode: str = "union"  # "union" | "majority"
+    judge_temperatures: Optional[dict[str, float]] = None
 
 
 # ── AI Analysis ──

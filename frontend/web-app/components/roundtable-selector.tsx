@@ -10,15 +10,19 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Slider } from "@/components/ui/slider";
 import { JUDGE_PERSONAS, type JudgePersona } from "@/lib/judge-personas";
 
 interface RoundtableSelectorProps {
   panelSize: 3 | 6 | 9 | 12;
   judgeIds: string[];
   personaEdits: Record<string, string>;
+  judgeTemperatures?: Record<string, number>;
   onToggleJudge: (judgeId: string) => void;
   onUpdatePersonaEdit: (judgeId: string, text: string) => void;
   onResetPersonaEdit: (judgeId: string) => void;
+  onSaveCustomJudge?: (judgeId: string, description: string) => void;
+  onUpdateTemperature?: (judgeId: string, temp: number) => void;
 }
 
 const SIZE_CONFIG: Record<number, { radius: number; seat: number }> = {
@@ -141,18 +145,24 @@ function FilledSeat({
   seatSize,
   persona,
   personaEdit,
+  temperature,
   onRemove,
   onUpdateEdit,
   onResetEdit,
+  onSaveCustom,
+  onUpdateTemperature,
 }: {
   x: number;
   y: number;
   seatSize: number;
   persona: JudgePersona;
   personaEdit?: string;
+  temperature?: number;
   onRemove: () => void;
   onUpdateEdit: (text: string) => void;
   onResetEdit: () => void;
+  onSaveCustom?: (description: string) => void;
+  onUpdateTemperature?: (temp: number) => void;
 }) {
   const [open, setOpen] = useState(false);
   const hasEdit = personaEdit !== undefined && personaEdit !== persona.description;
@@ -199,14 +209,46 @@ function FilledSeat({
               onChange={(e) => onUpdateEdit(e.target.value)}
             />
             {hasEdit && (
-              <button
-                onClick={onResetEdit}
-                className="text-[10px] text-primary hover:underline"
-              >
-                Reset to default
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={onResetEdit}
+                  className="text-[10px] text-primary hover:underline"
+                >
+                  Reset to default
+                </button>
+                {onSaveCustom && (
+                  <button
+                    onClick={() => {
+                      onSaveCustom(personaEdit ?? persona.description);
+                      setOpen(false);
+                    }}
+                    className="text-[10px] text-green-600 hover:underline"
+                  >
+                    Save as custom judge
+                  </button>
+                )}
+              </div>
             )}
           </div>
+
+          {/* Temperature slider */}
+          {onUpdateTemperature && (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium text-muted-foreground">Temperature</label>
+                <span className="text-xs font-mono tabular-nums text-muted-foreground">{(temperature ?? 0.7).toFixed(1)}</span>
+              </div>
+              <Slider
+                value={[temperature ?? 0.7]}
+                min={0}
+                max={1}
+                step={0.1}
+                onValueChange={([v]) => onUpdateTemperature(v)}
+                className="w-full"
+              />
+              <p className="text-[9px] text-muted-foreground">Lower = more consistent, higher = more creative</p>
+            </div>
+          )}
 
           {/* Remove button */}
           <Button
@@ -231,9 +273,12 @@ export function RoundtableSelector({
   panelSize,
   judgeIds,
   personaEdits,
+  judgeTemperatures,
   onToggleJudge,
   onUpdatePersonaEdit,
   onResetPersonaEdit,
+  onSaveCustomJudge,
+  onUpdateTemperature,
 }: RoundtableSelectorProps) {
   const config = SIZE_CONFIG[panelSize];
   const seatSize = config.seat;
@@ -254,12 +299,18 @@ export function RoundtableSelector({
   });
 
   const availableJudges = JUDGE_PERSONAS.filter((p) => !judgeIds.includes(p.id));
+  const hasEmptySeats = judgeIds.length < panelSize;
 
   // Center circle size
   const centerRadius = Math.max(28, radius * 0.35);
 
   return (
-    <div className="flex justify-center">
+    <div className="flex flex-col items-center gap-1">
+      {hasEmptySeats && (
+        <p className="text-[10px] text-muted-foreground text-center">
+          Click <span className="inline-flex items-center justify-center size-3.5 rounded-full border border-dashed border-muted-foreground/40 text-[8px] align-middle">+</span> to add judges to the panel
+        </p>
+      )}
       <div className="relative" style={{ width: containerSize, height: containerSize }}>
         {/* Center decoration */}
         <div
@@ -286,9 +337,12 @@ export function RoundtableSelector({
               seatSize={seatSize}
               persona={persona}
               personaEdit={personaEdits[judgeId!]}
+              temperature={judgeTemperatures?.[judgeId!]}
               onRemove={() => onToggleJudge(judgeId!)}
               onUpdateEdit={(text) => onUpdatePersonaEdit(judgeId!, text)}
               onResetEdit={() => onResetPersonaEdit(judgeId!)}
+              onSaveCustom={onSaveCustomJudge ? (desc) => onSaveCustomJudge(judgeId!, desc) : undefined}
+              onUpdateTemperature={onUpdateTemperature ? (temp) => onUpdateTemperature(judgeId!, temp) : undefined}
             />
           ) : (
             <EmptySeat

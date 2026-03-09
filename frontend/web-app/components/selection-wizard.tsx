@@ -17,12 +17,19 @@ import { Slider } from "@/components/ui/slider";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { ChevronLeft, ChevronRight, Plus, Sparkles, X, Users, User, MoreHorizontal } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Sparkles, X, Users, User, MoreHorizontal, HelpCircle } from "lucide-react";
 import {
   Popover,
   PopoverTrigger,
   PopoverContent,
 } from "@/components/ui/popover";
+import {
+  Tooltip as UITooltip,
+  TooltipTrigger as UITooltipTrigger,
+  TooltipContent as UITooltipContent,
+  TooltipProvider,
+} from "@/components/ui/tooltip";
+import { toast } from "sonner";
 import type { SelectionPreferences, PanelConfig } from "@/lib/api";
 import { DEFAULT_PANEL_CONFIG } from "@/lib/api";
 import { JUDGE_PERSONAS, type JudgePersona } from "@/lib/judge-personas";
@@ -469,6 +476,28 @@ export function SelectionWizard({
                                 Reset to default
                               </button>
                             )}
+                            <div className="space-y-1 pt-1">
+                              <div className="flex items-center justify-between">
+                                <Label className="text-xs text-muted-foreground">Temperature</Label>
+                                <span className="text-[10px] font-mono tabular-nums text-muted-foreground">
+                                  {(panel.judge_temperatures?.[persona.id] ?? 0.7).toFixed(1)}
+                                </span>
+                              </div>
+                              <Slider
+                                value={[panel.judge_temperatures?.[persona.id] ?? 0.7]}
+                                min={0}
+                                max={1}
+                                step={0.1}
+                                onValueChange={([v]) =>
+                                  setPanel((p) => ({
+                                    ...p,
+                                    judge_temperatures: { ...(p.judge_temperatures || {}), [persona.id]: v },
+                                  }))
+                                }
+                                className="w-full"
+                              />
+                              <p className="text-[9px] text-muted-foreground">Lower = consistent, higher = creative</p>
+                            </div>
                           </div>
                         </PopoverContent>
                       </Popover>
@@ -483,9 +512,21 @@ export function SelectionWizard({
           {content === "capacity" && (
             <div className="space-y-4">
               <div>
-                <h3 className="text-sm font-semibold mb-1">Venue Capacity</h3>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <h3 className="text-sm font-semibold">Venue Capacity</h3>
+                  <TooltipProvider>
+                    <UITooltip>
+                      <UITooltipTrigger asChild>
+                        <HelpCircle className="size-3.5 text-muted-foreground cursor-help" />
+                      </UITooltipTrigger>
+                      <UITooltipContent side="right" className="max-w-[220px]">
+                        This refers to in-person attendees only. Virtual participants are not counted against venue capacity.
+                      </UITooltipContent>
+                    </UITooltip>
+                  </TooltipProvider>
+                </div>
                 <p className="text-sm text-muted-foreground">
-                  How many attendees can your venue hold? This helps the AI be more selective when needed.
+                  How many in-person attendees can your venue hold? Virtual participants have no limit by default.
                 </p>
               </div>
               <div className="flex items-center gap-3">
@@ -523,13 +564,13 @@ export function SelectionWizard({
             </div>
           )}
 
-          {/* Attendee Mix */}
+          {/* Attendee Demographic Constraints */}
           {content === "mix" && (
             <div className="space-y-4">
               <div>
-                <h3 className="text-sm font-semibold mb-1">Target Attendee Mix</h3>
+                <h3 className="text-sm font-semibold mb-1">Attendee Demographic Constraints</h3>
                 <p className="text-sm text-muted-foreground">
-                  Set soft target percentages for each attendee type. These guide the AI but aren&apos;t strict quotas.
+                  Set target percentages for each attendee type. Total must equal 100%.
                 </p>
               </div>
               <div className="space-y-3">
@@ -557,14 +598,45 @@ export function SelectionWizard({
                       <Slider
                         value={[value]}
                         min={0}
-                        max={50}
+                        max={100}
                         step={5}
-                        onValueChange={([v]) => updateMix(t.key, v)}
+                        onValueChange={([v]) => {
+                          const currentTotal = Object.values(prefs.attendee_mix).reduce((a, b) => a + b, 0);
+                          const newTotal = currentTotal - (prefs.attendee_mix[t.key] ?? 0) + v;
+                          if (newTotal > 100) {
+                            toast.error("Audience distribution must total 100%.");
+                            return;
+                          }
+                          updateMix(t.key, v);
+                        }}
                       />
                     </div>
                   );
                 })}
               </div>
+              {(() => {
+                const total = Object.values(prefs.attendee_mix).reduce((a, b) => a + b, 0);
+                return (
+                  <div className="flex items-center justify-between">
+                    <span className={`text-xs font-medium ${total > 100 ? "text-red-500" : total === 100 ? "text-green-600" : "text-muted-foreground"}`}>
+                      Total: {total}%{total > 100 && " — Audience distribution must total 100%."}
+                    </span>
+                  </div>
+                );
+              })()}
+              <TooltipProvider>
+                <UITooltip>
+                  <UITooltipTrigger asChild>
+                    <p className="text-[10px] text-muted-foreground cursor-help flex items-center gap-1">
+                      <HelpCircle className="size-3 shrink-0" />
+                      How are individuals with multiple categories handled?
+                    </p>
+                  </UITooltipTrigger>
+                  <UITooltipContent side="bottom" className="max-w-[260px]">
+                    Individuals may qualify for multiple categories. Each person will only be counted once and will be allocated to a category with available capacity.
+                  </UITooltipContent>
+                </UITooltip>
+              </TooltipProvider>
               <div className="flex gap-2">
                 <Input
                   value={newCategory}
@@ -591,7 +663,7 @@ export function SelectionWizard({
               <div>
                 <h3 className="text-sm font-semibold mb-1">Auto-Accept Rules</h3>
                 <p className="text-sm text-muted-foreground">
-                  Select which attendee types should be automatically accepted (score 100, skip AI scoring).
+                  Select which attendee types should be automatically accepted (score 100, skip AI scoring). These rules are applied before the target attendee mix.
                 </p>
               </div>
               <div className="space-y-2">
@@ -608,6 +680,31 @@ export function SelectionWizard({
                   </label>
                 ))}
               </div>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Add custom role to auto-accept..."
+                  className="h-8 text-sm"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      const val = (e.target as HTMLInputElement).value.trim();
+                      if (!val) return;
+                      const exists = allTypes.some((t) => t.key.toLowerCase() === val.toLowerCase());
+                      if (!exists) {
+                        setPrefs((p) => ({
+                          ...p,
+                          custom_categories: [...(p.custom_categories || []), val],
+                        }));
+                      }
+                      setPrefs((p) => ({
+                        ...p,
+                        auto_accept_types: p.auto_accept_types.includes(val) ? p.auto_accept_types : [...p.auto_accept_types, val],
+                      }));
+                      (e.target as HTMLInputElement).value = "";
+                    }
+                  }}
+                />
+              </div>
             </div>
           )}
 
@@ -615,7 +712,19 @@ export function SelectionWizard({
           {content === "relevance" && (
             <div className="space-y-4">
               <div>
-                <h3 className="text-sm font-semibold mb-1">AI Relevance Filter</h3>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <h3 className="text-sm font-semibold">AI Relevance Filter</h3>
+                  <TooltipProvider>
+                    <UITooltip>
+                      <UITooltipTrigger asChild>
+                        <HelpCircle className="size-3.5 text-muted-foreground cursor-help" />
+                      </UITooltipTrigger>
+                      <UITooltipContent side="right" className="max-w-[220px]">
+                        Controls how strictly the AI filters applicants by their relevance to your event topic. Stricter = fewer but more on-topic attendees.
+                      </UITooltipContent>
+                    </UITooltip>
+                  </TooltipProvider>
+                </div>
                 <p className="text-sm text-muted-foreground">
                   How strictly should the AI filter applicants by relevance to your event?
                 </p>

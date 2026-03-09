@@ -85,20 +85,39 @@ class EnrichResponse(BaseModel):
 
 # ─── URL normalizer ───────────────────────────────────────────────────────────
 def normalize_linkedin_url(raw: str) -> str | None:
+    """Normalize a LinkedIn URL, fixing common typos.
+
+    Common fixes applied:
+    - linked.com → linkedin.com
+    - Missing /in/ prefix (bare username)
+    - Missing https:// scheme
+    - URLs like linkedin.com/sergey-q-630639160 → linkedin.com/in/sergey-q-630639160
+    """
     from urllib.parse import urlparse
     url = raw.strip()
-    if not url or url.startswith("@") or url.startswith("#") or " " in url:
+    if not url:
+        return None
+    if url.startswith("@") or url.startswith("#"):
         return None
     if url.startswith("https://x.com") or url.startswith("http://x.com"):
         return None
     if url in ("https://www.linkedin.com", "https://linkedin.com"):
         return None
+
+    # Fix common typo: linked.com → linkedin.com
+    if "linked.com/" in url and "linkedin.com" not in url:
+        url = url.replace("linked.com/", "linkedin.com/")
+
+    # Bare username without any URL structure
+    if not url.startswith("http") and "/" not in url and len(url) > 2 and "." not in url:
+        return f"https://www.linkedin.com/in/{url}/"
+
+    # Add scheme if missing
     for prefix in ("linkedin.com/", "www.linkedin.com/"):
         if url.startswith(prefix):
             url = "https://www." + url.lstrip("www.")
             break
-    if url.startswith("linked.com/"):
-        return None
+
     if not url.startswith("http"):
         return None
     try:
@@ -107,6 +126,14 @@ def normalize_linkedin_url(raw: str) -> str | None:
         return None
     if "linkedin.com" not in parsed.netloc:
         return None
+
+    # Fix URLs missing /in/ (e.g. linkedin.com/sergey-q-630639160)
+    if "/in/" not in parsed.path and "/company/" not in parsed.path:
+        path_parts = [p for p in parsed.path.split("/") if p]
+        if path_parts and len(path_parts[0]) > 2:
+            return f"https://www.linkedin.com/in/{path_parts[0]}/"
+        return None
+
     match = re.search(r"linkedin\.com/(in|company)/([^/?&#\s]+)", url)
     if not match:
         return None
