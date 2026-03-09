@@ -210,6 +210,11 @@ export function SelectionWizard({
   };
 
   const handleSave = () => {
+    const mixTotal = Object.values(prefs.attendee_mix).reduce((a, b) => a + b, 0);
+    if (mixTotal > 0 && mixTotal !== 100) {
+      toast.error("Audience distribution must total 100%.");
+      return;
+    }
     const edits = Object.keys(personaEdits).length > 0 ? personaEdits : undefined;
     onSave(prefs, panel.enabled ? panel : undefined, edits);
     onOpenChange(false);
@@ -601,12 +606,6 @@ export function SelectionWizard({
                         max={100}
                         step={5}
                         onValueChange={([v]) => {
-                          const currentTotal = Object.values(prefs.attendee_mix).reduce((a, b) => a + b, 0);
-                          const newTotal = currentTotal - (prefs.attendee_mix[t.key] ?? 0) + v;
-                          if (newTotal > 100) {
-                            toast.error("Audience distribution must total 100%.");
-                            return;
-                          }
                           updateMix(t.key, v);
                         }}
                       />

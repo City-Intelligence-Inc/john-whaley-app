@@ -1697,6 +1697,11 @@ export default function Page() {
 
   const handleReallocate = useCallback(async () => {
     if (!activeSessionId) return;
+    const mixTotal = Object.values(postMix).reduce((a, b) => a + b, 0);
+    if (mixTotal > 0 && mixTotal !== 100) {
+      toast.error("Audience distribution must total 100%.");
+      return;
+    }
     setReallocating(true);
     try {
       const result = await api.reallocate({
@@ -2237,11 +2242,6 @@ export default function Page() {
                         max={100}
                         step={5}
                         onValueChange={([v]) => {
-                          const total = Object.values(postMix).reduce((a, b) => a + b, 0) - (postMix[t.key] ?? 0) + v;
-                          if (total > 100) {
-                            toast.error("Audience distribution must total 100%.");
-                            return;
-                          }
                           setPostMix((prev) => ({ ...prev, [t.key]: v }));
                         }}
                         className="flex-1"
@@ -3021,11 +3021,6 @@ export default function Page() {
                                 max={100}
                                 step={5}
                                 onValueChange={([v]) => {
-                                  const newTotal = mixTotal - (selectionPreferences.attendee_mix[t.key] ?? 0) + v;
-                                  if (newTotal > 100) {
-                                    toast.error("Audience distribution must total 100%.");
-                                    return;
-                                  }
                                   setSelectionPreferences((p) => ({
                                     ...p,
                                     attendee_mix: { ...p.attendee_mix, [t.key]: v },
