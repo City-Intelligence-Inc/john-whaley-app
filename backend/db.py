@@ -208,7 +208,7 @@ def save_linkedin_scrape(result: dict) -> None:
 
     # Store all available fields, skip Nones
     for field in ("name", "headline", "photo_url", "location", "connections",
-                  "company", "education", "error"):
+                  "company", "education", "experience", "error"):
         val = result.get(field)
         if val is not None:
             item[field] = val

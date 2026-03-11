@@ -146,17 +146,34 @@ Rank them by score (highest first). Return ONLY the JSON, no other text."""
 _CLASSIFY_PROMPT = """
 {event_context}
 
-Here is the applicant's information:
+Here is the applicant's information (including self-reported role from their registration form AND their LinkedIn profile data):
 
 {info}
 
-Classify this applicant into ONE attendee type. Return ONLY a JSON object:
-{{"attendee_type": "<type>", "attendee_type_detail": "<specific label>", "investor_level": "<level or null>", "investor_professional": <true/false or null>, "summary": "<1 sentence: who they are and why they'd attend>"}}
+Your task: Classify this applicant AND verify their claimed role against their LinkedIn data. This is critical — people inflate their roles on registration forms. Trust LinkedIn data over self-reported claims.
+
+Return ONLY a JSON object with these fields:
+{{
+  "attendee_type": "<type>",
+  "attendee_type_detail": "<specific label>",
+  "investor_level": "<level or null>",
+  "investor_professional": <true/false or null>,
+  "vc_seniority_tier": <1-5 or null>,
+  "vc_fund_name": "<fund name or null>",
+  "verification_status": "<verified|mismatch|needs_review|unverifiable>",
+  "verification_notes": "<1-2 sentences explaining your verification reasoning>",
+  "verification_flags": [<list of flag codes, or empty array>],
+  "summary": "<1 sentence: who they are and why they'd attend>"
+}}
+
+═══════════════════════════════════════════════════════
+ATTENDEE TYPE CLASSIFICATION
+═══════════════════════════════════════════════════════
 
 attendee_type must be one of: "vc", "entrepreneur", "faculty", "alumni", "press", "student", "other"
 
 Rules:
-- "vc" = Their PRIMARY current role is investing. They work at a VC firm, PE firm, family office, or are a professional angel investor. NOT someone whose day job is engineering/product/etc. who made a few angel investments on the side.
+- "vc" = Their PRIMARY current role is investing. They work at a recognized VC firm, PE firm, family office, or are a professional angel investor with a real track record. NOT someone whose day job is something else who made a few angel investments on the side.
 - "entrepreneur" = Founder, CEO, CTO, startup executive actively running/building a company
 - "faculty" = Professor, researcher, academic staff, postdoc at any university
 - "alumni" = Alumni NOT primarily a VC/founder/professor now
@@ -164,24 +181,101 @@ Rules:
 - "student" = Currently enrolled student at any university
 - "other" = Everyone else (industry engineers, PMs, designers, consultants, etc.)
 
-INVESTOR CLASSIFICATION (only when attendee_type is "vc"):
-- investor_level: one of "intern", "analyst", "associate", "senior_associate", "vp", "principal", "partner", "managing_partner", "gp", "angel", "unknown"
-- investor_professional: true if investing is their PRIMARY occupation (they work at a fund or invest full-time), false if they dabble (engineer/founder who occasionally angel invests)
+═══════════════════════════════════════════════════════
+VC ROLE TAXONOMY — DETAILED SENIORITY HIERARCHY
+═══════════════════════════════════════════════════════
 
-Title hierarchy (lowest to highest seniority):
-  intern < analyst < associate < senior_associate < vp < principal < partner < managing_partner/gp
+When classifying someone as "vc", you MUST determine their exact seniority tier and investor_level.
 
-IMPORTANT distinctions:
-- Someone who lists "angel investor" but primarily works as an engineer/founder → attendee_type "other" or "entrepreneur", NOT "vc"
-- An investment associate is entry-level (like an intern). A partner makes real decisions.
-- "Investor at X" could be any level — look at actual title and context clues.
+TIER 1 — SENIOR DECISION-MAKERS (highest value, they write checks and sit on boards):
+  - Managing Partner / Managing Director / Senior Managing Director / Managing General Partner
+  - General Partner (GP) / Founding Partner / Senior Partner
+  → investor_level: "managing_partner" or "gp"
+  → vc_seniority_tier: 1
+  → These people run the fund, make final investment decisions, manage LP relationships
 
-For non-vc types, set investor_level and investor_professional to null.
+TIER 2 — PARTNERS & SENIOR PROFESSIONALS:
+  - Partner / Investment Partner / Venture Partner
+  - Operating Partner / Platform Partner (helps portfolio companies, may not lead deals)
+  - Principal / Director / Investment Director / Senior Director
+  → investor_level: "partner", "principal", or "operating_partner"
+  → vc_seniority_tier: 2
+  → Can lead deals independently, have carry, may sit on boards
 
-Classify by CURRENT primary role (alum now a VC → "vc").
+TIER 3 — MID-LEVEL:
+  - Vice President (VP) / Senior Vice President / VP of Investments
+  - Senior Associate / Senior Investment Associate
+  - Entrepreneur in Residence (EIR) / Executive in Residence
+  - Professional Angel Investor (invests own capital, has portfolio)
+  → investor_level: "vp", "senior_associate", "eir", or "angel"
+  → vc_seniority_tier: 3
+
+TIER 4 — JUNIOR:
+  - Associate / Investment Associate
+  - Analyst / Investment Analyst / Research Analyst / Financial Analyst
+  - Advisor / Venture Advisor (part-time relationship)
+  → investor_level: "associate", "analyst", or "advisor"
+  → vc_seniority_tier: 4
+
+TIER 5 — ENTRY-LEVEL / PERIPHERAL:
+  - Intern / Summer Associate / Fellow / Venture Fellow
+  - Scout / Deal Scout (part-time deal sourcing, often not a full role)
+  → investor_level: "intern" or "scout"
+  → vc_seniority_tier: 5
+
+═══════════════════════════════════════════════════════
+CROSS-VERIFICATION RULES (CRITICAL)
+═══════════════════════════════════════════════════════
+
+You must compare the applicant's SELF-REPORTED role against their LINKEDIN data. Self-reported data comes from the registration form (fields like "How would you describe yourself"). LinkedIn data includes headline, experience/work history, company, and education.
+
+1. SELF-REPORTED vs LINKEDIN HEADLINE: Do they match? Is the self-reported role more senior or different?
+2. SELF-REPORTED vs LINKEDIN EXPERIENCE: Does their work history support the claimed role? Look at job titles, companies, and tenure.
+3. COMPANY VERIFICATION: Is the company a real, recognized fund? Names containing "Ventures", "Capital", "Partners", "Fund", "VC" suggest legitimate funds. Personal LLCs, consulting firms, or "Self-employed" do NOT.
+4. TITLE CONSISTENCY: Has the person progressed logically (analyst → associate → principal → partner)? A jump from unrelated field to "Partner" at an unknown entity is suspicious.
+5. TENURE CHECK: Someone claiming GP who has been in VC for < 2 years is a red flag.
+
+VERIFICATION STATUS:
+- "verified" = LinkedIn clearly confirms their self-reported role (title matches, fund is real, experience supports it)
+- "mismatch" = LinkedIn contradicts their self-reported role (e.g., claims Investor but LinkedIn shows Software Engineer)
+- "needs_review" = Ambiguous — can't fully verify. Profile is vague, or role is borderline. PUT THESE ON WAITLIST.
+- "unverifiable" = No LinkedIn data available, or profile is private/broken
+
+═══════════════════════════════════════════════════════
+RED FLAGS — USE THESE VERIFICATION FLAG CODES
+═══════════════════════════════════════════════════════
+
+Include ANY applicable flags in the verification_flags array:
+
+- "self_reported_mismatch" = Self-reported role doesn't match LinkedIn data
+- "vague_investor_claim" = Claims to be investor/VC but LinkedIn profile is vague about actual investing activity (no fund named, no deals mentioned, no clear investment role)
+- "no_fund_affiliation" = Claims VC but not affiliated with any recognizable fund or investment firm
+- "self_employed_investor" = Lists "Self-employed" or personal LLC while claiming investor status
+- "title_inflation" = LinkedIn title appears inflated or doesn't match typical VC career progression
+- "side_angel" = Primary role is NOT investing — they occasionally angel invest but self-reported as "Investor"
+- "junior_role" = Actually a junior role (analyst/associate/intern) despite potentially claiming seniority
+- "no_linkedin_data" = No LinkedIn profile or profile is private — can't verify claims
+- "broken_linkedin_url" = LinkedIn URL doesn't work
+- "career_mismatch" = Career history is in a completely different field (e.g., real estate, unrelated industry)
+- "recent_role_change" = Started current investment role very recently (< 6 months)
+
+═══════════════════════════════════════════════════════
+CLASSIFICATION DECISION RULES
+═══════════════════════════════════════════════════════
+
+- If someone self-reports as "Investor" but LinkedIn shows they're a software engineer who angel invests → classify as "other" or "entrepreneur", NOT "vc". Set flag "side_angel".
+- If someone self-reports as "Investor" but LinkedIn is vague (e.g., "Interested in startups", no fund named) → classify as "other" with verification_status "needs_review" and flag "vague_investor_claim".
+- If someone is at a real fund but in a non-investment role (marketing, HR, ops) → classify as "other", not "vc".
+- If LinkedIn is unavailable → use self-reported data but set verification_status "unverifiable" and flag "no_linkedin_data".
+- "Self-employed" + "Investor" = always flag as "self_employed_investor" and set verification_status "needs_review". These are often hobbyist angel investors, not professional VCs.
+- Classify by CURRENT primary role (alum now a VC → "vc").
+
+For investor_level and investor_professional: set to null for non-vc types.
+investor_professional: true ONLY if investing is their PRIMARY occupation at a recognized fund/firm. false for hobbyist/side angels.
 
 For attendee_type_detail:
-- For "vc": use format "<level> at <firm>" or "Angel Investor" or "Fund Manager". E.g. "Partner at Sequoia", "Associate at Zeal Capital"
+- For "vc": use format "<level> at <firm>" e.g. "Partner at Sequoia", "Associate at Zeal Capital"
+- For angel investors: "Angel Investor" (if professional) or "Occasional Angel" (if side activity)
 - For other types: use a BROAD role category. Good: "Engineer", "AI Startup Founder", "CS Professor". Bad: "Senior Staff Platform Infrastructure Engineer" — too specific.
 
 Return ONLY the JSON, no other text.
@@ -429,7 +523,7 @@ async def _classify_one(applicant: dict, body: BulkAnalyzeRequest, semaphore: as
         )
 
         try:
-            raw = await call_ai_async(body.provider, body.api_key, body.model, prompt)
+            raw = await call_ai_async(body.provider, body.api_key, body.model, prompt, max_tokens=1024)
             result = parse_json_response(raw)
 
             fields = {
@@ -441,6 +535,18 @@ async def _classify_one(applicant: dict, body: BulkAnalyzeRequest, semaphore: as
                 fields["investor_level"] = result["investor_level"]
             if result.get("investor_professional") is not None:
                 fields["investor_professional"] = result["investor_professional"]
+            # Store VC-specific fields
+            if result.get("vc_seniority_tier") is not None:
+                fields["vc_seniority_tier"] = result["vc_seniority_tier"]
+            if result.get("vc_fund_name"):
+                fields["vc_fund_name"] = result["vc_fund_name"]
+            # Store verification fields
+            if result.get("verification_status"):
+                fields["verification_status"] = result["verification_status"]
+            if result.get("verification_notes"):
+                fields["verification_notes"] = result["verification_notes"]
+            if result.get("verification_flags"):
+                fields["verification_flags"] = result["verification_flags"]
 
             db.update_applicant_fields(applicant_id, fields)
 
@@ -451,6 +557,11 @@ async def _classify_one(applicant: dict, body: BulkAnalyzeRequest, semaphore: as
                 "attendee_type_detail": fields["attendee_type_detail"],
                 "investor_level": fields.get("investor_level"),
                 "investor_professional": fields.get("investor_professional"),
+                "vc_seniority_tier": fields.get("vc_seniority_tier"),
+                "vc_fund_name": fields.get("vc_fund_name"),
+                "verification_status": fields.get("verification_status"),
+                "verification_notes": fields.get("verification_notes"),
+                "verification_flags": fields.get("verification_flags", []),
                 "summary": result.get("summary", ""),
             }
 
@@ -469,10 +580,33 @@ async def _score_one(applicant: dict, body: BulkAnalyzeRequest, pool_summary: st
 
     async with semaphore:
         investor_context = ""
+        verification_status = applicant.get("verification_status", "")
+        verification_notes = applicant.get("verification_notes", "")
+        verification_flags = applicant.get("verification_flags", [])
+
         if attendee_type == "vc":
             level = applicant.get("investor_level", "unknown")
             pro = applicant.get("investor_professional", False)
-            investor_context = f"Investor level: {level}. Professional investor: {'Yes' if pro else 'No (occasional/dabbler)'}. Note: Partners/GPs are decision-makers (high value). Associates/Analysts are entry-level."
+            tier = applicant.get("vc_seniority_tier", "unknown")
+            fund = applicant.get("vc_fund_name", "unknown")
+            investor_context = (
+                f"Investor level: {level}. Professional investor: {'Yes' if pro else 'No (occasional/dabbler)'}. "
+                f"Seniority tier: {tier}/5 (1=senior partner, 5=intern/scout). Fund: {fund}. "
+                f"Note: Partners/GPs are decision-makers (high value). Associates/Analysts are entry-level."
+            )
+
+        # Add verification context to scoring
+        if verification_status or verification_flags:
+            investor_context += f"\nVERIFICATION: Status={verification_status}. "
+            if verification_notes:
+                investor_context += f"Notes: {verification_notes}. "
+            if verification_flags:
+                investor_context += f"Flags: {', '.join(verification_flags)}. "
+            investor_context += (
+                "SCORING IMPACT: If verification_status is 'mismatch' or has flags like 'vague_investor_claim'/'self_employed_investor', "
+                "reduce the score and set status to 'waitlisted' with reasoning explaining the verification concern. "
+                "If 'needs_review', default to 'waitlisted' rather than 'accepted'."
+            )
 
         prompt = _SCORE_PROMPT.format(
             base_prompt=body.prompt,

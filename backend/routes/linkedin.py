@@ -66,6 +66,7 @@ class ProfileData(BaseModel):
     connections: Optional[str] = None
     company: Optional[str] = None
     education: Optional[str] = None
+    experience: Optional[list[dict]] = None  # Full work history: [{title, company, date_range, duration, description}]
     error: Optional[str] = None
 
 
@@ -285,7 +286,79 @@ async def _scrape_with_playwright(url: str, li_at: str | None, user_agent: str |
                     }
                 }
 
-                return { name, headline, location, connections, photoUrl };
+                // Experience section — extract full work history
+                let experience = [];
+                try {
+                    // Find the experience section by its ID anchor or heading
+                    const expSection = document.querySelector('#experience') ||
+                        document.querySelector('section[id*="experience"]');
+                    if (expSection) {
+                        // Each role is typically in a list item within the section
+                        const items = expSection.querySelectorAll(':scope > div > ul > li, :scope > div > div > ul > li');
+                        for (const item of items) {
+                            const spans = item.querySelectorAll('span[aria-hidden="true"]');
+                            const texts = Array.from(spans).map(s => s.innerText ? s.innerText.trim() : '').filter(Boolean);
+                            if (texts.length >= 2) {
+                                // LinkedIn patterns:
+                                // Single role: [Title, Company, DateRange, Duration, Location?, Description?]
+                                // Multi-role at company: [Company, Duration, then sub-items]
+                                const entry = {
+                                    title: texts[0] || '',
+                                    company: texts[1] || '',
+                                    date_range: texts[2] || '',
+                                    duration: texts[3] || '',
+                                    description: texts.slice(4).join(' ').substring(0, 500),
+                                };
+                                // Check if this looks like a company header (multi-role)
+                                const subItems = item.querySelectorAll(':scope > div > ul > li, :scope > div > div > ul > li');
+                                if (subItems.length > 0) {
+                                    const companyName = texts[0];
+                                    for (const sub of subItems) {
+                                        const subSpans = sub.querySelectorAll('span[aria-hidden="true"]');
+                                        const subTexts = Array.from(subSpans).map(s => s.innerText ? s.innerText.trim() : '').filter(Boolean);
+                                        if (subTexts.length >= 1) {
+                                            experience.push({
+                                                title: subTexts[0] || '',
+                                                company: companyName,
+                                                date_range: subTexts[1] || '',
+                                                duration: subTexts[2] || '',
+                                                description: subTexts.slice(3).join(' ').substring(0, 500),
+                                            });
+                                        }
+                                    }
+                                } else {
+                                    experience.push(entry);
+                                }
+                            }
+                        }
+                    }
+                    // Fallback: look for experience in the page text
+                    if (experience.length === 0) {
+                        const allSections = document.querySelectorAll('section');
+                        for (const sec of allSections) {
+                            const heading = sec.querySelector('h2, [id*="experience"]');
+                            if (heading && /experience/i.test(heading.innerText || '')) {
+                                const items = sec.querySelectorAll('li');
+                                for (const item of items) {
+                                    const spans = item.querySelectorAll('span[aria-hidden="true"]');
+                                    const texts = Array.from(spans).map(s => s.innerText ? s.innerText.trim() : '').filter(Boolean);
+                                    if (texts.length >= 2) {
+                                        experience.push({
+                                            title: texts[0],
+                                            company: texts[1],
+                                            date_range: texts[2] || '',
+                                            duration: texts[3] || '',
+                                            description: texts.slice(4).join(' ').substring(0, 500),
+                                        });
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    }
+                } catch(e) {}
+
+                return { name, headline, location, connections, photoUrl, experience };
             }""")
 
             content = await page.content()
@@ -346,6 +419,14 @@ async def _scrape_with_playwright(url: str, li_at: str | None, user_agent: str |
         if not name or name.lower() in ("linkedin", ""):
             return ProfileData(url=url, error="Could not extract profile data — page may be an auth wall or the URL is invalid")
 
+        # Process experience data from JS extraction
+        experience_list = data.get("experience", [])
+        # Filter out empty/garbage entries
+        experience_list = [
+            e for e in experience_list
+            if e.get("title") and len(e["title"]) > 1
+        ]
+
         return ProfileData(
             url=url,
             name=name,
@@ -353,6 +434,7 @@ async def _scrape_with_playwright(url: str, li_at: str | None, user_agent: str |
             photo_url=photo_url,
             location=location,
             connections=connections,
+            experience=experience_list if experience_list else None,
             error=None,
         )
 
@@ -466,9 +548,49 @@ def _parse_authed_html(url: str, text: str) -> dict | None:
                 photo_url = root + seg
                 break
 
+    # Experience: extract positions from the authenticated JSON data
+    experience = []
+    # LinkedIn embeds position data with title/companyName patterns
+    wider_chunk = decoded[max(0, pid_idx - 20000): pid_idx + 40000]
+    # Find position blocks: "title":"Some Title" near "companyName":"Some Company"
+    position_titles = list(re.finditer(r'"title":"([^"]{2,150})"', wider_chunk))
+    for pt_m in position_titles:
+        title_val = pt_m.group(1)
+        # Skip type URNs and non-position data
+        if re.match(r"^(com\.|urn:|https?://|\d)", title_val):
+            continue
+        # Look for companyName near this title (within 500 chars)
+        nearby = wider_chunk[pt_m.start():pt_m.start() + 500]
+        comp_m = re.search(r'"companyName":"([^"]{2,100})"', nearby)
+        date_m = re.search(r'"dateRange":\{[^}]*"start":\{[^}]*"year":(\d{4})', nearby)
+        end_m = re.search(r'"end":\{[^}]*"year":(\d{4})', nearby)
+        if comp_m:
+            entry = {
+                "title": title_val,
+                "company": comp_m.group(1),
+                "date_range": "",
+                "duration": "",
+                "description": "",
+            }
+            if date_m:
+                start_year = date_m.group(1)
+                end_year = end_m.group(1) if end_m else "Present"
+                entry["date_range"] = f"{start_year} - {end_year}"
+            experience.append(entry)
+    # Deduplicate by title+company
+    seen_exp = set()
+    unique_experience = []
+    for e in experience:
+        key = (e["title"].lower(), e["company"].lower())
+        if key not in seen_exp:
+            seen_exp.add(key)
+            unique_experience.append(e)
+
     return {"url": url, "name": name, "headline": headline, "photo_url": photo_url,
             "location": location, "connections": connections,
-            "company": None, "education": None, "error": None}
+            "company": None, "education": None,
+            "experience": unique_experience if unique_experience else None,
+            "error": None}
 
 
 # ─── Requests-based scraper (sync) ────────────────────────────────────────────
@@ -665,6 +787,12 @@ async def _run_job(job_id: str, urls: list[str], li_at: str | None, user_agent: 
                     fields["linkedin_image"] = result_dict["photo_url"]
                 if result_dict.get("location"):
                     fields["linkedin_location"] = result_dict["location"]
+                if result_dict.get("experience"):
+                    fields["linkedin_experience"] = result_dict["experience"]
+                if result_dict.get("company"):
+                    fields["linkedin_company"] = result_dict["company"]
+                if result_dict.get("education"):
+                    fields["linkedin_education"] = result_dict["education"]
                 if fields:
                     db.update_applicant_fields(applicant_id, fields)
             except Exception:

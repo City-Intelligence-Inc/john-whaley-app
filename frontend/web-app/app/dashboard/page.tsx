@@ -47,6 +47,10 @@ import {
   UserPlus,
   Thermometer,
   Scale,
+  ShieldCheck,
+  ShieldAlert,
+  ShieldQuestion,
+  AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -1608,16 +1612,18 @@ export default function Page() {
     "applicant_id", "session_id",
     "user_override_attendee_type", "user_override_attendee_type_detail",
     "luma_guest_id", "luma_status",
+    "verification_flags", "vc_fund_name",  // shown inline, not as columns
+    "linkedin_experience",  // complex object, shown in expanded row
   ]);
   // Low-value columns hidden by default (common in Luma CSVs)
   const DEFAULT_HIDDEN = new Set([
     "amount", "amount_discount", "tax", "currency", "created_at",
     "event_id", "order_id", "payment_id", "coupon_code",
     "checkout_custom_questions", "utm_source", "utm_medium", "utm_campaign",
-    "investor_professional",
+    "investor_professional", "vc_seniority_tier",
   ]);
   // Priority columns shown first (if they exist in data)
-  const PRIORITY_COLS = ["name", "email", "title", "company", "location", "ai_score", "status", "attendee_type"];
+  const PRIORITY_COLS = ["name", "email", "title", "company", "location", "ai_score", "status", "attendee_type", "verification_status"];
 
   const [userToggledColumns, setUserToggledColumns] = useState<Record<string, boolean>>({});
 
@@ -1735,6 +1741,8 @@ export default function Page() {
     attendee_type: "Type", attendee_type_detail: "Type Detail",
     linkedin_headline: "Headline", linkedin_about: "About",
     linkedin_experience: "Experience", linkedin_url: "LinkedIn URL",
+    verification_status: "Verified", verification_notes: "Verification Notes",
+    vc_seniority_tier: "VC Tier", vc_fund_name: "Fund",
     education: "Education", ai_review: "AI Review",
     ai_reasoning: "AI Reasoning", panel_votes: "Panel Votes",
     accepting_judges: "Accepting Judges",
@@ -2401,6 +2409,29 @@ export default function Page() {
                           </td>
                         );
                       }
+                      if (key === "verification_status") {
+                        const vs = String(val || "").toLowerCase();
+                        const vsConfig: Record<string, { icon: typeof ShieldCheck; color: string; label: string }> = {
+                          verified: { icon: ShieldCheck, color: "text-emerald-600", label: "Verified" },
+                          mismatch: { icon: ShieldAlert, color: "text-red-500", label: "Mismatch" },
+                          needs_review: { icon: AlertTriangle, color: "text-amber-500", label: "Needs Review" },
+                          unverifiable: { icon: ShieldQuestion, color: "text-gray-400", label: "Unverifiable" },
+                        };
+                        const cfg = vsConfig[vs];
+                        const VsIcon = cfg?.icon;
+                        return (
+                          <td key={key} className="px-3 py-1.5 border-r border-gray-100 dark:border-gray-800" title={a.verification_notes as string || ""}>
+                            {cfg && VsIcon ? (
+                              <span className={`inline-flex items-center gap-1 text-xs font-medium ${cfg.color}`}>
+                                <VsIcon className="size-3.5" />
+                                {cfg.label}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground text-xs">—</span>
+                            )}
+                          </td>
+                        );
+                      }
                       if (key === "attendee_type") {
                         return (
                           <td key={key} className="px-3 py-1.5 border-r border-gray-100 dark:border-gray-800">
@@ -2527,6 +2558,62 @@ export default function Page() {
                               )}
                             </div>
                           )}
+                          {(a.verification_status || a.verification_notes || a.verification_flags) ? (
+                            <div className="space-y-2">
+                              <span className="font-medium text-xs text-muted-foreground uppercase tracking-wide">Verification</span>
+                              <div className="mt-1 flex flex-wrap gap-1.5">
+                                {a.verification_status ? (() => {
+                                  const vsMap: Record<string, { icon: typeof ShieldCheck; color: string }> = {
+                                    verified: { icon: ShieldCheck, color: "text-emerald-600 border-emerald-200 bg-emerald-50 dark:bg-emerald-950 dark:border-emerald-800" },
+                                    mismatch: { icon: ShieldAlert, color: "text-red-500 border-red-200 bg-red-50 dark:bg-red-950 dark:border-red-800" },
+                                    needs_review: { icon: AlertTriangle, color: "text-amber-500 border-amber-200 bg-amber-50 dark:bg-amber-950 dark:border-amber-800" },
+                                    unverifiable: { icon: ShieldQuestion, color: "text-gray-400 border-gray-200 bg-gray-50 dark:bg-gray-800 dark:border-gray-700" },
+                                  };
+                                  const cfg = vsMap[String(a.verification_status).toLowerCase()];
+                                  const Icon = cfg?.icon || ShieldQuestion;
+                                  return (
+                                    <Badge variant="outline" className={`text-xs ${cfg?.color || ""}`}>
+                                      <Icon className="size-3 mr-1" />
+                                      {String(a.verification_status)}
+                                    </Badge>
+                                  );
+                                })() : null}
+                                {a.vc_seniority_tier ? (
+                                  <Badge variant="secondary" className="text-xs">VC Tier {String(a.vc_seniority_tier)}</Badge>
+                                ) : null}
+                                {a.vc_fund_name ? (
+                                  <Badge variant="secondary" className="text-xs">{String(a.vc_fund_name)}</Badge>
+                                ) : null}
+                              </div>
+                              {a.verification_flags ? (
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  {(Array.isArray(a.verification_flags) ? a.verification_flags as string[] : String(a.verification_flags).split(",")).map((flag: string, fi: number) => (
+                                    <span key={fi} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300 border border-orange-200 dark:border-orange-800">
+                                      <AlertTriangle className="size-2.5" />
+                                      {String(flag).trim().replace(/_/g, " ")}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : null}
+                              {a.verification_notes ? (
+                                <p className="mt-1 text-xs text-muted-foreground">{String(a.verification_notes)}</p>
+                              ) : null}
+                              {Array.isArray(a.linkedin_experience) && (a.linkedin_experience as Array<Record<string, string>>).length > 0 ? (
+                                <div className="mt-2">
+                                  <span className="font-medium text-[10px] text-muted-foreground uppercase tracking-wide">LinkedIn Experience</span>
+                                  <div className="mt-1 space-y-1">
+                                    {(a.linkedin_experience as Array<{ title?: string; company?: string; date_range?: string }>).slice(0, 3).map((exp, ei) => (
+                                      <div key={ei} className="text-xs text-muted-foreground">
+                                        <span className="text-foreground font-medium">{exp.title}</span>
+                                        {exp.company ? <span> at {exp.company}</span> : null}
+                                        {exp.date_range ? <span className="ml-1 opacity-60">({exp.date_range})</span> : null}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : null}
                         </div>
                       </td>
                     </tr>
