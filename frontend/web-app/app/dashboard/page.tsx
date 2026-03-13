@@ -122,6 +122,7 @@ import { api, type Applicant, type SelectionPreferences, type PanelConfig, DEFAU
 import { useApplicants, useStats, useSessions } from "@/hooks/use-applicants";
 import { CSVUploader } from "@/components/csv-uploader";
 import { RoundtableSelector } from "@/components/roundtable-selector";
+import { OnboardingTour, useRestartTour } from "@/components/onboarding-tour";
 
 const ANTHROPIC_MODELS = [
   { value: "claude-sonnet-4-20250514", label: "Claude Sonnet 4" },
@@ -1857,8 +1858,11 @@ export default function Page() {
     }
   };
 
+  const restartTour = useRestartTour();
+
   return (
     <div className="space-y-6">
+      <OnboardingTour />
       {/* Header Controls */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
@@ -1870,7 +1874,7 @@ export default function Page() {
               setSelectedIds(new Set());
             }}
           >
-            <SelectTrigger className="h-10 w-full sm:w-[220px]">
+            <SelectTrigger className="h-10 w-full sm:w-[220px]" data-tour="session-picker">
               <FolderOpen className="size-4 mr-2 text-muted-foreground" />
               <SelectValue placeholder="All Sessions" />
             </SelectTrigger>
@@ -1901,13 +1905,16 @@ export default function Page() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => setShowImportDialog(true)} className="h-10">
+          <Button variant="outline" onClick={() => setShowImportDialog(true)} className="h-10" data-tour="import-btn">
             <Upload className="size-4 mr-2" />
             Import
           </Button>
-          <Button variant="outline" onClick={() => setShowSettingsDialog(true)} className="h-10">
+          <Button variant="outline" onClick={() => setShowSettingsDialog(true)} className="h-10" data-tour="settings-btn">
             <Settings2 className="size-4 mr-2" />
             Settings
+          </Button>
+          <Button variant="ghost" size="icon" onClick={restartTour} className="size-10 text-muted-foreground" title="Restart onboarding tour">
+            <HelpCircle className="size-4" />
           </Button>
         </div>
       </div>
@@ -2153,6 +2160,7 @@ export default function Page() {
             }}
             size="sm"
             className="h-9"
+            data-tour="run-analysis-btn"
           >
             <Brain className="size-4 mr-1.5" />
             Run Analysis
@@ -2175,7 +2183,7 @@ export default function Page() {
 
       {/* Post-analysis score threshold (T6) — live slider */}
       {applicants.some((a) => Number(a.ai_score) > 0) && (
-        <Card className="border-dashed">
+        <Card className="border-dashed" data-tour="score-cutoff">
           <CardContent className="py-3 px-4">
             <div className="flex flex-col sm:flex-row sm:items-center gap-3">
               <div className="flex items-center gap-2 min-w-0">
@@ -2292,7 +2300,7 @@ export default function Page() {
         />
       ) : (
         /* Airtable-style Grid View */
-        <div className="rounded-lg border overflow-auto max-h-[calc(100vh-280px)]">
+        <div className="rounded-lg border overflow-auto max-h-[calc(100vh-280px)]" data-tour="applicant-table">
           <table className="w-full border-collapse text-sm">
             <thead className="sticky top-0 z-10">
               <tr className="bg-gray-50 dark:bg-gray-900 border-b-2 border-gray-200 dark:border-gray-700">
