@@ -493,16 +493,16 @@ function ApplicantCardScanner({
   const score = current.ai_score ? parseInt(current.ai_score) : 0;
   const scoreColor =
     score >= 70
-      ? "text-green-600 dark:text-green-400"
+      ? "text-emerald-400"
       : score >= 40
-        ? "text-yellow-600 dark:text-yellow-400"
-        : "text-red-600 dark:text-red-400";
+        ? "text-amber-400"
+        : "text-red-400";
   const scoreBg =
     score >= 70
-      ? "bg-green-100 dark:bg-green-950 border-green-300 dark:border-green-700"
+      ? "bg-emerald-500/10 border-emerald-500/20"
       : score >= 40
-        ? "bg-yellow-100 dark:bg-yellow-950 border-yellow-300 dark:border-yellow-700"
-        : "bg-red-100 dark:bg-red-950 border-red-300 dark:border-red-700";
+        ? "bg-amber-500/10 border-amber-500/20"
+        : "bg-red-500/10 border-red-500/20";
 
   const displayName =
     current.name ||
@@ -512,12 +512,12 @@ function ApplicantCardScanner({
     "Unknown";
 
   const statusBadge = current.status === "accepted"
-    ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+    ? "bg-emerald-500/15 text-emerald-400"
     : current.status === "waitlisted"
-      ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"
+      ? "bg-amber-500/15 text-amber-400"
       : current.status === "rejected"
-        ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
-        : "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200";
+        ? "bg-red-500/15 text-red-400"
+        : "bg-muted text-muted-foreground";
 
   const handleAction = (status: string) => {
     onStatusChange(current.applicant_id, status);
@@ -1851,10 +1851,10 @@ export default function Page() {
 
   const statusColor = (status: string) => {
     switch (status) {
-      case "accepted": return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200";
-      case "waitlisted": return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200";
-      case "rejected": return "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200";
-      default: return "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200";
+      case "accepted": return "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20";
+      case "waitlisted": return "bg-amber-500/15 text-amber-400 border border-amber-500/20";
+      case "rejected": return "bg-red-500/15 text-red-400 border border-red-500/20";
+      default: return "bg-muted text-muted-foreground border border-border";
     }
   };
 
@@ -1905,11 +1905,11 @@ export default function Page() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => setShowImportDialog(true)} className="h-10" data-tour="import-btn">
+          <Button onClick={() => setShowImportDialog(true)} className="h-10 bg-gold text-gold-foreground hover:bg-gold/90 font-medium" data-tour="import-btn">
             <Upload className="size-4 mr-2" />
-            Import
+            Import Applicants
           </Button>
-          <Button variant="outline" onClick={() => setShowSettingsDialog(true)} className="h-10" data-tour="settings-btn">
+          <Button variant="outline" onClick={() => setShowSettingsDialog(true)} className="h-10 border-border/60" data-tour="settings-btn">
             <Settings2 className="size-4 mr-2" />
             Settings
           </Button>
@@ -1957,14 +1957,14 @@ export default function Page() {
       <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 sm:gap-3">
         {[
           { label: "Total", value: stats?.total ?? 0, filter: "all", color: "text-foreground" },
-          { label: "Accepted", value: accepted.length, filter: "accepted", color: "text-green-600 dark:text-green-400" },
-          { label: "Waitlisted", value: waitlisted.length, filter: "waitlisted", color: "text-yellow-600 dark:text-yellow-400" },
-          { label: "Rejected", value: rejected.length, filter: "rejected", color: "text-red-600 dark:text-red-400" },
+          { label: "Accepted", value: accepted.length, filter: "accepted", color: "text-emerald-400" },
+          { label: "Waitlisted", value: waitlisted.length, filter: "waitlisted", color: "text-amber-400" },
+          { label: "Rejected", value: rejected.length, filter: "rejected", color: "text-red-400" },
           { label: "Pending", value: pending.length, filter: "pending", color: "text-muted-foreground" },
         ].map(({ label, value, filter, color }) => (
           <Card
             key={filter}
-            className={`cursor-pointer transition-colors hover:bg-muted/50 ${statusFilter === filter ? "ring-2 ring-primary" : ""}`}
+            className={`cursor-pointer transition-colors hover:bg-muted/50 ${statusFilter === filter ? "ring-1 ring-gold/60" : ""}`}
             onClick={() => setStatusFilter(filter)}
           >
             <CardContent className="py-4 text-center">
@@ -2303,18 +2303,18 @@ export default function Page() {
         <div className="rounded-lg border overflow-auto max-h-[calc(100vh-280px)]" data-tour="applicant-table">
           <table className="w-full border-collapse text-sm">
             <thead className="sticky top-0 z-10">
-              <tr className="bg-gray-50 dark:bg-gray-900 border-b-2 border-gray-200 dark:border-gray-700">
-                <th className="sticky left-0 z-20 bg-gray-50 dark:bg-gray-900 w-10 px-3 py-2 border-r border-gray-200 dark:border-gray-700">
+              <tr className="bg-secondary border-b-2 border-border">
+                <th className="sticky left-0 z-20 bg-secondary w-10 px-3 py-2 border-r border-border">
                   <Checkbox
                     checked={filteredApplicants.length > 0 && selectedIds.size === filteredApplicants.length}
                     onCheckedChange={toggleSelectAll}
                   />
                 </th>
-                <th className="w-10 px-2 py-2 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider border-r border-gray-200 dark:border-gray-700">#</th>
+                <th className="w-10 px-2 py-2 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider border-r border-border">#</th>
                 {tableColumns.map((key) => (
                   <th
                     key={key}
-                    className={`px-3 py-2 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider border-r border-gray-200 dark:border-gray-700 cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors whitespace-nowrap ${key === "ai_score" ? "text-center" : ""}`}
+                    className={`px-3 py-2 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider border-r border-border cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors whitespace-nowrap ${key === "ai_score" ? "text-center" : ""}`}
                     onClick={() => {
                       if (sortBy === key) {
                         setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -2355,29 +2355,29 @@ export default function Page() {
               {!loadingApplicants && filteredApplicants.map((a, i) => {
                 const score = a.ai_score ? parseInt(a.ai_score) : 0;
                 const scoreColorClass =
-                  score >= 70 ? "text-green-600 dark:text-green-400"
-                  : score >= 40 ? "text-yellow-600 dark:text-yellow-400"
-                  : score > 0 ? "text-red-600 dark:text-red-400"
+                  score >= 70 ? "text-emerald-400"
+                  : score >= 40 ? "text-amber-400"
+                  : score > 0 ? "text-red-400"
                   : "text-muted-foreground";
                 const rowStatusBg =
-                  a.status === "accepted" ? "bg-green-50/60 dark:bg-green-950/20"
-                  : a.status === "rejected" ? "bg-red-50/60 dark:bg-red-950/20"
-                  : a.status === "waitlisted" ? "bg-yellow-50/60 dark:bg-yellow-950/20"
+                  a.status === "accepted" ? "bg-emerald-500/5"
+                  : a.status === "rejected" ? "bg-red-500/5"
+                  : a.status === "waitlisted" ? "bg-amber-500/5"
                   : "";
 
                 return (
                   <React.Fragment key={a.applicant_id}>
                   <tr
-                    className={`border-b border-gray-100 dark:border-gray-800 cursor-pointer hover:bg-blue-50/50 dark:hover:bg-blue-950/20 transition-colors ${rowStatusBg} ${selectedIds.has(a.applicant_id) ? "bg-blue-100/60 dark:bg-blue-900/30" : ""}`}
+                    className={`border-b border-border/50 cursor-pointer hover:bg-gold/5 transition-colors ${rowStatusBg} ${selectedIds.has(a.applicant_id) ? "bg-gold/10" : ""}`}
                     onClick={() => setSelectedApplicantId(a.applicant_id)}
                   >
-                    <td className="sticky left-0 z-[5] px-3 py-1.5 border-r border-gray-200 dark:border-gray-700 bg-inherit" onClick={(e) => e.stopPropagation()}>
+                    <td className="sticky left-0 z-[5] px-3 py-1.5 border-r border-border bg-inherit" onClick={(e) => e.stopPropagation()}>
                       <Checkbox
                         checked={selectedIds.has(a.applicant_id)}
                         onCheckedChange={() => toggleSelect(a.applicant_id)}
                       />
                     </td>
-                    <td className="px-2 py-1.5 text-muted-foreground font-mono text-xs border-r border-gray-200 dark:border-gray-700" onClick={(e) => e.stopPropagation()}>
+                    <td className="px-2 py-1.5 text-muted-foreground font-mono text-xs border-r border-border" onClick={(e) => e.stopPropagation()}>
                       <button
                         className="hover:text-foreground transition-colors"
                         onClick={() => {
@@ -2399,7 +2399,7 @@ export default function Page() {
                       const val = a[key];
                       if (key === "ai_score") {
                         return (
-                          <td key={key} className="px-3 py-1.5 text-center border-r border-gray-100 dark:border-gray-800">
+                          <td key={key} className="px-3 py-1.5 text-center border-r border-border/50">
                             {score > 0 ? (
                               <span className={`font-bold tabular-nums ${scoreColorClass}`}>{score}</span>
                             ) : (
@@ -2410,7 +2410,7 @@ export default function Page() {
                       }
                       if (key === "status") {
                         return (
-                          <td key={key} className="px-3 py-1.5 border-r border-gray-100 dark:border-gray-800">
+                          <td key={key} className="px-3 py-1.5 border-r border-border/50">
                             <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${statusColor(String(val || "pending"))}`}>
                               {String(val || "pending").charAt(0).toUpperCase() + String(val || "pending").slice(1)}
                             </span>
@@ -2428,7 +2428,7 @@ export default function Page() {
                         const cfg = vsConfig[vs];
                         const VsIcon = cfg?.icon;
                         return (
-                          <td key={key} className="px-3 py-1.5 border-r border-gray-100 dark:border-gray-800" title={a.verification_notes as string || ""}>
+                          <td key={key} className="px-3 py-1.5 border-r border-border/50" title={a.verification_notes as string || ""}>
                             {cfg && VsIcon ? (
                               <span className={`inline-flex items-center gap-1 text-xs font-medium ${cfg.color}`}>
                                 <VsIcon className="size-3.5" />
@@ -2442,7 +2442,7 @@ export default function Page() {
                       }
                       if (key === "attendee_type") {
                         return (
-                          <td key={key} className="px-3 py-1.5 border-r border-gray-100 dark:border-gray-800">
+                          <td key={key} className="px-3 py-1.5 border-r border-border/50">
                             {val ? (
                               <Badge variant="outline" className="text-xs font-normal">
                                 {String(a.attendee_type_detail || val)}
@@ -2463,7 +2463,7 @@ export default function Page() {
                         const photoUrl = (a.image || a.photo_url) as string | undefined;
                         const initials = String(displayName).split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
                         return (
-                          <td key={key} className="px-3 py-1.5 font-medium max-w-[240px] border-r border-gray-100 dark:border-gray-800">
+                          <td key={key} className="px-3 py-1.5 font-medium max-w-[240px] border-r border-border/50">
                             <div className="flex items-center gap-2">
                               {photoUrl ? (
                                 <img src={photoUrl} alt="" className="size-6 rounded-full object-cover shrink-0" />
@@ -2481,7 +2481,7 @@ export default function Page() {
                         );
                       }
                       return (
-                        <td key={key} className="px-3 py-1.5 max-w-[200px] truncate text-muted-foreground border-r border-gray-100 dark:border-gray-800">
+                        <td key={key} className="px-3 py-1.5 max-w-[200px] truncate text-muted-foreground border-r border-border/50">
                           {val != null && val !== "" ? String(val) : "—"}
                         </td>
                       );
@@ -2572,10 +2572,10 @@ export default function Page() {
                               <div className="mt-1 flex flex-wrap gap-1.5">
                                 {a.verification_status ? (() => {
                                   const vsMap: Record<string, { icon: typeof ShieldCheck; color: string }> = {
-                                    verified: { icon: ShieldCheck, color: "text-emerald-600 border-emerald-200 bg-emerald-50 dark:bg-emerald-950 dark:border-emerald-800" },
-                                    mismatch: { icon: ShieldAlert, color: "text-red-500 border-red-200 bg-red-50 dark:bg-red-950 dark:border-red-800" },
-                                    needs_review: { icon: AlertTriangle, color: "text-amber-500 border-amber-200 bg-amber-50 dark:bg-amber-950 dark:border-amber-800" },
-                                    unverifiable: { icon: ShieldQuestion, color: "text-gray-400 border-gray-200 bg-gray-50 dark:bg-gray-800 dark:border-gray-700" },
+                                    verified: { icon: ShieldCheck, color: "text-emerald-400 border-emerald-500/20 bg-emerald-500/10" },
+                                    mismatch: { icon: ShieldAlert, color: "text-red-400 border-red-500/20 bg-red-500/10" },
+                                    needs_review: { icon: AlertTriangle, color: "text-amber-400 border-amber-500/20 bg-amber-500/10" },
+                                    unverifiable: { icon: ShieldQuestion, color: "text-muted-foreground border-border bg-muted" },
                                   };
                                   const cfg = vsMap[String(a.verification_status).toLowerCase()];
                                   const Icon = cfg?.icon || ShieldQuestion;
@@ -2596,7 +2596,7 @@ export default function Page() {
                               {a.verification_flags ? (
                                 <div className="flex flex-wrap gap-1 mt-1">
                                   {(Array.isArray(a.verification_flags) ? a.verification_flags as string[] : String(a.verification_flags).split(",")).map((flag: string, fi: number) => (
-                                    <span key={fi} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300 border border-orange-200 dark:border-orange-800">
+                                    <span key={fi} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-500/15 text-orange-400 border border-orange-500/20">
                                       <AlertTriangle className="size-2.5" />
                                       {String(flag).trim().replace(/_/g, " ")}
                                     </span>

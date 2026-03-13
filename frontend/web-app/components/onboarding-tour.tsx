@@ -166,7 +166,7 @@ function SpotlightOverlay({
 
       {/* Spotlight ring */}
       <div
-        className="absolute rounded-lg ring-2 ring-blue-500 ring-offset-2 ring-offset-transparent pointer-events-none"
+        className="absolute rounded-lg ring-2 ring-gold ring-offset-2 ring-offset-transparent pointer-events-none"
         style={{
           top: sy,
           left: sx,
@@ -177,14 +177,14 @@ function SpotlightOverlay({
 
       {/* Tooltip card */}
       <div
-        className="absolute bg-white dark:bg-gray-900 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 p-5"
+        className="absolute bg-card rounded-xl shadow-2xl border border-border p-5"
         style={{ ...tooltipStyle, width: tooltipWidth }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-start justify-between mb-3">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-lg bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400">
+            <div className="p-2 rounded-lg bg-gold/10 text-gold">
               {step.icon}
             </div>
             <div>
@@ -215,10 +215,10 @@ function SpotlightOverlay({
                 key={i}
                 className={`size-1.5 rounded-full transition-colors ${
                   i === stepIndex
-                    ? "bg-blue-500"
+                    ? "bg-gold"
                     : i < stepIndex
-                      ? "bg-blue-300 dark:bg-blue-700"
-                      : "bg-gray-300 dark:bg-gray-600"
+                      ? "bg-gold/50"
+                      : "bg-muted"
                 }`}
               />
             ))}

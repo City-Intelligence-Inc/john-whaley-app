@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
-import { ThemeProvider } from "next-themes";
 import { Toaster } from "sonner";
 import "./globals.css";
 
@@ -16,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Event Review",
-  description: "AI-powered applicant review tool for any event",
+  title: "AI Select",
+  description: "Turn applications into decisions — automatically.",
 };
 
 export default function RootLayout({
@@ -27,19 +26,22 @@ export default function RootLayout({
 }>) {
   return (
     <ClerkProvider>
-      <html lang="en" suppressHydrationWarning>
+      <html lang="en" className="dark" suppressHydrationWarning>
         <body
           className={`${geistSans.variable} ${geistMono.variable} antialiased`}
         >
-          <ThemeProvider
-            attribute="class"
-            defaultTheme="system"
-            enableSystem
-            disableTransitionOnChange
-          >
-            {children}
-            <Toaster richColors />
-          </ThemeProvider>
+          {children}
+          <Toaster
+            richColors
+            theme="dark"
+            toastOptions={{
+              style: {
+                background: "hsl(220 18% 10%)",
+                border: "1px solid hsl(220 15% 18%)",
+                color: "hsl(40 10% 92%)",
+              },
+            }}
+          />
         </body>
       </html>
     </ClerkProvider>
