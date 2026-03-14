@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useCallback, use } from "react";
-import { useAuth } from "@clerk/nextjs";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -272,7 +271,6 @@ function JudgeEditor({
 // ── Main Profile Page ──
 export default function ProfilePage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = use(params);
-  const { getToken } = useAuth();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [judges, setJudges] = useState<Judge[]>([]);
@@ -313,7 +311,7 @@ export default function ProfilePage({ params }: { params: Promise<{ slug: string
       }
     })();
     loadJudges();
-  }, [slug, getToken, loadJudges]);
+  }, [slug, loadJudges]);
 
   async function deleteJudge(id: string) {
     try {
