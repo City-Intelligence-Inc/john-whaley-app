@@ -469,13 +469,28 @@ def _allocate_seats(
         return {j["id"]: per_judge for j in judges}
 
 
+def _effective_capacity(prefs: SelectionPreferences | None) -> int | None:
+    """Get the effective in-person venue capacity from either venue_capacity or pool_capacity."""
+    if not prefs:
+        return None
+    if prefs.venue_capacity:
+        return prefs.venue_capacity
+    if prefs.pool_capacity and prefs.pool_capacity.in_person:
+        return prefs.pool_capacity.in_person
+    return None
+
+
 def _selection_context(prefs: SelectionPreferences | None) -> str:
     """Build prompt text from selection preferences."""
     if not prefs:
         return ""
     parts: list[str] = []
-    if prefs.venue_capacity:
-        parts.append(f"VENUE CAPACITY: The venue can hold {prefs.venue_capacity} attendees. Aim to accept roughly this many people. Only reject truly poor fits.")
+    capacity = _effective_capacity(prefs)
+    if capacity:
+        if prefs.pool_capacity and prefs.pool_capacity.virtual is not None:
+            parts.append(f"VENUE CAPACITY: The venue can hold {capacity} in-person attendees. Virtual attendees ({prefs.pool_capacity.virtual or 'unlimited'} cap) do NOT count against venue capacity. Aim to accept roughly {capacity} in-person attendees. Only reject truly poor fits.")
+        else:
+            parts.append(f"VENUE CAPACITY: The venue can hold {capacity} attendees. Aim to accept roughly this many people. Only reject truly poor fits.")
     if prefs.attendee_mix:
         type_labels = {
             "vc": "VCs / Investors", "entrepreneur": "Founders / Entrepreneurs",
@@ -738,10 +753,18 @@ async def analyze_all_stream(body: BulkAnalyzeRequest):
         yield f"event: phase\ndata: {json.dumps({'phase': 'pool_summary', 'message': 'Classification complete. Pool distribution:', 'type_counts': type_counts, 'total': total})}\n\n"
 
         # ── WHITELIST / BLACKLIST PHASE ──
+        # Merge global + per-event lists
         whitelist_data = db.get_settings("applicant_whitelist") or {}
         blacklist_data = db.get_settings("applicant_blacklist") or {}
         whitelist_emails = set(whitelist_data.get("emails", []))
         blacklist_emails = set(blacklist_data.get("emails", []))
+
+        # Per-event lists (override/extend global)
+        if body.session_id:
+            evt_wl = db.get_settings(f"session_{body.session_id}_whitelist") or {}
+            evt_bl = db.get_settings(f"session_{body.session_id}_blacklist") or {}
+            whitelist_emails |= set(evt_wl.get("emails", []))
+            blacklist_emails |= set(evt_bl.get("emails", []))
 
         listed_ids: set[str] = set()
         for a in applicants:
@@ -796,7 +819,7 @@ async def analyze_all_stream(body: BulkAnalyzeRequest):
             seat_alloc = _allocate_seats(
                 judges,
                 scoring_total,
-                body.selection_preferences.venue_capacity if body.selection_preferences else None,
+                _effective_capacity(body.selection_preferences),
                 body.selection_preferences.attendee_mix if body.selection_preferences else None,
             )
 
