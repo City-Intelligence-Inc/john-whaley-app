@@ -141,6 +141,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
       <label>li_at Cookie (paste once, stays saved)</label>
       <input id="scrapeLiAt" type="password" placeholder="From DevTools → Cookies → linkedin.com" style="width:100%">
     </div>
+    <div style="flex:1; min-width:200px;">
+      <label>User Agent (optional, rotate if blocked)</label>
+      <input id="scrapeUA" placeholder="Leave blank for default Chrome UA" style="width:100%; background:#0d0d0d; border:1px solid #222; border-radius:6px; padding:8px 12px; color:#e0e0e0; font-size:12px; outline:none; font-family:monospace;">
+    </div>
     <button class="btn btn-green" onclick="scrapeOne()" id="scrapeBtn" style="padding:8px 20px; margin-bottom:0;">Scrape</button>
   </div>
   <div class="scrape-status" id="scrapeStatus"></div>
@@ -160,8 +164,10 @@ let _f = [];
 
 // Load li_at from localStorage
 const savedLiAt = localStorage.getItem('li_at') || '';
+const savedUA = localStorage.getItem('scrape_ua') || '';
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('scrapeLiAt').value = savedLiAt;
+  document.getElementById('scrapeUA').value = savedUA;
 });
 
 function esc(s){return s?s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):''}
@@ -184,11 +190,13 @@ async function scrapeOne() {
   const btn = document.getElementById('scrapeBtn');
   const url = urlInput.value.trim();
   const liAt = liAtInput.value.trim();
+  const ua = document.getElementById('scrapeUA').value.trim();
 
   if (!url) { status.textContent = 'Paste a LinkedIn URL first'; status.className = 'scrape-status err'; return; }
 
-  // Save li_at
+  // Save li_at + ua
   if (liAt) localStorage.setItem('li_at', liAt);
+  if (ua) localStorage.setItem('scrape_ua', ua);
 
   btn.disabled = true;
   btn.textContent = 'Scraping...';
@@ -199,7 +207,7 @@ async function scrapeOne() {
     const resp = await fetch(`${API}/linkedin/scrape-one`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, li_at: liAt || undefined }),
+      body: JSON.stringify({ url, li_at: liAt || undefined, user_agent: ua || undefined }),
     });
     const data = await resp.json();
 

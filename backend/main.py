@@ -92,6 +92,7 @@ def health():
 class ScrapeOneIn(BaseModel):
     url: str
     li_at: Optional[str] = None
+    user_agent: Optional[str] = None
 
 
 @app.post("/linkedin/scrape-one", tags=["linkedin"])
@@ -104,7 +105,7 @@ async def scrape_one_noauth(body: ScrapeOneIn):
     if not norm:
         return {"error": f"Invalid LinkedIn URL: {body.url}"}
 
-    result = await _scrape_profile_requests(norm, body.li_at, None)
+    result = await _scrape_profile_requests(norm, body.li_at, body.user_agent)
     result_dict = result.model_dump()
 
     # Save to linkedin-scrapes table
