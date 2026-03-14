@@ -37,16 +37,17 @@ STATUS_VALUE_MAP = {
 
 # Column names that should be normalized to attendance_mode
 _ATTENDANCE_KEY_PATTERNS = re.compile(
-    r"^(ticket_type|attendance_mode|attendance|joining|"
-    r"will_you_be_joining_in_person_or_remote\??|"
-    r"in_person_or_remote|rsvp_type|event_type)$"
+    r"^(ticket_type|ticket_name|attendance_mode|attendance|joining|"
+    r"will_you_be_joining_in[-_]person_or_remote\??|"
+    r"in[-_]person_or_remote|rsvp_type|event_type)$"
 )
 
 _ATTENDANCE_VALUE_MAP = {
     "in person": "in_person", "in-person": "in_person", "in_person": "in_person",
     "onsite": "in_person", "physical": "in_person", "offline": "in_person",
+    "standard": "in_person", "general admission": "in_person",
     "remote": "virtual", "virtual": "virtual", "online": "virtual",
-    "zoom": "virtual", "livestream": "virtual",
+    "zoom": "virtual", "livestream": "virtual", "virtual (online)": "virtual",
 }
 
 

@@ -1325,6 +1325,8 @@ export default function Page() {
     log(`Criteria: ${criteria.join(", ")}`);
     if (prefs.venue_capacity) {
       log(`Venue capacity: ${prefs.venue_capacity}`);
+    } else if (prefs.pool_capacity?.in_person) {
+      log(`In-person capacity: ${prefs.pool_capacity.in_person}${prefs.pool_capacity.virtual ? `, Virtual cap: ${prefs.pool_capacity.virtual}` : ""}`);
     }
     if (prefs.auto_accept_types.length > 0) {
       log(`Auto-accept: ${prefs.auto_accept_types.join(", ")}`);
@@ -2220,7 +2222,7 @@ export default function Page() {
           setShowPostAnalysisMix(open);
           if (open && Object.keys(postMix).length === 0) {
             setPostMix({ ...selectionPreferences.attendee_mix });
-            setPostCapacity(selectionPreferences.venue_capacity);
+            setPostCapacity(selectionPreferences.venue_capacity ?? selectionPreferences.pool_capacity?.in_person ?? null);
           }
         }}>
           <CollapsibleTrigger asChild>
@@ -2247,7 +2249,10 @@ export default function Page() {
                     placeholder="No limit"
                   />
                 </div>
-                {ATTENDEE_TYPES.map((t) => {
+                {[
+                  ...ATTENDEE_TYPES,
+                  ...(selectionPreferences.custom_categories || []).map((c) => ({ key: c, label: c, color: "#6b7280" })),
+                ].map((t) => {
                   const value = postMix[t.key] ?? 0;
                   return (
                     <div key={t.key} className="flex items-center gap-2">
@@ -3103,9 +3108,13 @@ export default function Page() {
                 <CollapsibleContent className="mt-2 space-y-2">
                   {(() => {
                     const mixTotal = Object.values(selectionPreferences.attendee_mix).reduce((a, b) => a + b, 0);
+                    const allSettingsTypes = [
+                      ...SETTINGS_ATTENDEE_TYPES,
+                      ...(selectionPreferences.custom_categories || []).map((c) => ({ key: c, label: c })),
+                    ];
                     return (
                       <>
-                        {SETTINGS_ATTENDEE_TYPES.map((t) => {
+                        {allSettingsTypes.map((t) => {
                           const value = selectionPreferences.attendee_mix[t.key] ?? 0;
                           return (
                             <div key={t.key} className="flex items-center gap-2">

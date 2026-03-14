@@ -339,10 +339,11 @@ function renderQueue() {
     
     if (search && !p.name.toLowerCase().includes(search) && !p.email.toLowerCase().includes(search)) continue;
     
-    const bg = done ? 'background:#0a0a0a;opacity:0.5;' : 'background:#111;cursor:pointer;';
-    const status = done ? '<span style="color:#4caf50;font-size:10px;">done</span>' : '';
-    
-    html += `<div onclick="${done ? '' : `pickProfile('${p.url.replace(/'/g,"\'")}','${p.email.replace(/'/g,"\'")}','${p.name.replace(/'/g,"\'")}')`}" style="${bg}padding:8px 12px;border-bottom:1px solid #1a1a1a;display:flex;align-items:center;gap:8px;">
+    const bg = done ? 'background:#0a0a0a;' : 'background:#111;';
+    const status = done ? `<a href="http://localhost:3000/dashboard/linkedin/${slug}" target="_blank" style="color:#4caf50;font-size:10px;text-decoration:none;" title="View profile">view &rarr;</a>` : '';
+    const onclick = done ? '' : `pickProfile('${p.url.replace(/'/g,"\\'")}','${p.email.replace(/'/g,"\\'")}','${p.name.replace(/'/g,"\\'")}')`;
+
+    html += `<div onclick="${onclick}" style="${bg}padding:8px 12px;border-bottom:1px solid #1a1a1a;display:flex;align-items:center;gap:8px;cursor:pointer;">
       <div style="flex:1;min-width:0;">
         <div style="font-size:12px;font-weight:600;color:${done?'#555':'#ccc'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${p.name}</div>
         <div style="font-size:10px;color:#555;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${p.email}</div>
