@@ -20,8 +20,13 @@ import {
   List,
   SlidersHorizontal,
   RefreshCw,
+  Plus,
+  ClipboardPaste,
+  Check,
+  Loader2,
 } from "lucide-react";
 import { useAuth } from "@clerk/nextjs";
+import { useRouter } from "next/navigation";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -184,11 +189,16 @@ function FieldTag({ has, label }: { has: boolean; label: string }) {
   );
 }
 
+function slugFromUrl(url: string) {
+  const m = url.match(/linkedin\.com\/in\/([^/?&#\s]+)/);
+  return m ? m[1].replace(/\/$/, "") : null;
+}
+
 // ── Profile Card ──
-function ProfileCard({ p, onClick }: { p: Profile; onClick: () => void }) {
+function ProfileCard({ p, onClick, onNavigate }: { p: Profile; onClick: () => void; onNavigate: () => void }) {
   return (
     <div
-      onClick={onClick}
+      onClick={onNavigate}
       className="group bg-[#1a2236] border border-[#253256] rounded-xl overflow-hidden cursor-pointer transition-all hover:border-[#488CFF]/50 hover:shadow-lg hover:shadow-[#488CFF]/5 hover:-translate-y-0.5"
     >
       {/* Banner + avatar */}
@@ -407,8 +417,134 @@ function TableRow({ p, onClick }: { p: Profile; onClick: () => void }) {
   );
 }
 
+// ── Paste-to-Add Panel ──
+function AddProfilePanel({
+  onAdded,
+}: {
+  onAdded: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [url, setUrl] = useState("");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [content, setContent] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  async function handleSave() {
+    if (!url.trim() || !content.trim()) return;
+    setSaving(true);
+    try {
+      await fetch(`${API}/linkedin/manual-scrape`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: url.trim(),
+          name: name.trim() || undefined,
+          email: email.trim() || undefined,
+          content: content.trim(),
+        }),
+      });
+      setSaved(true);
+      setTimeout(() => {
+        setUrl("");
+        setName("");
+        setEmail("");
+        setContent("");
+        setSaved(false);
+        onAdded();
+      }, 800);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-[#488CFF] text-white hover:bg-[#3a7ae0] transition-colors"
+      >
+        <Plus className="w-4 h-4" /> Add Profile
+      </button>
+    );
+  }
+
+  return (
+    <div className="bg-[#1a2236] border border-[#253256] rounded-xl p-5 mb-4 mx-6">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+          <ClipboardPaste className="w-4 h-4 text-[#488CFF]" />
+          Paste LinkedIn Profile
+        </h3>
+        <button onClick={() => setOpen(false)} className="text-[#4A5A7A] hover:text-white">
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3 mb-3">
+        <input
+          type="text"
+          placeholder="LinkedIn URL *"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          className="bg-[#111827] border border-[#253256] rounded-lg px-3 py-2 text-sm text-white placeholder:text-[#4A5A7A] outline-none focus:border-[#488CFF]"
+        />
+        <input
+          type="text"
+          placeholder="Name (auto-detected)"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="bg-[#111827] border border-[#253256] rounded-lg px-3 py-2 text-sm text-white placeholder:text-[#4A5A7A] outline-none focus:border-[#488CFF]"
+        />
+        <input
+          type="email"
+          placeholder="Email (optional)"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          className="bg-[#111827] border border-[#253256] rounded-lg px-3 py-2 text-sm text-white placeholder:text-[#4A5A7A] outline-none focus:border-[#488CFF]"
+        />
+      </div>
+
+      <textarea
+        placeholder="Go to their LinkedIn profile, Cmd+A to select all, Cmd+C to copy, then Cmd+V paste here. The backend parses it into structured fields automatically."
+        value={content}
+        onChange={(e) => setContent(e.target.value)}
+        rows={6}
+        className="w-full bg-[#111827] border border-[#253256] rounded-lg px-3 py-2 text-sm text-white placeholder:text-[#4A5A7A] outline-none focus:border-[#488CFF] resize-y mb-3"
+      />
+
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] text-[#4A5A7A]">
+          Parsed into: name, headline, location, about, experience, education, skills, certifications, languages, etc.
+        </p>
+        <button
+          onClick={handleSave}
+          disabled={!url.trim() || !content.trim() || saving}
+          className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all ${
+            saved
+              ? "bg-emerald-600 text-white"
+              : "bg-[#488CFF] text-white hover:bg-[#3a7ae0] disabled:opacity-40 disabled:cursor-not-allowed"
+          }`}
+        >
+          {saving ? (
+            <><Loader2 className="w-4 h-4 animate-spin" /> Saving...</>
+          ) : saved ? (
+            <><Check className="w-4 h-4" /> Saved!</>
+          ) : (
+            "Save & Parse"
+          )}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Page ──
 export default function LinkedInPage() {
+  const router = useRouter();
   const { getToken } = useAuth();
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -553,6 +689,8 @@ export default function LinkedInPage() {
           >
             <RefreshCw className="w-4 h-4" />
           </button>
+
+          <AddProfilePanel onAdded={loadDatabase} />
         </div>
 
         {/* Row 2: Filters + Sort + View toggle */}
@@ -665,13 +803,17 @@ export default function LinkedInPage() {
         </div>
       ) : view === "cards" ? (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-4 p-6">
-          {filtered.map((p) => (
-            <ProfileCard
-              key={p.url}
-              p={p}
-              onClick={() => setSelected(p)}
-            />
-          ))}
+          {filtered.map((p) => {
+            const slug = slugFromUrl(p.url);
+            return (
+              <ProfileCard
+                key={p.url}
+                p={p}
+                onClick={() => setSelected(p)}
+                onNavigate={() => slug ? router.push(`/dashboard/linkedin/${slug}`) : setSelected(p)}
+              />
+            );
+          })}
         </div>
       ) : (
         <div className="px-6 py-4 overflow-x-auto">
@@ -697,13 +839,16 @@ export default function LinkedInPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((p) => (
-                <TableRow
-                  key={p.url}
-                  p={p}
-                  onClick={() => setSelected(p)}
-                />
-              ))}
+              {filtered.map((p) => {
+                const slug = slugFromUrl(p.url);
+                return (
+                  <TableRow
+                    key={p.url}
+                    p={p}
+                    onClick={() => slug ? router.push(`/dashboard/linkedin/${slug}`) : setSelected(p)}
+                  />
+                );
+              })}
             </tbody>
           </table>
         </div>
