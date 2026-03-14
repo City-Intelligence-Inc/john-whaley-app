@@ -92,9 +92,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
   </div>
 </div>
 
-<div style="display:flex; flex:1; overflow:hidden;">
+<div style="display:flex; flex:1; overflow:hidden; height:calc(100vh - 52px);">
 <!-- Queue sidebar -->
-<div id="queueSidebar" style="width:280px; shrink:0; border-right:1px solid #222; background:#0d0d0d; overflow-y:auto; display:flex; flex-direction:column;">
+<div id="queueSidebar" style="width:280px; flex-shrink:0; border-right:1px solid #222; background:#0d0d0d; overflow:hidden; display:flex; flex-direction:column;">
   <div style="padding:12px; border-bottom:1px solid #1a1a1a;">
     <input id="queueSearch" placeholder="Filter names..." style="width:100%;background:#111;border:1px solid #222;border-radius:6px;padding:6px 10px;color:#e0e0e0;font-size:12px;outline:none;">
     <div style="font-size:10px;color:#555;margin-top:6px;" id="queueStats">0 remaining</div>
@@ -105,7 +105,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 <div class="container" style="flex:1; overflow-y:auto;">
   <div class="row">
     <div class="field">
-      <label>LinkedIn URL *</label>
+      <label>LinkedIn URL * <a id="openLink" href="#" target="_blank" onclick="event.stopPropagation();this.href=document.getElementById('url').value||'#'" style="color:#4fc3f7;font-size:11px;text-transform:none;letter-spacing:0;font-weight:400;margin-left:6px;">Open in LinkedIn &rarr;</a></label>
       <input id="url" placeholder="https://linkedin.com/in/someone" autofocus>
     </div>
     <div class="field">
@@ -167,17 +167,22 @@ async function saveProfile() {
   btn.textContent = 'Saving...';
 
   try {
+    console.log('Saving profile:', url);
+    const body = JSON.stringify({
+      url,
+      email: email || undefined,
+      content,
+      photo_base64: photoData || undefined,
+    });
+    console.log('Payload size:', body.length, 'bytes');
     const resp = await fetch(`${API}/linkedin/manual-scrape`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        url,
-        email: email || undefined,
-        content,
-        photo_base64: photoData || undefined,
-      }),
+      body,
     });
+    console.log('Response status:', resp.status);
     const data = await resp.json();
+    console.log('Response:', data);
 
     if (resp.ok) {
       // Extract name from the parsed content for display
@@ -353,19 +358,20 @@ function renderQueue() {
 function pickProfile(url, email, name) {
   document.getElementById('url').value = url;
   document.getElementById('email').value = email;
+  window.open(url, '_blank');
   document.getElementById('content').focus();
 }
 
 document.getElementById('queueSearch').addEventListener('input', renderQueue);
 
-// Override saveProfile to also update queue
-const _origSave = saveProfile;
-saveProfile = async function() {
-  await _origSave();
-  // Mark as done
-  const url = document.getElementById('url').value;
+// Hook into save to update queue — patch clearForm to capture URL before clearing
+const _origClearForm = clearForm;
+clearForm = function() {
+  // Mark the current URL as done in queue before clearing
+  const url = document.getElementById('url').value.trim();
   const slug = (url.match(/linkedin\.com\/in\/([^/?&#\s]+)/) || [])[1] || '';
   if (slug) scrapedUrls.add(slug.replace(/\/$/, '').toLowerCase());
+  _origClearForm();
   renderQueue();
 };
 
