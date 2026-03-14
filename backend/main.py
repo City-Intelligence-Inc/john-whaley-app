@@ -57,6 +57,20 @@ def manual_scrape_noauth(body: ManualScrapeIn):
     return {"status": "ok", "photo_url": result.get("photo_url"), "url": result.get("url")}
 
 
+@app.get("/sessions", tags=["sessions"])
+def list_sessions_noauth():
+    """List all sessions — no auth for local dev."""
+    import db as _db
+    return _db.list_sessions()
+
+
+@app.get("/applicants", tags=["applicants"])
+def list_applicants_noauth(session_id: Optional[str] = None):
+    """List applicants — no auth for local dev."""
+    import db as _db
+    return _db.scan_all_applicants(session_id=session_id)
+
+
 @app.get("/linkedin/database", tags=["linkedin"])
 def linkedin_database_noauth():
     from config import linkedin_scrapes_table
