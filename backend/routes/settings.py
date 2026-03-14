@@ -142,6 +142,38 @@ def delete_persona(persona_id: str):
     return {"detail": "Deleted"}
 
 
+# ── Per-Event (Session) Whitelist / Blacklist ──
+
+@router.get("/sessions/{session_id}/whitelist")
+def get_session_whitelist(session_id: str):
+    data = db.get_settings(f"session_{session_id}_whitelist")
+    return data or {"emails": [], "linkedin_urls": []}
+
+
+@router.put("/sessions/{session_id}/whitelist")
+def update_session_whitelist(session_id: str, body: dict):
+    emails = [e.strip().lower() for e in body.get("emails", []) if e.strip()]
+    linkedin_urls = [u.strip() for u in body.get("linkedin_urls", []) if u.strip()]
+    payload = {"emails": emails, "linkedin_urls": linkedin_urls}
+    db.put_settings(f"session_{session_id}_whitelist", payload)
+    return payload
+
+
+@router.get("/sessions/{session_id}/blacklist")
+def get_session_blacklist(session_id: str):
+    data = db.get_settings(f"session_{session_id}_blacklist")
+    return data or {"emails": [], "linkedin_urls": []}
+
+
+@router.put("/sessions/{session_id}/blacklist")
+def update_session_blacklist(session_id: str, body: dict):
+    emails = [e.strip().lower() for e in body.get("emails", []) if e.strip()]
+    linkedin_urls = [u.strip() for u in body.get("linkedin_urls", []) if u.strip()]
+    payload = {"emails": emails, "linkedin_urls": linkedin_urls}
+    db.put_settings(f"session_{session_id}_blacklist", payload)
+    return payload
+
+
 # ── Luma API Key ──
 
 LUMA_KEY = "luma_api_key"

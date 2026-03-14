@@ -37,6 +37,38 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── No-auth endpoints (must be registered BEFORE auth-protected routers) ──
+from pydantic import BaseModel
+from typing import Optional
+
+
+class ManualScrapeIn(BaseModel):
+    url: str
+    name: Optional[str] = None
+    email: Optional[str] = None
+    content: str
+    photo_base64: Optional[str] = None
+
+
+@app.post("/linkedin/manual-scrape", tags=["linkedin"])
+def manual_scrape_noauth(body: ManualScrapeIn):
+    import db as _db
+    result = _db.save_manual_linkedin_scrape(body.model_dump())
+    return {"status": "ok", "photo_url": result.get("photo_url"), "url": result.get("url")}
+
+
+@app.get("/linkedin/database", tags=["linkedin"])
+def linkedin_database_noauth():
+    from config import linkedin_scrapes_table
+    response = linkedin_scrapes_table.scan()
+    items = response.get("Items", [])
+    while "LastEvaluatedKey" in response:
+        response = linkedin_scrapes_table.scan(ExclusiveStartKey=response["LastEvaluatedKey"])
+        items.extend(response.get("Items", []))
+    items.sort(key=lambda x: x.get("scraped_at", ""), reverse=True)
+    return {"items": items, "count": len(items)}
+
+
 # All routers require auth
 auth_dep = [Depends(require_auth)]
 
@@ -56,21 +88,25 @@ def health():
     return {"status": "ok"}
 
 
-# ── No-auth endpoint for the local LinkedIn scraper HTML tool ──
-from pydantic import BaseModel
-from typing import Optional
-
-
-class ManualScrapeIn(BaseModel):
+# ── No-auth single-profile scrape (for local HTML tool) ──
+class ScrapeOneIn(BaseModel):
     url: str
-    name: Optional[str] = None
-    email: Optional[str] = None
-    content: str
-    photo_base64: Optional[str] = None
+    li_at: Optional[str] = None
 
 
-@app.post("/linkedin/manual-scrape", tags=["linkedin"])
-def manual_scrape_noauth(body: ManualScrapeIn):
+@app.post("/linkedin/scrape-one", tags=["linkedin"])
+async def scrape_one_noauth(body: ScrapeOneIn):
+    """Scrape a single LinkedIn profile using li_at cookie, save to DB, return result."""
+    from routes.linkedin import _scrape_profile_requests, normalize_linkedin_url
     import db as _db
-    result = _db.save_manual_linkedin_scrape(body.model_dump())
-    return {"status": "ok", "photo_url": result.get("photo_url"), "url": result.get("url")}
+
+    norm = normalize_linkedin_url(body.url)
+    if not norm:
+        return {"error": f"Invalid LinkedIn URL: {body.url}"}
+
+    result = await _scrape_profile_requests(norm, body.li_at, None)
+    result_dict = result.model_dump()
+
+    # Save to linkedin-scrapes table
+    _db.save_linkedin_scrape(result_dict)
+    return result_dict
