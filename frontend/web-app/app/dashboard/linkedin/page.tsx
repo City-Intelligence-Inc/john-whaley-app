@@ -417,11 +417,21 @@ function TableRow({ p, onClick }: { p: Profile; onClick: () => void }) {
   );
 }
 
-// ── Manual Scrape Panel (full page overlay) ──
+// ── Applicant queue item ──
+interface QueuePerson {
+  name: string;
+  email: string;
+  linkedin_url: string;
+  done: boolean;
+}
+
+// ── Manual Scrape Panel (full page overlay with queue) ──
 function ManualScrapePanel({
   onAdded,
+  existingProfiles,
 }: {
   onAdded: () => void;
+  existingProfiles: Profile[];
 }) {
   const [open, setOpen] = useState(false);
   const [url, setUrl] = useState("");
@@ -429,7 +439,62 @@ function ManualScrapePanel({
   const [content, setContent] = useState("");
   const [photoData, setPhotoData] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [recentAdds, setRecentAdds] = useState<{ name: string; url: string; time: string }[]>([]);
+  const [queue, setQueue] = useState<QueuePerson[]>([]);
+  const [queueFilter, setQueueFilter] = useState("");
+  const [doneUrls, setDoneUrls] = useState<Set<string>>(new Set());
+
+  // Build queue from applicants not in LinkedIn DB
+  useEffect(() => {
+    if (!open) return;
+    (async () => {
+      try {
+        // Get all applicants from all sessions
+        const appResp = await fetch(`${API}/applicants`);
+        const applicants = await appResp.json();
+
+        // Build set of scraped LinkedIn slugs
+        const scraped = new Set<string>();
+        for (const p of existingProfiles) {
+          const m = p.url.match(/linkedin\.com\/in\/([^/?&#\s]+)/);
+          if (m) scraped.add(m[1].replace(/\/$/, "").toLowerCase());
+        }
+        setDoneUrls(scraped);
+
+        // Filter applicants who have a linkedin_url but aren't scraped
+        const q: QueuePerson[] = [];
+        const seen = new Set<string>();
+        for (const a of applicants || []) {
+          const li = a.linkedin_url || "";
+          if (!li || !li.includes("linkedin.com/in/")) continue;
+          const m = li.match(/linkedin\.com\/in\/([^/?&#\s]+)/);
+          const slug = m ? m[1].replace(/\/$/, "").toLowerCase() : "";
+          if (!slug || seen.has(slug)) continue;
+          seen.add(slug);
+          q.push({
+            name: a.name || a.email || "Unknown",
+            email: a.email || "",
+            linkedin_url: li,
+            done: scraped.has(slug),
+          });
+        }
+        // Sort: not-done first, then alphabetical
+        q.sort((a, b) => {
+          if (a.done !== b.done) return a.done ? 1 : -1;
+          return a.name.localeCompare(b.name);
+        });
+        setQueue(q);
+      } catch (e) {
+        console.error(e);
+      }
+    })();
+  }, [open, existingProfiles]);
+
+  function pickPerson(p: QueuePerson) {
+    setUrl(p.linkedin_url);
+    setEmail(p.email);
+    setContent("");
+    setPhotoData(null);
+  }
 
   async function handleSave() {
     if (!url.trim() || !content.trim()) return;
@@ -446,12 +511,34 @@ function ManualScrapePanel({
         }),
       });
       if (resp.ok) {
-        setRecentAdds((prev) => [
-          { name: url.split("/in/")[1]?.replace(/\/$/, "") || "profile", url: url.trim(), time: new Date().toLocaleTimeString() },
-          ...prev,
-        ].slice(0, 10));
-        setUrl("");
-        setEmail("");
+        // Mark as done in queue
+        const m = url.match(/linkedin\.com\/in\/([^/?&#\s]+)/);
+        if (m) {
+          const slug = m[1].replace(/\/$/, "").toLowerCase();
+          setDoneUrls((prev) => new Set([...prev, slug]));
+          setQueue((prev) =>
+            prev.map((q) => {
+              const qs = q.linkedin_url.match(/linkedin\.com\/in\/([^/?&#\s]+)/);
+              return qs && qs[1].replace(/\/$/, "").toLowerCase() === slug
+                ? { ...q, done: true }
+                : q;
+            })
+          );
+        }
+        // Auto-advance to next undone
+        const nextUndone = queue.find((q) => {
+          if (q.done) return false;
+          const qs = q.linkedin_url.match(/linkedin\.com\/in\/([^/?&#\s]+)/);
+          const slug = qs ? qs[1].replace(/\/$/, "").toLowerCase() : "";
+          return !doneUrls.has(slug) && q.linkedin_url !== url.trim();
+        });
+        if (nextUndone) {
+          setUrl(nextUndone.linkedin_url);
+          setEmail(nextUndone.email);
+        } else {
+          setUrl("");
+          setEmail("");
+        }
         setContent("");
         setPhotoData(null);
         onAdded();
@@ -463,10 +550,8 @@ function ManualScrapePanel({
     }
   }
 
-  // Handle paste for images
   function handlePaste(e: React.ClipboardEvent) {
-    const items = e.clipboardData.items;
-    for (const item of Array.from(items)) {
+    for (const item of Array.from(e.clipboardData.items)) {
       if (item.type.startsWith("image/")) {
         e.preventDefault();
         const file = item.getAsFile();
@@ -479,16 +564,15 @@ function ManualScrapePanel({
     }
   }
 
-  // Handle drop for images
-  function handleDrop(e: React.DragEvent) {
-    e.preventDefault();
-    const file = e.dataTransfer.files[0];
-    if (file?.type.startsWith("image/")) {
-      const reader = new FileReader();
-      reader.onload = (ev) => setPhotoData(ev.target?.result as string);
-      reader.readAsDataURL(file);
-    }
-  }
+  const filteredQueue = queueFilter
+    ? queue.filter(
+        (q) =>
+          q.name.toLowerCase().includes(queueFilter.toLowerCase()) ||
+          q.email.toLowerCase().includes(queueFilter.toLowerCase())
+      )
+    : queue;
+
+  const remaining = queue.filter((q) => !q.done).length;
 
   if (!open) {
     return (
@@ -502,21 +586,79 @@ function ManualScrapePanel({
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm overflow-y-auto" onClick={() => setOpen(false)}>
-      <div className="max-w-2xl mx-auto my-8 px-4" onClick={(e) => e.stopPropagation()}>
-        <div className="bg-[#111827] border border-[#253256] rounded-2xl overflow-hidden shadow-2xl">
+    <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm" onClick={() => setOpen(false)}>
+      <div className="flex h-full" onClick={(e) => e.stopPropagation()}>
+        {/* ── Left: Queue sidebar ── */}
+        <div className="w-[280px] shrink-0 bg-[#0d1117] border-r border-[#253256] flex flex-col">
+          <div className="p-3 border-b border-[#253256]">
+            <div className="text-xs font-semibold text-white mb-2 flex items-center justify-between">
+              <span>Applicants</span>
+              <span className="text-[#488CFF]">{remaining} left</span>
+            </div>
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-[#4A5A7A]" />
+              <input
+                type="text"
+                placeholder="Filter..."
+                value={queueFilter}
+                onChange={(e) => setQueueFilter(e.target.value)}
+                className="w-full bg-[#111827] border border-[#253256] rounded-md pl-7 pr-2 py-1.5 text-xs text-white placeholder:text-[#4A5A7A] outline-none focus:border-[#488CFF]"
+              />
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {filteredQueue.map((q, i) => {
+              const isActive = q.linkedin_url === url;
+              return (
+                <button
+                  key={i}
+                  onClick={() => !q.done && pickPerson(q)}
+                  disabled={q.done}
+                  className={`w-full text-left px-3 py-2 border-b border-[#1a1a2e] transition-colors flex items-center gap-2 ${
+                    q.done
+                      ? "opacity-40 cursor-default"
+                      : isActive
+                        ? "bg-[#488CFF]/10 border-l-2 border-l-[#488CFF]"
+                        : "hover:bg-[#111827] cursor-pointer"
+                  }`}
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className={`text-xs font-medium truncate ${isActive ? "text-[#488CFF]" : "text-[#9BA8C2]"}`}>
+                      {q.name}
+                    </div>
+                    <div className="text-[10px] text-[#4A5A7A] truncate">{q.email}</div>
+                  </div>
+                  {q.done && (
+                    <span className="text-[9px] text-emerald-500 font-medium shrink-0">done</span>
+                  )}
+                </button>
+              );
+            })}
+            {filteredQueue.length === 0 && (
+              <div className="text-xs text-[#4A5A7A] text-center py-8">No applicants with LinkedIn URLs</div>
+            )}
+          </div>
+        </div>
+
+        {/* ── Right: Form ── */}
+        <div className="flex-1 overflow-y-auto bg-[#111827]">
           {/* Header */}
-          <div className="flex items-center justify-between px-6 py-4 border-b border-[#253256]">
-            <h2 className="text-base font-semibold text-white flex items-center gap-2">
-              <ClipboardPaste className="w-5 h-5 text-[#488CFF]" />
-              Manual Profile Scrape
+          <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-3 bg-[#111827] border-b border-[#253256]">
+            <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+              <ClipboardPaste className="w-4 h-4 text-[#488CFF]" />
+              Manual Scrape
+              {url && (
+                <a href={url} target="_blank" rel="noreferrer" className="text-[11px] text-[#488CFF] hover:underline font-normal ml-2 flex items-center gap-1">
+                  Open profile <ExternalLink className="w-3 h-3" />
+                </a>
+              )}
             </h2>
             <button onClick={() => setOpen(false)} className="text-[#4A5A7A] hover:text-white">
               <X className="w-5 h-5" />
             </button>
           </div>
 
-          <div className="p-6 space-y-4">
+          <div className="p-6 max-w-2xl space-y-4">
             {/* URL + Email */}
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -526,12 +668,11 @@ function ManualScrapePanel({
                   placeholder="https://linkedin.com/in/someone"
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
-                  autoFocus
                   className="w-full bg-[#0d1117] border border-[#253256] rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-[#4A5A7A] outline-none focus:border-[#488CFF]"
                 />
               </div>
               <div>
-                <label className="block text-[10px] text-[#4A5A7A] uppercase tracking-wider font-semibold mb-1">Email (optional)</label>
+                <label className="block text-[10px] text-[#4A5A7A] uppercase tracking-wider font-semibold mb-1">Email</label>
                 <input
                   type="email"
                   placeholder="their@email.com"
@@ -542,12 +683,20 @@ function ManualScrapePanel({
               </div>
             </div>
 
-            {/* Photo drop zone */}
+            {/* Photo */}
             <div>
               <label className="block text-[10px] text-[#4A5A7A] uppercase tracking-wider font-semibold mb-1">Profile Photo</label>
               <div
                 onPaste={handlePaste}
-                onDrop={handleDrop}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const file = e.dataTransfer.files[0];
+                  if (file?.type.startsWith("image/")) {
+                    const reader = new FileReader();
+                    reader.onload = (ev) => setPhotoData(ev.target?.result as string);
+                    reader.readAsDataURL(file);
+                  }
+                }}
                 onDragOver={(e) => e.preventDefault()}
                 onClick={() => {
                   const input = document.createElement("input");
@@ -563,91 +712,48 @@ function ManualScrapePanel({
                   input.click();
                 }}
                 tabIndex={0}
-                className="border-2 border-dashed border-[#253256] rounded-xl p-4 text-center cursor-pointer hover:border-[#488CFF]/50 transition-colors min-h-[70px] flex items-center justify-center gap-3"
+                className="border-2 border-dashed border-[#253256] rounded-xl p-3 text-center cursor-pointer hover:border-[#488CFF]/50 transition-colors min-h-[60px] flex items-center justify-center gap-3"
               >
                 {photoData ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={photoData} alt="" className="w-16 h-16 rounded-full object-cover border-2 border-[#253256]" />
+                  <>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={photoData} alt="" className="w-14 h-14 rounded-full object-cover border-2 border-[#253256]" />
+                    <button onClick={(e) => { e.stopPropagation(); setPhotoData(null); }} className="text-[#4A5A7A] hover:text-red-400 text-xs">Remove</button>
+                  </>
                 ) : (
-                  <span className="text-xs text-[#4A5A7A]">Paste (Cmd+V), drag, or click to add photo</span>
-                )}
-                {photoData && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setPhotoData(null); }}
-                    className="text-[#4A5A7A] hover:text-red-400 text-xs"
-                  >
-                    Remove
-                  </button>
+                  <span className="text-xs text-[#4A5A7A]">Paste, drag, or click to add photo</span>
                 )}
               </div>
             </div>
 
-            {/* Content paste */}
+            {/* Content */}
             <div>
-              <label className="block text-[10px] text-[#4A5A7A] uppercase tracking-wider font-semibold mb-1">Profile Content * (Cmd+A Cmd+C from LinkedIn, Cmd+V here)</label>
+              <label className="block text-[10px] text-[#4A5A7A] uppercase tracking-wider font-semibold mb-1">Profile Content *</label>
               <textarea
-                placeholder={"Go to their LinkedIn profile page\nCmd+A to select all\nCmd+C to copy\nCmd+V to paste here\n\nThe backend strips nav junk and parses into: name, headline, location, about, experience, education, skills, certifications, languages, etc."}
+                placeholder={"Open their LinkedIn profile\nCmd+A → Cmd+C → Cmd+V here\n\nAuto-parsed into structured fields."}
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
-                rows={12}
+                rows={14}
+                autoFocus
                 className="w-full bg-[#0d1117] border border-[#253256] rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-[#4A5A7A] outline-none focus:border-[#488CFF] resize-y font-mono leading-relaxed"
               />
             </div>
 
             {/* Actions */}
-            <div className="flex items-center justify-between pt-2">
-              <span className="text-[10px] text-[#4A5A7A]">Cmd+Enter to save</span>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => { setUrl(""); setEmail(""); setContent(""); setPhotoData(null); }}
-                  className="px-4 py-2 rounded-lg text-sm text-[#5A6B8A] hover:text-white border border-[#253256] hover:border-[#488CFF]/30 transition-colors"
-                >
-                  Clear
-                </button>
-                <button
-                  onClick={handleSave}
-                  disabled={!url.trim() || !content.trim() || saving}
-                  className="flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                >
-                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                  {saving ? "Saving..." : "Save to Database"}
-                </button>
-              </div>
+            <div className="flex items-center justify-between pt-1">
+              <span className="text-[10px] text-[#4A5A7A]">Cmd+Enter to save & advance</span>
+              <button
+                onClick={handleSave}
+                disabled={!url.trim() || !content.trim() || saving}
+                className="flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                {saving ? "Saving..." : "Save & Next"}
+              </button>
             </div>
-
-            {/* Recent adds */}
-            {recentAdds.length > 0 && (
-              <div className="border-t border-[#253256] pt-4 mt-2">
-                <h4 className="text-[10px] text-[#4A5A7A] uppercase tracking-wider font-semibold mb-2">Recently Added</h4>
-                <div className="space-y-1">
-                  {recentAdds.map((r, i) => (
-                    <div key={i} className="flex items-center gap-2 text-xs text-[#7B8DB5] bg-[#0d1117] rounded-lg px-3 py-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                      <span className="flex-1 truncate">{r.name}</span>
-                      <span className="text-[#4A5A7A]">{r.time}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         </div>
       </div>
-
-      {/* Global keyboard handler for Cmd+Enter */}
-      <div
-        ref={(el) => {
-          if (!el) return;
-          const handler = (e: KeyboardEvent) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-              e.preventDefault();
-              handleSave();
-            }
-          };
-          window.addEventListener("keydown", handler);
-          return () => window.removeEventListener("keydown", handler);
-        }}
-      />
     </div>
   );
 }
@@ -963,7 +1069,7 @@ export default function LinkedInPage() {
           </button>
 
           <EnrichPanel onDone={loadDatabase} getToken={getToken} />
-          <ManualScrapePanel onAdded={loadDatabase} />
+          <ManualScrapePanel onAdded={loadDatabase} existingProfiles={profiles} />
         </div>
 
         {/* Row 2: Filters + Sort + View toggle */}
