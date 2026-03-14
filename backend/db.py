@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 from boto3.dynamodb.conditions import Key as DDBKey
 from fastapi import HTTPException
-from config import applicants_table, sessions_table, settings_table, linkedin_scrapes_table
+from config import applicants_table, sessions_table, settings_table, linkedin_scrapes_table, s3, S3_BUCKET
 
 
 # ── Generic helpers ──
@@ -214,6 +214,279 @@ def save_linkedin_scrape(result: dict) -> None:
             item[field] = val
 
     linkedin_scrapes_table.put_item(Item=item)
+
+
+def upload_photo_to_s3(linkedin_url: str, photo_bytes: bytes, content_type: str = "image/jpeg") -> str:
+    """Upload a profile photo to S3 and return the public URL."""
+    import re
+    slug = re.search(r"/in/([^/?&#\s]+)", linkedin_url)
+    key = f"photos/{slug.group(1) if slug else uuid.uuid4()}.jpg"
+    s3.put_object(
+        Bucket=S3_BUCKET,
+        Key=key,
+        Body=photo_bytes,
+        ContentType=content_type,
+    )
+    return f"https://{S3_BUCKET}.s3.amazonaws.com/{key}"
+
+
+def _parse_linkedin_paste(raw: str) -> dict:
+    """
+    Parse a raw copy-paste from a LinkedIn profile page into structured sections.
+
+    LinkedIn pastes always start with nav junk (notifications, Home, My Network, etc.)
+    The real profile starts after "Try Premium for $0" or similar, with the name repeated.
+    Sections (Experience, Education, Skills, etc.) appear as standalone header lines.
+    The page ends with "More profiles for you" / "People also viewed" / LinkedIn footer.
+    """
+    import re
+
+    lines = raw.strip().split("\n")
+    if not lines:
+        return {}
+
+    result: dict = {}
+
+    # ── Step 1: Strip the LinkedIn nav header ──
+    # The nav contains: notifications, Home, My Network, Jobs, Messaging, etc.
+    # Find the LAST nav marker to skip past all of them.
+    profile_start = 0
+    nav_end_markers = ["Try Premium", "For Business", "Get the app"]
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if any(stripped.startswith(m) for m in nav_end_markers):
+            profile_start = i + 1  # keep advancing past ALL nav markers
+
+    # ── Step 2: Strip the footer ──
+    # Cut off at the FIRST footer marker (scanning forward from profile_start)
+    # to avoid capturing LinkedIn footer "About", "Careers", etc. as profile sections
+    profile_end = len(lines)
+    footer_markers = ["More profiles for you", "People also viewed",
+                       "Explore premium profiles", "LinkedIn Corporation",
+                       "Talent Solutions", "Community Guidelines",
+                       "Marketing Solutions"]
+    for i in range(profile_start, len(lines)):
+        stripped = lines[i].strip()
+        if any(stripped == m or stripped.startswith(m) for m in footer_markers):
+            profile_end = i
+            break
+
+    profile_lines = lines[profile_start:profile_end]
+
+    # ── Step 3: Find the profile header (name, headline, location) ──
+    # After nav, first non-empty line = name, then headline, then location info
+    clean = [(i, l.strip()) for i, l in enumerate(profile_lines) if l.strip()]
+    if not clean:
+        return {}
+
+    # Name is first non-empty line after nav
+    result["name"] = clean[0][1]
+
+    # Look through the next ~15 lines for headline, location, connections
+    header_lines = clean[1:20]
+    ui_junk = {"More", "Message", "Connect", "Follow", "Cover photo",
+               "Show credential", "Show all", "Show publication",
+               "Like", "Comment", "Repost", "Send"}
+
+    for _, text in header_lines:
+        if text in ui_junk or text.startswith("View "):
+            continue
+        # Headline: typically long-ish, contains "at" or "|" or role-like words
+        if not result.get("headline") and len(text) > 10 and text != result["name"]:
+            if not re.match(r"^[\d·]+$", text) and "Contact info" not in text:
+                result["headline"] = text
+                continue
+        # Location — must not be the same as headline
+        if not result.get("location") and text != result.get("headline") and re.search(
+            r"(Area|Bay|Metro|United States|California|New York|London|Canada|India|Japan|China|Singapore|,)", text
+        ):
+            result["location"] = text.split("·")[0].strip()
+            continue
+
+    # Connections — search broadly
+    for _, text in clean:
+        m = re.search(r"(\d[\d,]*\+?)\s*connections", text, re.I)
+        if m:
+            result["connections"] = m.group(1)
+            break
+
+    # ── Step 4: Split into major sections ──
+    section_headers = {
+        "About", "Activity", "Experience", "Education",
+        "Licenses & certifications", "Skills", "Recommendations",
+        "Courses", "Projects", "Publications", "Honors & awards",
+        "Languages", "Organizations", "Volunteer experience",
+        "Interests", "Services",
+    }
+    section_lower = {s.lower(): s for s in section_headers}
+
+    sections: dict[str, list[str]] = {}
+    current_section = "_header"
+    sections[current_section] = []
+
+    for line in profile_lines:
+        stripped = line.strip()
+        if stripped.lower() in section_lower:
+            current_section = section_lower[stripped.lower()]
+            sections[current_section] = []
+        elif current_section != "_header":
+            sections[current_section].append(stripped)
+
+    # ── Step 5: Clean each section — remove UI noise ──
+    noise_patterns = [
+        r"^\d+ reactions?\d*$", r"^\d+ comments?\d*$", r"^\d+ reposts?\d*$",
+        r"^Like$", r"^Comment$", r"^Repost$", r"^Send$", r"^Follow$",
+        r"^Show all.*$", r"^Show credential$", r"^Show publication$",
+        r"^View .+'s profile", r"^View image$", r"^View company:",
+        r"^View celebration", r"^\d+ followers$",
+        r"^Endorsed by", r"^\d+ endorsements?$",
+        r"^\d+/\d+$",  # image pagination like "1/2"
+        r"logo$",  # "company logo"
+    ]
+    noise_re = re.compile("|".join(noise_patterns), re.I)
+
+    def clean_section(lines_list: list[str]) -> str:
+        cleaned = [l for l in lines_list if l and not noise_re.search(l)]
+        return "\n".join(cleaned).strip()
+
+    # ── Step 6: Extract structured fields ──
+    # About — stop before Activity noise leaks in
+    about_lines = sections.get("About", [])
+    if about_lines:
+        # The About section on LinkedIn ends with "… more" or before Activity
+        about_text = []
+        for l in about_lines:
+            if noise_re.search(l):
+                continue
+            about_text.append(l)
+        result["about"] = "\n".join(about_text).strip()
+
+    # Experience — the big one, includes company logos, roles, dates, descriptions
+    exp_lines = sections.get("Experience", [])
+    if exp_lines:
+        exp_text = clean_section(exp_lines)
+        result["experience"] = exp_text
+        # First line is usually current company
+        first_meaningful = [l for l in exp_lines if l and not noise_re.search(l)]
+        if first_meaningful:
+            result["company"] = first_meaningful[0]
+
+    # Education
+    edu_lines = sections.get("Education", [])
+    if edu_lines:
+        result["education"] = clean_section(edu_lines)
+
+    # Skills
+    skills_lines = sections.get("Skills", [])
+    if skills_lines:
+        result["skills"] = clean_section(skills_lines)
+
+    # Certifications
+    cert_lines = sections.get("Licenses & certifications", [])
+    if cert_lines:
+        result["certifications"] = clean_section(cert_lines)
+
+    # Languages
+    lang_lines = sections.get("Languages", [])
+    if lang_lines:
+        result["languages"] = clean_section(lang_lines)
+
+    # Volunteer
+    vol_lines = sections.get("Volunteer experience", [])
+    if vol_lines:
+        result["volunteer"] = clean_section(vol_lines)
+
+    # Recommendations
+    rec_lines = sections.get("Recommendations", [])
+    if rec_lines:
+        result["recommendations"] = clean_section(rec_lines)
+
+    # Projects
+    proj_lines = sections.get("Projects", [])
+    if proj_lines:
+        result["projects"] = clean_section(proj_lines)
+
+    # Publications
+    pub_lines = sections.get("Publications", [])
+    if pub_lines:
+        result["publications"] = clean_section(pub_lines)
+
+    # Honors & awards
+    awards_lines = sections.get("Honors & awards", [])
+    if awards_lines:
+        result["awards"] = clean_section(awards_lines)
+
+    # Courses
+    courses_lines = sections.get("Courses", [])
+    if courses_lines:
+        result["courses"] = clean_section(courses_lines)
+
+    # Organizations
+    org_lines = sections.get("Organizations", [])
+    if org_lines:
+        result["organizations"] = clean_section(org_lines)
+
+    return result
+
+
+def save_manual_linkedin_scrape(data: dict) -> dict:
+    """Save a manually scraped LinkedIn profile. Parses raw paste into structured columns + uploads photo to S3."""
+    url = data.get("url")
+    if not url:
+        return {}
+
+    # Parse the raw paste into structured fields
+    parsed = _parse_linkedin_paste(data.get("content", ""))
+
+    item: dict = {
+        "url": url,
+        "scraped_at": datetime.now(timezone.utc).isoformat(),
+        "email": data.get("email"),
+        "source": "manual",
+        "raw_content": data.get("content"),
+        # Structured fields from parsing
+        "name": parsed.get("name") or data.get("name"),
+        "headline": parsed.get("headline"),
+        "location": parsed.get("location"),
+        "connections": parsed.get("connections"),
+        "about": parsed.get("about"),
+        "experience": parsed.get("experience"),
+        "company": parsed.get("company"),
+        "education": parsed.get("education"),
+        "skills": parsed.get("skills"),
+        "certifications": parsed.get("certifications"),
+        "languages": parsed.get("languages"),
+        "volunteer": parsed.get("volunteer"),
+        "recommendations": parsed.get("recommendations"),
+        "projects": parsed.get("projects"),
+        "publications": parsed.get("publications"),
+        "awards": parsed.get("awards"),
+        "courses": parsed.get("courses"),
+        "organizations": parsed.get("organizations"),
+    }
+
+    # Upload photo if provided as base64
+    photo_b64 = data.get("photo_base64")
+    if photo_b64:
+        import base64
+        # Strip data URL prefix if present
+        if "," in photo_b64:
+            header, photo_b64 = photo_b64.split(",", 1)
+            content_type = "image/jpeg"
+            if "png" in header:
+                content_type = "image/png"
+            elif "webp" in header:
+                content_type = "image/webp"
+        else:
+            content_type = "image/jpeg"
+        photo_bytes = base64.b64decode(photo_b64)
+        photo_url = upload_photo_to_s3(url, photo_bytes, content_type)
+        item["photo_url"] = photo_url
+
+    # Remove None/empty values (DynamoDB doesn't allow empty strings)
+    item = {k: v for k, v in item.items() if v}
+    linkedin_scrapes_table.put_item(Item=item)
+    return item
 
 
 # ── Settings operations ──

@@ -1,209 +1,429 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
+import {
+  Search,
+  X,
+  ExternalLink,
+  MapPin,
+  Building2,
+  GraduationCap,
+  Users,
+  Briefcase,
+  Award,
+  Languages,
+  BookOpen,
+  FolderOpen,
+  Heart,
+  Star,
+  Grid3X3,
+  List,
+  SlidersHorizontal,
+  RefreshCw,
+} from "lucide-react";
+import { useAuth } from "@clerk/nextjs";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 interface Profile {
   url: string;
   name?: string;
+  email?: string;
   headline?: string;
   photo_url?: string;
   location?: string;
   connections?: string;
   company?: string;
   education?: string;
+  about?: string;
+  experience?: string;
+  skills?: string;
+  certifications?: string;
+  languages?: string;
+  recommendations?: string;
+  publications?: string;
+  awards?: string;
+  courses?: string;
+  organizations?: string;
+  volunteer?: string;
+  projects?: string;
   scraped_at?: string;
+  source?: string;
   error?: string;
 }
 
-function proxyPhoto(url?: string) {
-  if (!url) return null;
-  return `${API}/linkedin/proxy-image?url=${encodeURIComponent(url)}`;
+type FilterKey =
+  | "has-photo"
+  | "has-about"
+  | "has-exp"
+  | "has-edu"
+  | "has-skills"
+  | "no-photo"
+  | "no-about";
+
+type SortKey = "name" | "recent" | "fields";
+
+const FIELD_KEYS = [
+  "name",
+  "headline",
+  "location",
+  "about",
+  "experience",
+  "education",
+  "skills",
+  "photo_url",
+  "certifications",
+  "languages",
+  "recommendations",
+  "publications",
+  "awards",
+  "courses",
+  "organizations",
+  "volunteer",
+  "projects",
+] as const;
+
+function fieldCount(p: Profile) {
+  return FIELD_KEYS.filter((f) => p[f as keyof Profile]).length;
 }
 
 function initials(name?: string) {
   if (!name) return "?";
-  return name.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+  return name
+    .trim()
+    .split(/\s+/)
+    .map((w) => w[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
 }
 
-function handleFromUrl(url: string) {
-  const m = url.match(/linkedin\.com\/(?:in|company)\/([^/?#]+)/);
-  return m ? m[1].replace(/-/g, " ") : url;
+// ── Detail section config ──
+const SECTIONS: { key: keyof Profile; label: string; icon: typeof Briefcase; full?: boolean }[] = [
+  { key: "about", label: "About", icon: BookOpen, full: true },
+  { key: "experience", label: "Experience", icon: Briefcase, full: true },
+  { key: "education", label: "Education", icon: GraduationCap },
+  { key: "skills", label: "Skills", icon: Star },
+  { key: "company", label: "Company", icon: Building2 },
+  { key: "certifications", label: "Certifications", icon: Award },
+  { key: "languages", label: "Languages", icon: Languages },
+  { key: "recommendations", label: "Recommendations", icon: Heart, full: true },
+  { key: "publications", label: "Publications", icon: BookOpen, full: true },
+  { key: "awards", label: "Awards", icon: Award },
+  { key: "courses", label: "Courses", icon: BookOpen },
+  { key: "organizations", label: "Organizations", icon: Users },
+  { key: "volunteer", label: "Volunteer", icon: Heart },
+  { key: "projects", label: "Projects", icon: FolderOpen },
+];
+
+// ── Filter config ──
+const FILTERS: { key: FilterKey; label: string; positive: boolean }[] = [
+  { key: "has-photo", label: "Photo", positive: true },
+  { key: "has-about", label: "About", positive: true },
+  { key: "has-exp", label: "Experience", positive: true },
+  { key: "has-edu", label: "Education", positive: true },
+  { key: "has-skills", label: "Skills", positive: true },
+  { key: "no-photo", label: "No Photo", positive: false },
+  { key: "no-about", label: "No About", positive: false },
+];
+
+function matchesFilter(p: Profile, f: FilterKey) {
+  switch (f) {
+    case "has-photo": return !!p.photo_url;
+    case "has-about": return !!p.about;
+    case "has-exp": return !!p.experience;
+    case "has-edu": return !!p.education;
+    case "has-skills": return !!p.skills;
+    case "no-photo": return !p.photo_url;
+    case "no-about": return !p.about;
+  }
 }
 
-function timeAgo(iso?: string) {
-  if (!iso) return "";
-  const diff = Date.now() - new Date(iso).getTime();
-  const m = Math.floor(diff / 60000);
-  if (m < 1) return "just now";
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
-}
+// ── Avatar ──
+function Avatar({ p, size = "sm" }: { p: Profile; size?: "sm" | "lg" }) {
+  const dim = size === "lg" ? "w-20 h-20" : "w-11 h-11";
+  const textSize = size === "lg" ? "text-2xl" : "text-sm";
 
-function Avatar({ p }: { p: Profile }) {
-  const photo = proxyPhoto(p.photo_url);
-  const name = p.name || handleFromUrl(p.url);
+  if (p.photo_url) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={p.photo_url}
+        alt=""
+        className={`${dim} rounded-full object-cover border-2 border-[#253256] bg-[#1a2236] flex-shrink-0`}
+        onError={(e) => {
+          (e.target as HTMLImageElement).style.display = "none";
+          (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden");
+        }}
+      />
+    );
+  }
   return (
-    <div className="w-9 h-9 rounded-full overflow-hidden bg-[#0a66c2] flex-shrink-0 flex items-center justify-center">
-      {photo ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={photo} alt="" className="w-full h-full object-cover"
-          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-      ) : (
-        <span className="text-white font-bold text-xs">{initials(name)}</span>
-      )}
+    <div
+      className={`${dim} rounded-full bg-gradient-to-br from-[#1a237e] to-[#0d47a1] border-2 border-[#253256] flex items-center justify-center flex-shrink-0`}
+    >
+      <span className={`${textSize} font-bold text-[#90caf9]`}>
+        {initials(p.name)}
+      </span>
     </div>
   );
 }
 
-function ProfileCard({ p }: { p: Profile }) {
-  const ok = !p.error;
-  const name = ok ? (p.name || handleFromUrl(p.url)) : handleFromUrl(p.url);
-  const photo = proxyPhoto(p.photo_url);
-
+// ── Field Tag ──
+function FieldTag({ has, label }: { has: boolean; label: string }) {
   return (
-    <div className="bg-[#1a1a24] border border-[#2a2a38] rounded-xl overflow-hidden hover:border-[#0a66c2] transition-colors">
-      <div className="h-12 bg-gradient-to-r from-[#0a66c2] to-[#083d7a] relative">
-        <div className="absolute -bottom-5 left-3 w-11 h-11 rounded-full border-2 border-[#1a1a24] overflow-hidden bg-[#0a66c2]">
-          {photo ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={photo} alt="" className="w-full h-full object-cover"
-              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center text-white font-bold text-sm">
-              {initials(name)}
-            </div>
-          )}
+    <span
+      className={`text-[9px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wide ${
+        has
+          ? "bg-emerald-500/15 text-emerald-400"
+          : "bg-red-500/10 text-red-400/60"
+      }`}
+    >
+      {label}
+    </span>
+  );
+}
+
+// ── Profile Card ──
+function ProfileCard({ p, onClick }: { p: Profile; onClick: () => void }) {
+  return (
+    <div
+      onClick={onClick}
+      className="group bg-[#1a2236] border border-[#253256] rounded-xl overflow-hidden cursor-pointer transition-all hover:border-[#488CFF]/50 hover:shadow-lg hover:shadow-[#488CFF]/5 hover:-translate-y-0.5"
+    >
+      {/* Banner + avatar */}
+      <div className="h-14 bg-gradient-to-r from-[#0d47a1] to-[#1565c0] relative">
+        <div className="absolute -bottom-5 left-4">
+          <Avatar p={p} />
         </div>
       </div>
 
-      <div className="pt-7 px-3 pb-2">
-        <div className="font-semibold text-sm text-white truncate">{name}</div>
-        {ok ? (
-          <div className="text-xs text-slate-400 mt-0.5 line-clamp-2 leading-relaxed">
-            {p.headline || <span className="text-slate-600">No headline</span>}
-          </div>
-        ) : (
-          <div className="text-xs text-red-400 mt-0.5">{
-            /999|rate/i.test(p.error || "") ? "Rate limited" :
-            /redirect/i.test(p.error || "") ? "Auth required" : "Failed"
-          }</div>
-        )}
+      {/* Info */}
+      <div className="pt-7 px-4 pb-2">
+        <h3 className="font-semibold text-sm text-white truncate group-hover:text-[#6AABFF] transition-colors">
+          {p.name || "Unknown"}
+        </h3>
+        <p className="text-xs text-[#7B8DB5] mt-0.5 line-clamp-2 leading-relaxed min-h-[2.5em]">
+          {p.headline || "No headline"}
+        </p>
+      </div>
 
-        {ok && (
-          <div className="mt-2 space-y-1">
-            {p.location && (
-              <div className="flex gap-1.5 text-[11px] text-slate-500">
-                <span>📍</span><span className="truncate">{p.location}</span>
-              </div>
-            )}
-            {p.company && (
-              <div className="flex gap-1.5 text-[11px] text-slate-500">
-                <span>🏢</span><span className="truncate">{p.company}</span>
-              </div>
-            )}
-            {p.education && (
-              <div className="flex gap-1.5 text-[11px] text-slate-500">
-                <span>🎓</span><span className="truncate">{p.education}</span>
-              </div>
-            )}
-            {p.connections && (
-              <div className="flex gap-1.5 text-[11px] text-slate-500">
-                <span>🔗</span><span>{p.connections} connections</span>
-              </div>
-            )}
+      {/* Meta */}
+      <div className="px-4 pb-2 space-y-1">
+        {p.location && (
+          <div className="flex items-center gap-1.5 text-[11px] text-[#4A5A7A]">
+            <MapPin className="w-3 h-3" />
+            <span className="truncate">{p.location}</span>
+          </div>
+        )}
+        {p.company && (
+          <div className="flex items-center gap-1.5 text-[11px] text-[#4A5A7A]">
+            <Building2 className="w-3 h-3" />
+            <span className="truncate">{p.company}</span>
           </div>
         )}
       </div>
 
-      <div className="px-3 pb-3 pt-1 flex items-center justify-between border-t border-[#1e1e2a] mt-2">
-        <a href={p.url} target="_blank" rel="noreferrer"
-          className="text-[11px] text-[#0a66c2] font-medium hover:underline">
-          View ↗
+      {/* Tags */}
+      <div className="px-4 pb-3 flex flex-wrap gap-1">
+        <FieldTag has={!!p.photo_url} label="photo" />
+        <FieldTag has={!!p.about} label="about" />
+        <FieldTag has={!!p.experience} label="exp" />
+        <FieldTag has={!!p.education} label="edu" />
+        <FieldTag has={!!p.skills} label="skills" />
+      </div>
+
+      {/* About preview */}
+      {p.about && (
+        <div className="px-4 pb-3 text-[11px] text-[#5A6B8A] line-clamp-2 leading-relaxed">
+          {p.about}
+        </div>
+      )}
+
+      {/* Footer */}
+      <div className="px-4 py-2 flex items-center justify-between border-t border-[#253256]">
+        <a
+          href={p.url}
+          target="_blank"
+          rel="noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="text-[11px] text-[#488CFF] font-medium hover:underline flex items-center gap-1"
+        >
+          <ExternalLink className="w-3 h-3" /> LinkedIn
         </a>
-        <span className="text-[10px] text-slate-600">{timeAgo(p.scraped_at)}</span>
+        {p.connections && (
+          <span className="text-[10px] text-[#4A5A7A]">
+            {p.connections} conn
+          </span>
+        )}
       </div>
     </div>
   );
 }
 
-function TableView({ profiles }: { profiles: Profile[] }) {
+// ── Detail Overlay ──
+function DetailOverlay({
+  p,
+  onClose,
+}: {
+  p: Profile;
+  onClose: () => void;
+}) {
+  const activeSections = SECTIONS.filter((s) => p[s.key]);
+
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm border-collapse">
-        <thead>
-          <tr className="border-b border-[#2a2a38] text-left">
-            <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide w-8">#</th>
-            <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Name</th>
-            <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Headline</th>
-            <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Company</th>
-            <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Education</th>
-            <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Location</th>
-            <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Connections</th>
-            <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Scraped</th>
-          </tr>
-        </thead>
-        <tbody>
-          {profiles.map((p, idx) => {
-            const name = p.name || handleFromUrl(p.url);
-            const ok = !p.error;
-            return (
-              <tr key={p.url} className="border-b border-[#1e1e2a] hover:bg-[#1a1a24] transition-colors">
-                <td className="px-4 py-2.5 text-slate-600 text-xs">{idx + 1}</td>
-                <td className="px-4 py-2.5">
-                  <div className="flex items-center gap-2.5">
-                    <Avatar p={p} />
-                    <div className="min-w-0">
-                      <a href={p.url} target="_blank" rel="noreferrer"
-                        className="text-white font-medium hover:text-[#0a66c2] transition-colors truncate block max-w-[160px]">
-                        {name}
-                      </a>
-                      {!ok && <span className="text-[10px] text-red-400">Failed</span>}
-                    </div>
-                  </div>
-                </td>
-                <td className="px-4 py-2.5 text-slate-300 max-w-[220px]">
-                  <span className="line-clamp-2 text-xs leading-relaxed">{p.headline || <span className="text-slate-600">—</span>}</span>
-                </td>
-                <td className="px-4 py-2.5 text-slate-400 text-xs max-w-[140px]">
-                  <span className="truncate block">{p.company || <span className="text-slate-600">—</span>}</span>
-                </td>
-                <td className="px-4 py-2.5 text-slate-400 text-xs max-w-[140px]">
-                  <span className="truncate block">{p.education || <span className="text-slate-600">—</span>}</span>
-                </td>
-                <td className="px-4 py-2.5 text-slate-400 text-xs whitespace-nowrap">{p.location || <span className="text-slate-600">—</span>}</td>
-                <td className="px-4 py-2.5 text-slate-400 text-xs whitespace-nowrap">{p.connections ? `${p.connections}` : <span className="text-slate-600">—</span>}</td>
-                <td className="px-4 py-2.5 text-slate-600 text-xs whitespace-nowrap">{timeAgo(p.scraped_at)}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+    <div
+      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm overflow-y-auto"
+      onClick={onClose}
+    >
+      <div className="max-w-3xl mx-auto my-10 px-4" onClick={(e) => e.stopPropagation()}>
+        <div className="bg-[#1a2236] border border-[#253256] rounded-2xl overflow-hidden shadow-2xl">
+          {/* Header */}
+          <div className="relative">
+            <div className="h-24 bg-gradient-to-r from-[#0d47a1] to-[#1565c0]" />
+            <button
+              onClick={onClose}
+              className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/40 hover:bg-black/60 flex items-center justify-center transition-colors"
+            >
+              <X className="w-4 h-4 text-white" />
+            </button>
+            <div className="absolute -bottom-10 left-6">
+              <Avatar p={p} size="lg" />
+            </div>
+          </div>
+
+          {/* Profile info */}
+          <div className="pt-14 px-6 pb-4">
+            <h2 className="text-xl font-bold text-white">{p.name}</h2>
+            <p className="text-sm text-[#7B8DB5] mt-1">{p.headline}</p>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3 text-xs text-[#5A6B8A]">
+              {p.location && (
+                <span className="flex items-center gap-1">
+                  <MapPin className="w-3 h-3" /> {p.location}
+                </span>
+              )}
+              {p.connections && (
+                <span className="flex items-center gap-1">
+                  <Users className="w-3 h-3" /> {p.connections} connections
+                </span>
+              )}
+              {p.email && <span>{p.email}</span>}
+            </div>
+            <div className="mt-2 flex items-center gap-3">
+              <a
+                href={p.url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-[#488CFF] hover:underline flex items-center gap-1"
+              >
+                <ExternalLink className="w-3 h-3" /> View on LinkedIn
+              </a>
+              {p.scraped_at && (
+                <span className="text-[10px] text-[#4A5A7A]">
+                  Scraped: {p.scraped_at.slice(0, 10)}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Sections */}
+          <div className="px-6 pb-6 grid grid-cols-1 md:grid-cols-2 gap-3">
+            {activeSections.map((s) => {
+              const Icon = s.icon;
+              return (
+                <div
+                  key={s.key}
+                  className={`bg-[#111827] border border-[#1e2a42] rounded-xl p-4 ${
+                    s.full ? "md:col-span-2" : ""
+                  }`}
+                >
+                  <h3 className="text-[11px] font-semibold uppercase tracking-wider text-[#488CFF] mb-2 flex items-center gap-1.5">
+                    <Icon className="w-3.5 h-3.5" />
+                    {s.label}
+                  </h3>
+                  <pre className="text-xs text-[#9BA8C2] whitespace-pre-wrap break-words font-[inherit] leading-relaxed max-h-64 overflow-y-auto">
+                    {p[s.key] as string}
+                  </pre>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
 
+// ── Table Row ──
+function TableRow({ p, onClick }: { p: Profile; onClick: () => void }) {
+  return (
+    <tr
+      onClick={onClick}
+      className="border-b border-[#1e2a42] hover:bg-[#1a2236] cursor-pointer transition-colors"
+    >
+      <td className="px-4 py-3">
+        <div className="flex items-center gap-3">
+          <Avatar p={p} />
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-white truncate max-w-[180px]">
+              {p.name || "Unknown"}
+            </div>
+            <div className="text-[11px] text-[#5A6B8A] truncate max-w-[180px]">
+              {p.email || ""}
+            </div>
+          </div>
+        </div>
+      </td>
+      <td className="px-4 py-3 text-xs text-[#7B8DB5] max-w-[240px]">
+        <span className="line-clamp-2 leading-relaxed">{p.headline || "—"}</span>
+      </td>
+      <td className="px-4 py-3 text-xs text-[#5A6B8A] whitespace-nowrap">
+        {p.location || "—"}
+      </td>
+      <td className="px-4 py-3 text-xs text-[#5A6B8A] max-w-[140px]">
+        <span className="truncate block">{p.company || "—"}</span>
+      </td>
+      <td className="px-4 py-3">
+        <div className="flex gap-1">
+          <FieldTag has={!!p.photo_url} label="P" />
+          <FieldTag has={!!p.about} label="A" />
+          <FieldTag has={!!p.experience} label="E" />
+          <FieldTag has={!!p.education} label="Ed" />
+          <FieldTag has={!!p.skills} label="S" />
+        </div>
+      </td>
+      <td className="px-4 py-3">
+        <a
+          href={p.url}
+          target="_blank"
+          rel="noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="text-[11px] text-[#488CFF] hover:underline"
+        >
+          <ExternalLink className="w-3.5 h-3.5" />
+        </a>
+      </td>
+    </tr>
+  );
+}
+
+// ── Main Page ──
 export default function LinkedInPage() {
+  const { getToken } = useAuth();
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<"all" | "ok" | "err">("ok");
   const [search, setSearch] = useState("");
-  const [view, setView] = useState<"cards" | "table">("table");
-
-  const [enrichOpen, setEnrichOpen] = useState(false);
-  const [liAt, setLiAt] = useState("");
-  const [csvUrls, setCsvUrls] = useState<string[]>([]);
-  const [fileName, setFileName] = useState("");
-  const [scraping, setScraping] = useState(false);
-  const [progress, setProgress] = useState({ done: 0, total: 0 });
-  const jobRef = useRef<string | null>(null);
+  const [activeFilters, setActiveFilters] = useState<Set<FilterKey>>(new Set());
+  const [sort, setSort] = useState<SortKey>("name");
+  const [view, setView] = useState<"cards" | "table">("cards");
+  const [selected, setSelected] = useState<Profile | null>(null);
 
   const loadDatabase = useCallback(async () => {
     try {
-      const r = await fetch(`${API}/linkedin/database`);
+      const token = await getToken();
+      const r = await fetch(`${API}/linkedin/database`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       const d = await r.json();
       setProfiles(d.items || []);
     } catch (e) {
@@ -211,222 +431,287 @@ export default function LinkedInPage() {
     } finally {
       setLoading(false);
     }
+  }, [getToken]);
+
+  useEffect(() => {
+    loadDatabase();
+  }, [loadDatabase]);
+
+  // Close detail on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSelected(null);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  useEffect(() => { loadDatabase(); }, [loadDatabase]);
+  const toggleFilter = (f: FilterKey) => {
+    setActiveFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(f)) next.delete(f);
+      else next.add(f);
+      return next;
+    });
+  };
 
-  function onCsvFile(file: File) {
-    setFileName(file.name);
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = e.target?.result as string;
-      const re = /https?:\/\/(?:www\.)?linkedin\.com\/(?:in|company)\/[^\s,"'<>]+/gi;
-      const seen = new Set<string>();
-      const urls: string[] = [];
-      let m;
-      while ((m = re.exec(text)) !== null) {
-        const u = m[0].replace(/[,;"'\s]+$/, "");
-        if (!seen.has(u)) { seen.add(u); urls.push(u); }
+  const filtered = useMemo(() => {
+    let result = profiles.filter((p) => {
+      // Search
+      if (search) {
+        const hay = [
+          p.name,
+          p.headline,
+          p.about,
+          p.experience,
+          p.education,
+          p.skills,
+          p.company,
+          p.location,
+          p.email,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        if (
+          !search
+            .toLowerCase()
+            .split(/\s+/)
+            .every((w) => hay.includes(w))
+        )
+          return false;
       }
-      setCsvUrls(urls);
-    };
-    reader.readAsText(file);
-  }
-
-  async function startEnrich() {
-    if (!csvUrls.length) return;
-    setScraping(true);
-    setProgress({ done: 0, total: csvUrls.length });
-
-    const body = JSON.stringify({ urls: csvUrls, li_at: liAt || undefined, max_retries: 1 });
-    let jobId: string;
-    try {
-      const r = await fetch(`${API}/linkedin/enrich`, { method: "POST", headers: { "Content-Type": "application/json" }, body });
-      const d = await r.json();
-      jobId = d.job_id;
-      jobRef.current = jobId;
-    } catch (e) {
-      console.error(e);
-      setScraping(false);
-      return;
-    }
-
-    const resp = await fetch(`${API}/linkedin/stream/${jobId}`);
-    const reader = resp.body!.getReader();
-    const decoder = new TextDecoder();
-    let buf = "";
-    let eventType = "";
-
-    const pump = async () => {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const lines = buf.split("\n");
-        buf = lines.pop() || "";
-        for (const line of lines) {
-          if (line.startsWith("event: ")) { eventType = line.slice(7).trim(); }
-          else if (line.startsWith("data: ")) {
-            try {
-              const result = JSON.parse(line.slice(6));
-              if (eventType === "done") break;
-              setProfiles((prev) => {
-                const exists = prev.findIndex((p) => p.url === result.url);
-                if (exists >= 0) {
-                  const updated = [...prev];
-                  updated[exists] = result;
-                  return updated;
-                }
-                return [result, ...prev];
-              });
-              setProgress((p) => ({ ...p, done: p.done + 1 }));
-            } catch {}
-            eventType = "";
-          }
-        }
+      // Filters
+      for (const f of activeFilters) {
+        if (!matchesFilter(p, f)) return false;
       }
-    };
+      return true;
+    });
 
-    await pump();
-    setScraping(false);
-    loadDatabase();
-  }
+    // Sort
+    if (sort === "name")
+      result.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    else if (sort === "recent")
+      result.sort((a, b) =>
+        (b.scraped_at || "").localeCompare(a.scraped_at || "")
+      );
+    else result.sort((a, b) => fieldCount(b) - fieldCount(a));
 
-  const visible = profiles.filter((p) => {
-    if (filter === "ok" && p.error) return false;
-    if (filter === "err" && !p.error) return false;
-    if (search) {
-      const s = [p.name, p.headline, p.location, p.company, p.education].filter(Boolean).join(" ").toLowerCase();
-      if (!s.includes(search.toLowerCase())) return false;
-    }
-    return true;
-  });
+    return result;
+  }, [profiles, search, activeFilters, sort]);
 
-  const okCount = profiles.filter((p) => !p.error).length;
-  const errCount = profiles.length - okCount;
+  // Stats
+  const stats = useMemo(
+    () => ({
+      total: profiles.length,
+      photos: profiles.filter((p) => p.photo_url).length,
+      about: profiles.filter((p) => p.about).length,
+      experience: profiles.filter((p) => p.experience).length,
+      education: profiles.filter((p) => p.education).length,
+      skills: profiles.filter((p) => p.skills).length,
+    }),
+    [profiles]
+  );
 
   return (
-    <div className="min-h-screen bg-[#0f0f13] text-slate-200 -m-6 sm:-m-8">
+    <div className="min-h-screen bg-[#111827] text-[#9BA8C2] -m-6 sm:-m-8">
+      {/* ── Top Bar ── */}
+      <div className="sticky top-0 z-20 bg-[#111827]/95 backdrop-blur-md border-b border-[#1e2a42]">
+        {/* Row 1: Title + Search */}
+        <div className="px-6 py-3 flex items-center gap-4">
+          <h1 className="text-base font-bold text-white whitespace-nowrap">
+            LinkedIn Profiles
+          </h1>
 
-      {/* Header */}
-      <div className="sticky top-0 z-10 bg-[#16161d] border-b border-[#2a2a38] px-6 py-3 flex items-center justify-between">
-        <div>
-          <h1 className="text-base font-bold text-white">LinkedIn Database</h1>
-          <p className="text-xs text-slate-500 mt-0.5">{profiles.length} profiles · {okCount} enriched · {errCount} failed</p>
-        </div>
-        <div className="flex gap-2 items-center">
-          {scraping && (
-            <span className="text-xs text-slate-400">{progress.done}/{progress.total} scraped</span>
-          )}
-          <button
-            onClick={() => setEnrichOpen(!enrichOpen)}
-            className="rounded-lg px-4 py-2 text-sm font-semibold bg-[#0a66c2] text-white hover:bg-[#0952a0] transition-colors"
-          >
-            + Enrich New
-          </button>
-        </div>
-      </div>
-
-      {/* Progress bar */}
-      {scraping && (
-        <div className="h-1 bg-[#2a2a38]">
-          <div
-            className="h-1 bg-gradient-to-r from-[#0a66c2] to-cyan-400 transition-all duration-300"
-            style={{ width: `${progress.total ? Math.round(progress.done / progress.total * 100) : 0}%` }}
-          />
-        </div>
-      )}
-
-      {/* Enrich panel */}
-      {enrichOpen && (
-        <div className="bg-[#1a1a24] border-b border-[#2a2a38] px-6 py-4 flex flex-wrap gap-4 items-end">
-          <div className="flex-1 min-w-[200px]">
-            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">CSV File</label>
-            <label className="flex items-center gap-2 cursor-pointer border border-dashed border-[#2a2a38] hover:border-[#0a66c2] rounded-lg px-4 py-2.5 transition-colors">
-              <input type="file" accept=".csv" className="hidden" onChange={(e) => e.target.files?.[0] && onCsvFile(e.target.files[0])} />
-              <span className="text-sm text-slate-500">{fileName || "Choose CSV…"}</span>
-              {csvUrls.length > 0 && <span className="text-xs text-green-400 ml-auto">{csvUrls.length} URLs</span>}
-            </label>
-          </div>
-          <div className="flex-1 min-w-[260px]">
-            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">li_at Cookie (optional)</label>
+          <div className="flex-1 relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#4A5A7A]" />
             <input
-              type="password"
-              placeholder="Paste li_at for full headlines + photos…"
-              value={liAt}
-              onChange={(e) => setLiAt(e.target.value)}
-              className="w-full rounded-lg border border-[#2a2a38] bg-[#0f0f13] px-3 py-2.5 text-sm text-slate-200 placeholder:text-slate-600 outline-none focus:border-[#0a66c2] font-mono"
+              type="text"
+              placeholder="Search name, headline, company, skills, school..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full bg-[#1a2236] border border-[#253256] rounded-lg pl-9 pr-4 py-2 text-sm text-white placeholder:text-[#4A5A7A] outline-none focus:border-[#488CFF] transition-colors"
             />
+            {search && (
+              <button
+                onClick={() => setSearch("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-[#4A5A7A] hover:text-white"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
+
+          <span className="bg-[#488CFF] text-white text-xs font-bold px-3 py-1 rounded-full">
+            {filtered.length}
+          </span>
+
           <button
-            onClick={startEnrich}
-            disabled={!csvUrls.length || scraping}
-            className="rounded-lg px-5 py-2.5 text-sm font-semibold bg-[#0a66c2] text-white hover:bg-[#0952a0] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            onClick={loadDatabase}
+            className="text-[#4A5A7A] hover:text-[#488CFF] transition-colors"
+            title="Refresh"
           >
-            {scraping ? "Scraping…" : "Start"}
+            <RefreshCw className="w-4 h-4" />
           </button>
         </div>
-      )}
 
-      {/* Toolbar */}
-      <div className="px-6 py-3 flex gap-3 items-center flex-wrap border-b border-[#1e1e2a]">
-        <div className="flex gap-1.5">
-          {([["all", `All ${profiles.length}`], ["ok", `Enriched ${okCount}`], ["err", `Failed ${errCount}`]] as const).map(([f, label]) => (
-            <button key={f} onClick={() => setFilter(f)}
-              className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
-                filter === f ? "bg-[#0a66c2] border-[#0a66c2] text-white" : "border-[#2a2a38] text-slate-500 hover:border-[#0a66c2]"
-              }`}>
-              {label}
+        {/* Row 2: Filters + Sort + View toggle */}
+        <div className="px-6 pb-3 flex items-center gap-2 flex-wrap">
+          <SlidersHorizontal className="w-3.5 h-3.5 text-[#4A5A7A] mr-1" />
+
+          {FILTERS.map((f) => (
+            <button
+              key={f.key}
+              onClick={() => toggleFilter(f.key)}
+              className={`px-3 py-1 rounded-full text-[11px] font-medium border transition-all ${
+                activeFilters.has(f.key)
+                  ? "bg-[#488CFF] border-[#488CFF] text-white"
+                  : "border-[#253256] text-[#5A6B8A] hover:border-[#488CFF]/50 hover:text-[#7B8DB5]"
+              }`}
+            >
+              <span
+                className={`inline-block w-1.5 h-1.5 rounded-full mr-1.5 ${
+                  f.positive ? "bg-emerald-400" : "bg-red-400"
+                }`}
+              />
+              {f.label}
             </button>
           ))}
-        </div>
 
-        {/* View toggle */}
-        <div className="flex gap-1 ml-2 bg-[#1a1a24] border border-[#2a2a38] rounded-lg p-0.5">
-          {(["table", "cards"] as const).map((v) => (
-            <button key={v} onClick={() => setView(v)}
-              className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                view === v ? "bg-[#0a66c2] text-white" : "text-slate-500 hover:text-slate-300"
-              }`}>
-              {v === "table" ? "⊞ Table" : "⊟ Cards"}
-            </button>
-          ))}
-        </div>
+          <div className="ml-auto flex items-center gap-2">
+            <select
+              value={sort}
+              onChange={(e) => setSort(e.target.value as SortKey)}
+              className="bg-[#1a2236] border border-[#253256] rounded-lg text-xs text-[#7B8DB5] px-3 py-1.5 cursor-pointer outline-none"
+            >
+              <option value="name">Name A-Z</option>
+              <option value="recent">Recently Scraped</option>
+              <option value="fields">Most Complete</option>
+            </select>
 
-        <input
-          type="text"
-          placeholder="Search name, headline, company…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="ml-auto rounded-full border border-[#2a2a38] bg-[#1a1a24] px-4 py-1.5 text-xs text-slate-200 placeholder:text-slate-600 outline-none focus:border-[#0a66c2] w-56"
-        />
+            <div className="flex bg-[#1a2236] border border-[#253256] rounded-lg p-0.5">
+              <button
+                onClick={() => setView("cards")}
+                className={`px-2.5 py-1 rounded-md transition-colors ${
+                  view === "cards"
+                    ? "bg-[#488CFF] text-white"
+                    : "text-[#5A6B8A] hover:text-[#7B8DB5]"
+                }`}
+              >
+                <Grid3X3 className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => setView("table")}
+                className={`px-2.5 py-1 rounded-md transition-colors ${
+                  view === "table"
+                    ? "bg-[#488CFF] text-white"
+                    : "text-[#5A6B8A] hover:text-[#7B8DB5]"
+                }`}
+              >
+                <List className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
-      {/* Content */}
+      {/* ── Stats Bar ── */}
+      <div className="px-6 py-2 border-b border-[#1e2a42] flex gap-6 text-[11px] text-[#4A5A7A] bg-[#0f1520]">
+        <span>
+          <strong className="text-[#488CFF]">{stats.total}</strong> profiles
+        </span>
+        <span>
+          <strong className="text-[#488CFF]">{stats.photos}</strong> photos
+        </span>
+        <span>
+          <strong className="text-[#488CFF]">{stats.about}</strong> about
+        </span>
+        <span>
+          <strong className="text-[#488CFF]">{stats.experience}</strong>{" "}
+          experience
+        </span>
+        <span>
+          <strong className="text-[#488CFF]">{stats.education}</strong>{" "}
+          education
+        </span>
+        <span>
+          <strong className="text-[#488CFF]">{stats.skills}</strong> skills
+        </span>
+      </div>
+
+      {/* ── Content ── */}
       {loading ? (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-3 p-6">
-          {Array(12).fill(0).map((_, i) => (
-            <div key={i} className="bg-[#1a1a24] border border-[#2a2a38] rounded-xl overflow-hidden animate-pulse">
-              <div className="h-12 bg-[#2a2a38]" />
-              <div className="p-3 pt-7 space-y-2">
-                <div className="h-3 bg-[#2a2a38] rounded-full w-3/5" />
-                <div className="h-3 bg-[#2a2a38] rounded-full w-2/5" />
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-4 p-6">
+          {Array(8)
+            .fill(0)
+            .map((_, i) => (
+              <div
+                key={i}
+                className="bg-[#1a2236] border border-[#253256] rounded-xl overflow-hidden animate-pulse"
+              >
+                <div className="h-14 bg-[#253256]" />
+                <div className="p-4 pt-8 space-y-2">
+                  <div className="h-3 bg-[#253256] rounded-full w-3/5" />
+                  <div className="h-3 bg-[#253256] rounded-full w-2/5" />
+                  <div className="h-3 bg-[#253256] rounded-full w-4/5" />
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
         </div>
-      ) : visible.length === 0 ? (
-        <div className="text-center py-24 text-slate-600 text-sm">
-          {profiles.length === 0 ? "No profiles yet — enrich some LinkedIn URLs to get started." : "No profiles match."}
+      ) : filtered.length === 0 ? (
+        <div className="text-center py-24 text-[#4A5A7A]">
+          <p className="text-lg font-medium mb-1">No profiles match</p>
+          <p className="text-sm">Try adjusting your search or filters.</p>
         </div>
       ) : view === "cards" ? (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-3 p-6">
-          {visible.map((p) => <ProfileCard key={p.url} p={p} />)}
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-4 p-6">
+          {filtered.map((p) => (
+            <ProfileCard
+              key={p.url}
+              p={p}
+              onClick={() => setSelected(p)}
+            />
+          ))}
         </div>
       ) : (
-        <div className="px-6 py-4">
-          <TableView profiles={visible} />
+        <div className="px-6 py-4 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-[#253256] text-left">
+                <th className="px-4 py-2.5 text-[10px] font-semibold text-[#4A5A7A] uppercase tracking-wider">
+                  Name
+                </th>
+                <th className="px-4 py-2.5 text-[10px] font-semibold text-[#4A5A7A] uppercase tracking-wider">
+                  Headline
+                </th>
+                <th className="px-4 py-2.5 text-[10px] font-semibold text-[#4A5A7A] uppercase tracking-wider">
+                  Location
+                </th>
+                <th className="px-4 py-2.5 text-[10px] font-semibold text-[#4A5A7A] uppercase tracking-wider">
+                  Company
+                </th>
+                <th className="px-4 py-2.5 text-[10px] font-semibold text-[#4A5A7A] uppercase tracking-wider">
+                  Fields
+                </th>
+                <th className="px-4 py-2.5 w-8" />
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((p) => (
+                <TableRow
+                  key={p.url}
+                  p={p}
+                  onClick={() => setSelected(p)}
+                />
+              ))}
+            </tbody>
+          </table>
         </div>
+      )}
+
+      {/* ── Detail Overlay ── */}
+      {selected && (
+        <DetailOverlay p={selected} onClose={() => setSelected(null)} />
       )}
     </div>
   );

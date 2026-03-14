@@ -5,6 +5,8 @@ Shared configuration: DynamoDB tables, constants.
 import boto3
 
 dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+s3 = boto3.client("s3", region_name="us-east-1")
+S3_BUCKET = "john-whaley-linkedin-photos"
 
 applicants_table = dynamodb.Table("john-whaley-applicants")
 sessions_table = dynamodb.Table("john-whaley-sessions")

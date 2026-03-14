@@ -54,3 +54,23 @@ app.include_router(luma_router, dependencies=auth_dep)
 @app.get("/")
 def health():
     return {"status": "ok"}
+
+
+# ── No-auth endpoint for the local LinkedIn scraper HTML tool ──
+from pydantic import BaseModel
+from typing import Optional
+
+
+class ManualScrapeIn(BaseModel):
+    url: str
+    name: Optional[str] = None
+    email: Optional[str] = None
+    content: str
+    photo_base64: Optional[str] = None
+
+
+@app.post("/linkedin/manual-scrape", tags=["linkedin"])
+def manual_scrape_noauth(body: ManualScrapeIn):
+    import db as _db
+    result = _db.save_manual_linkedin_scrape(body.model_dump())
+    return {"status": "ok", "photo_url": result.get("photo_url"), "url": result.get("url")}
