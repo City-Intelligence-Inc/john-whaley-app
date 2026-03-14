@@ -64,6 +64,13 @@ def list_sessions_noauth():
     return _db.list_sessions()
 
 
+@app.post("/sessions", tags=["sessions"])
+def create_session_noauth(body: dict):
+    """Create a session — no auth for local dev."""
+    import db as _db
+    return _db.create_session(body)
+
+
 @app.get("/applicants", tags=["applicants"])
 def list_applicants_noauth(session_id: Optional[str] = None):
     """List applicants — no auth for local dev."""

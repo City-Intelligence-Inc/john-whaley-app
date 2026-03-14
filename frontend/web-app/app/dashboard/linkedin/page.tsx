@@ -417,47 +417,76 @@ function TableRow({ p, onClick }: { p: Profile; onClick: () => void }) {
   );
 }
 
-// ── Paste-to-Add Panel ──
-function AddProfilePanel({
+// ── Manual Scrape Panel (full page overlay) ──
+function ManualScrapePanel({
   onAdded,
 }: {
   onAdded: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [url, setUrl] = useState("");
-  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [content, setContent] = useState("");
+  const [photoData, setPhotoData] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [recentAdds, setRecentAdds] = useState<{ name: string; url: string; time: string }[]>([]);
 
   async function handleSave() {
     if (!url.trim() || !content.trim()) return;
     setSaving(true);
     try {
-      await fetch(`${API}/linkedin/manual-scrape`, {
+      const resp = await fetch(`${API}/linkedin/manual-scrape`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           url: url.trim(),
-          name: name.trim() || undefined,
           email: email.trim() || undefined,
           content: content.trim(),
+          photo_base64: photoData || undefined,
         }),
       });
-      setSaved(true);
-      setTimeout(() => {
+      if (resp.ok) {
+        setRecentAdds((prev) => [
+          { name: url.split("/in/")[1]?.replace(/\/$/, "") || "profile", url: url.trim(), time: new Date().toLocaleTimeString() },
+          ...prev,
+        ].slice(0, 10));
         setUrl("");
-        setName("");
         setEmail("");
         setContent("");
-        setSaved(false);
+        setPhotoData(null);
         onAdded();
-      }, 800);
+      }
     } catch (e) {
       console.error(e);
     } finally {
       setSaving(false);
+    }
+  }
+
+  // Handle paste for images
+  function handlePaste(e: React.ClipboardEvent) {
+    const items = e.clipboardData.items;
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith("image/")) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => setPhotoData(ev.target?.result as string);
+        reader.readAsDataURL(file);
+        return;
+      }
+    }
+  }
+
+  // Handle drop for images
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file?.type.startsWith("image/")) {
+      const reader = new FileReader();
+      reader.onload = (ev) => setPhotoData(ev.target?.result as string);
+      reader.readAsDataURL(file);
     }
   }
 
@@ -467,7 +496,257 @@ function AddProfilePanel({
         onClick={() => setOpen(true)}
         className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-[#488CFF] text-white hover:bg-[#3a7ae0] transition-colors"
       >
-        <Plus className="w-4 h-4" /> Add Profile
+        <ClipboardPaste className="w-4 h-4" /> Manual Scrape
+      </button>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm overflow-y-auto" onClick={() => setOpen(false)}>
+      <div className="max-w-2xl mx-auto my-8 px-4" onClick={(e) => e.stopPropagation()}>
+        <div className="bg-[#111827] border border-[#253256] rounded-2xl overflow-hidden shadow-2xl">
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 py-4 border-b border-[#253256]">
+            <h2 className="text-base font-semibold text-white flex items-center gap-2">
+              <ClipboardPaste className="w-5 h-5 text-[#488CFF]" />
+              Manual Profile Scrape
+            </h2>
+            <button onClick={() => setOpen(false)} className="text-[#4A5A7A] hover:text-white">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="p-6 space-y-4">
+            {/* URL + Email */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[10px] text-[#4A5A7A] uppercase tracking-wider font-semibold mb-1">LinkedIn URL *</label>
+                <input
+                  type="text"
+                  placeholder="https://linkedin.com/in/someone"
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  autoFocus
+                  className="w-full bg-[#0d1117] border border-[#253256] rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-[#4A5A7A] outline-none focus:border-[#488CFF]"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] text-[#4A5A7A] uppercase tracking-wider font-semibold mb-1">Email (optional)</label>
+                <input
+                  type="email"
+                  placeholder="their@email.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full bg-[#0d1117] border border-[#253256] rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-[#4A5A7A] outline-none focus:border-[#488CFF]"
+                />
+              </div>
+            </div>
+
+            {/* Photo drop zone */}
+            <div>
+              <label className="block text-[10px] text-[#4A5A7A] uppercase tracking-wider font-semibold mb-1">Profile Photo</label>
+              <div
+                onPaste={handlePaste}
+                onDrop={handleDrop}
+                onDragOver={(e) => e.preventDefault()}
+                onClick={() => {
+                  const input = document.createElement("input");
+                  input.type = "file";
+                  input.accept = "image/*";
+                  input.onchange = (e) => {
+                    const file = (e.target as HTMLInputElement).files?.[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (ev) => setPhotoData(ev.target?.result as string);
+                    reader.readAsDataURL(file);
+                  };
+                  input.click();
+                }}
+                tabIndex={0}
+                className="border-2 border-dashed border-[#253256] rounded-xl p-4 text-center cursor-pointer hover:border-[#488CFF]/50 transition-colors min-h-[70px] flex items-center justify-center gap-3"
+              >
+                {photoData ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={photoData} alt="" className="w-16 h-16 rounded-full object-cover border-2 border-[#253256]" />
+                ) : (
+                  <span className="text-xs text-[#4A5A7A]">Paste (Cmd+V), drag, or click to add photo</span>
+                )}
+                {photoData && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setPhotoData(null); }}
+                    className="text-[#4A5A7A] hover:text-red-400 text-xs"
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Content paste */}
+            <div>
+              <label className="block text-[10px] text-[#4A5A7A] uppercase tracking-wider font-semibold mb-1">Profile Content * (Cmd+A Cmd+C from LinkedIn, Cmd+V here)</label>
+              <textarea
+                placeholder={"Go to their LinkedIn profile page\nCmd+A to select all\nCmd+C to copy\nCmd+V to paste here\n\nThe backend strips nav junk and parses into: name, headline, location, about, experience, education, skills, certifications, languages, etc."}
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                rows={12}
+                className="w-full bg-[#0d1117] border border-[#253256] rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-[#4A5A7A] outline-none focus:border-[#488CFF] resize-y font-mono leading-relaxed"
+              />
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center justify-between pt-2">
+              <span className="text-[10px] text-[#4A5A7A]">Cmd+Enter to save</span>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setUrl(""); setEmail(""); setContent(""); setPhotoData(null); }}
+                  className="px-4 py-2 rounded-lg text-sm text-[#5A6B8A] hover:text-white border border-[#253256] hover:border-[#488CFF]/30 transition-colors"
+                >
+                  Clear
+                </button>
+                <button
+                  onClick={handleSave}
+                  disabled={!url.trim() || !content.trim() || saving}
+                  className="flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                  {saving ? "Saving..." : "Save to Database"}
+                </button>
+              </div>
+            </div>
+
+            {/* Recent adds */}
+            {recentAdds.length > 0 && (
+              <div className="border-t border-[#253256] pt-4 mt-2">
+                <h4 className="text-[10px] text-[#4A5A7A] uppercase tracking-wider font-semibold mb-2">Recently Added</h4>
+                <div className="space-y-1">
+                  {recentAdds.map((r, i) => (
+                    <div key={i} className="flex items-center gap-2 text-xs text-[#7B8DB5] bg-[#0d1117] rounded-lg px-3 py-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                      <span className="flex-1 truncate">{r.name}</span>
+                      <span className="text-[#4A5A7A]">{r.time}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Global keyboard handler for Cmd+Enter */}
+      <div
+        ref={(el) => {
+          if (!el) return;
+          const handler = (e: KeyboardEvent) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+              e.preventDefault();
+              handleSave();
+            }
+          };
+          window.addEventListener("keydown", handler);
+          return () => window.removeEventListener("keydown", handler);
+        }}
+      />
+    </div>
+  );
+}
+
+// ── CSV Enrichment Panel ──
+function EnrichPanel({
+  onDone,
+  getToken,
+}: {
+  onDone: () => void;
+  getToken: () => Promise<string | null>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [liAt, setLiAt] = useState("");
+  const [csvUrls, setCsvUrls] = useState<string[]>([]);
+  const [fileName, setFileName] = useState("");
+  const [scraping, setScraping] = useState(false);
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const [results, setResults] = useState<{ url: string; name?: string; error?: string }[]>([]);
+
+  function onCsvFile(file: File) {
+    setFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      const re = /https?:\/\/(?:www\.)?linkedin\.com\/(?:in|company)\/[^\s,"'<>]+/gi;
+      const seen = new Set<string>();
+      const urls: string[] = [];
+      let m;
+      while ((m = re.exec(text)) !== null) {
+        const u = m[0].replace(/[,;"'\s]+$/, "");
+        if (!seen.has(u)) { seen.add(u); urls.push(u); }
+      }
+      setCsvUrls(urls);
+    };
+    reader.readAsText(file);
+  }
+
+  async function startEnrich() {
+    if (!csvUrls.length) return;
+    setScraping(true);
+    setProgress({ done: 0, total: csvUrls.length });
+    setResults([]);
+
+    try {
+      const token = await getToken();
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      const r = await fetch(`${API}/linkedin/enrich`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ urls: csvUrls, li_at: liAt || undefined, max_retries: 2 }),
+      });
+      const d = await r.json();
+      const jobId = d.job_id;
+
+      // Stream results
+      const resp = await fetch(`${API}/linkedin/stream/${jobId}`, { headers });
+      const reader = resp.body!.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      let eventType = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() || "";
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            eventType = line.slice(7).trim();
+          } else if (line.startsWith("data: ")) {
+            try {
+              const result = JSON.parse(line.slice(6));
+              if (eventType === "done") break;
+              setResults((prev) => [...prev, result]);
+              setProgress((p) => ({ ...p, done: p.done + 1 }));
+            } catch {}
+            eventType = "";
+          }
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setScraping(false);
+      onDone();
+    }
+  }
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-[#253256] text-[#7B8DB5] hover:border-[#488CFF]/50 hover:text-white transition-colors"
+      >
+        <RefreshCw className="w-3.5 h-3.5" /> Enrich CSV
       </button>
     );
   }
@@ -475,69 +754,62 @@ function AddProfilePanel({
   return (
     <div className="bg-[#1a2236] border border-[#253256] rounded-xl p-5 mb-4 mx-6">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-          <ClipboardPaste className="w-4 h-4 text-[#488CFF]" />
-          Paste LinkedIn Profile
-        </h3>
+        <h3 className="text-sm font-semibold text-white">Batch Enrich from CSV</h3>
         <button onClick={() => setOpen(false)} className="text-[#4A5A7A] hover:text-white">
           <X className="w-4 h-4" />
         </button>
       </div>
 
-      <div className="grid grid-cols-3 gap-3 mb-3">
-        <input
-          type="text"
-          placeholder="LinkedIn URL *"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          className="bg-[#111827] border border-[#253256] rounded-lg px-3 py-2 text-sm text-white placeholder:text-[#4A5A7A] outline-none focus:border-[#488CFF]"
-        />
-        <input
-          type="text"
-          placeholder="Name (auto-detected)"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          className="bg-[#111827] border border-[#253256] rounded-lg px-3 py-2 text-sm text-white placeholder:text-[#4A5A7A] outline-none focus:border-[#488CFF]"
-        />
-        <input
-          type="email"
-          placeholder="Email (optional)"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="bg-[#111827] border border-[#253256] rounded-lg px-3 py-2 text-sm text-white placeholder:text-[#4A5A7A] outline-none focus:border-[#488CFF]"
-        />
-      </div>
-
-      <textarea
-        placeholder="Go to their LinkedIn profile, Cmd+A to select all, Cmd+C to copy, then Cmd+V paste here. The backend parses it into structured fields automatically."
-        value={content}
-        onChange={(e) => setContent(e.target.value)}
-        rows={6}
-        className="w-full bg-[#111827] border border-[#253256] rounded-lg px-3 py-2 text-sm text-white placeholder:text-[#4A5A7A] outline-none focus:border-[#488CFF] resize-y mb-3"
-      />
-
-      <div className="flex items-center justify-between">
-        <p className="text-[10px] text-[#4A5A7A]">
-          Parsed into: name, headline, location, about, experience, education, skills, certifications, languages, etc.
-        </p>
+      <div className="flex flex-wrap gap-3 items-end mb-4">
+        <div className="flex-1 min-w-[200px]">
+          <label className="block text-[10px] font-semibold text-[#4A5A7A] uppercase tracking-wide mb-1">CSV File</label>
+          <label className="flex items-center gap-2 cursor-pointer border border-dashed border-[#253256] hover:border-[#488CFF] rounded-lg px-4 py-2.5 transition-colors">
+            <input type="file" accept=".csv" className="hidden" onChange={(e) => e.target.files?.[0] && onCsvFile(e.target.files[0])} />
+            <span className="text-sm text-[#5A6B8A]">{fileName || "Choose CSV..."}</span>
+            {csvUrls.length > 0 && <span className="text-xs text-emerald-400 ml-auto">{csvUrls.length} URLs found</span>}
+          </label>
+        </div>
+        <div className="flex-1 min-w-[260px]">
+          <label className="block text-[10px] font-semibold text-[#4A5A7A] uppercase tracking-wide mb-1">li_at Cookie (for full profiles)</label>
+          <input
+            type="password"
+            placeholder="Paste li_at from browser DevTools → Cookies → linkedin.com"
+            value={liAt}
+            onChange={(e) => setLiAt(e.target.value)}
+            className="w-full rounded-lg border border-[#253256] bg-[#111827] px-3 py-2.5 text-sm text-white placeholder:text-[#4A5A7A] outline-none focus:border-[#488CFF] font-mono"
+          />
+        </div>
         <button
-          onClick={handleSave}
-          disabled={!url.trim() || !content.trim() || saving}
-          className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all ${
-            saved
-              ? "bg-emerald-600 text-white"
-              : "bg-[#488CFF] text-white hover:bg-[#3a7ae0] disabled:opacity-40 disabled:cursor-not-allowed"
-          }`}
+          onClick={startEnrich}
+          disabled={!csvUrls.length || scraping}
+          className="rounded-lg px-5 py-2.5 text-sm font-semibold bg-[#488CFF] text-white hover:bg-[#3a7ae0] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
-          {saving ? (
-            <><Loader2 className="w-4 h-4 animate-spin" /> Saving...</>
-          ) : saved ? (
-            <><Check className="w-4 h-4" /> Saved!</>
-          ) : (
-            "Save & Parse"
-          )}
+          {scraping ? `Scraping ${progress.done}/${progress.total}...` : "Start Enrichment"}
         </button>
       </div>
+
+      {/* Progress bar */}
+      {scraping && (
+        <div className="h-1.5 bg-[#253256] rounded-full overflow-hidden mb-3">
+          <div
+            className="h-full bg-gradient-to-r from-[#488CFF] to-cyan-400 transition-all duration-300 rounded-full"
+            style={{ width: `${progress.total ? Math.round(progress.done / progress.total * 100) : 0}%` }}
+          />
+        </div>
+      )}
+
+      {/* Live results */}
+      {results.length > 0 && (
+        <div className="max-h-48 overflow-y-auto text-xs space-y-1">
+          {results.map((r, i) => (
+            <div key={i} className={`flex items-center gap-2 px-2 py-1 rounded ${r.error ? "text-red-400" : "text-emerald-400"}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${r.error ? "bg-red-400" : "bg-emerald-400"}`} />
+              <span className="text-[#9BA8C2] truncate flex-1">{r.name || r.url}</span>
+              {r.error && <span className="text-red-400/70 text-[10px]">{r.error.slice(0, 40)}</span>}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -690,7 +962,8 @@ export default function LinkedInPage() {
             <RefreshCw className="w-4 h-4" />
           </button>
 
-          <AddProfilePanel onAdded={loadDatabase} />
+          <EnrichPanel onDone={loadDatabase} getToken={getToken} />
+          <ManualScrapePanel onAdded={loadDatabase} />
         </div>
 
         {/* Row 2: Filters + Sort + View toggle */}
