@@ -92,7 +92,17 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
   </div>
 </div>
 
-<div class="container">
+<div style="display:flex; flex:1; overflow:hidden;">
+<!-- Queue sidebar -->
+<div id="queueSidebar" style="width:280px; shrink:0; border-right:1px solid #222; background:#0d0d0d; overflow-y:auto; display:flex; flex-direction:column;">
+  <div style="padding:12px; border-bottom:1px solid #1a1a1a;">
+    <input id="queueSearch" placeholder="Filter names..." style="width:100%;background:#111;border:1px solid #222;border-radius:6px;padding:6px 10px;color:#e0e0e0;font-size:12px;outline:none;">
+    <div style="font-size:10px;color:#555;margin-top:6px;" id="queueStats">0 remaining</div>
+  </div>
+  <div id="queueList" style="flex:1;overflow-y:auto;"></div>
+</div>
+
+<div class="container" style="flex:1; overflow-y:auto;">
   <div class="row">
     <div class="field">
       <label>LinkedIn URL *</label>
@@ -127,6 +137,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
     <h2>Recently Added</h2>
     <div id="recentList"></div>
   </div>
+</div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -292,6 +303,74 @@ async function updateCount() {
 
 renderRecent();
 updateCount();
+
+// ── Queue from CSV ──
+const CSV_PROFILES = [{"name": "Weida Tan", "email": "weida@pressclub.app", "url": "https://linkedin.com/in/weidatan"}, {"name": "\u00c7a\u011fla Kaymaz", "email": "cagla@categoryvc.com", "url": "https://www.linkedin.com/in/caglakaymaz/"}, {"name": "Chris Rowen", "email": "rowenchris@gmail.com", "url": "https://www.linkedin.com/in/chris-rowen-4310a61/"}, {"name": "Chris Ma", "email": "chris@xnova.vc", "url": "https://www.linkedin.com/in/yonghuima/"}, {"name": "Jaidev Shah", "email": "shahjaidev99@gmail.com", "url": "https://www.linkedin.com/in/shahjaidev?utm_source=share&utm_campaign=share_via&utm_content=profile&utm_medium=ios_app"}, {"name": "Tomoyuki Suzuki", "email": "tomo@leeaplabs.com", "url": "https://www.linkedin.com/in/tomo-datumix/"}, {"name": "Ravikant Dintyala", "email": "vsd4@cornell.edu", "url": "https://www.linkedin.com/in/ravikant-dintyala"}, {"name": "Duo Ding", "email": "duoding.cmu@gmail.com", "url": "https://www.linkedin.com/in/duoding1/"}, {"name": "Baran Atmanoglu", "email": "baran@maxitech.com", "url": "https://www.linkedin.com/in/baranatmanoglu"}, {"name": "Jake Smith", "email": "js@cannagecap.com", "url": "https://www.linkedin.com/in/jacobsmith24/"}, {"name": "Alim Giga", "email": "alim@race.capital", "url": "https://www.linkedin.com/in/alimgiga/"}, {"name": "Christopher Chen", "email": "chrischenlf@gmail.com", "url": "https://www.linkedin.com/in/chrischenlf"}, {"name": "Jeremy", "email": "hellonihaoworld@gmail.com", "url": "https://www.linkedin.com/in/jeremy-nin-a0673912b/"}, {"name": "Lisa Yu", "email": "lisa@99-vc.com", "url": "https://linkedin.com/in/lisayu"}, {"name": "Anna Yuan", "email": "anna@scaleagentic.ai", "url": "https://linkedin.com/in/annay"}, {"name": "Ethan Kuhlkin", "email": "ekuhlkin@insightpartners.com", "url": "https://www.linkedin.com/in/ethankuhlkin/"}, {"name": "riya jain", "email": "riya@peakecorp.com", "url": "https://www.linkedin.com/in/riya-jain-1b87016a/"}, {"name": "Henri Deshays", "email": "henri@newfundcap.com", "url": "https://www.linkedin.com/in/hdeshays/"}, {"name": "David Lynn", "email": "davidjlynn01@gmail.com", "url": "https://linkedin.com/in/djl2021"}, {"name": "Julian Chu", "email": "jhcchu@gmail.com", "url": "https://www.linkedin.com/in/julianchu"}, {"name": "Vipin Chawla", "email": "vipin@instantsys.com", "url": "https://www.linkedin.com/in/vipinchawla"}, {"name": "Puneet Chopra", "email": "puneet@gmail.com", "url": "https://www.linkedin.com/in/puneetchopra77"}, {"name": "Siyu Jia", "email": "jiasy@vertexventures.com", "url": "https://www.linkedin.com/in/siyujia9"}, {"name": "Michael Nathan", "email": "michael@meritage.group", "url": "http://www.linkedin.com/in/mnathan"}, {"name": "Aadik Shekar", "email": "ashekar@gmail.com", "url": "https://www.linkedin.com/in/aadik-shekar-b1a58834?utm_source=share&utm_campaign=share_via&utm_content=profile&utm_medium=ios_app"}, {"name": "Wilson Lin | VC | Early-stage AI", "email": "wilson@dcg.co", "url": "https://www.linkedin.com/in/wilsonlin1/"}, {"name": "Sharmin Ali", "email": "sharmin@establish.club", "url": "https://www.linkedin.com/in/sharmin-ali"}, {"name": "Miri Kojima", "email": "mirkojim@sbigroup.co.jp", "url": "https://www.linkedin.com/in/miri-k-193683177"}, {"name": "Amil Khanzada", "email": "amil@virufy.org", "url": "https://www.linkedin.com/in/amilkhanzada"}, {"name": "Allen Hu", "email": "qilin.hu@gmail.com", "url": "http://linkedin.com/in/allenqilinhu"}, {"name": "Marla Sofer", "email": "marla.sofer@knomee.com", "url": "https://www.linkedin.com/in/marlasofer/"}, {"name": "Kristy Edwards", "email": "kristy@keyai.co", "url": "https://www.linkedin.com/in/edwardskristy/"}, {"name": "Daisuke Nogiwa", "email": "nogiwa@fujiamerica.com", "url": "https://www.linkedin.com/in/daisukenogiwa/"}, {"name": "Ewa Ding", "email": "ewading@gmail.com", "url": "https://www.linkedin.com/in/ewading"}, {"name": "Michael Harries", "email": "michael@theroboticshub.com", "url": "https://linkedin.com/in/michaelharries"}, {"name": "Tom Nieman", "email": "tom@surtona.com", "url": "https://www.linkedin.com/in/tomnieman1/"}, {"name": "Shreyas Gosalia", "email": "shreyas.gosalia@gmail.com", "url": "https://www.linkedin.com/in/shreyasgosalia"}, {"name": "Sunny Zhang", "email": "sunny@eastsunshineventures.com", "url": "https://www.linkedin.com/in/xueting-sunny-zhang?utm_source=share&utm_campaign=share_via&utm_content=profile&utm_medium=ios_app"}, {"name": "Derianto Kusuma", "email": "deriantok@gmail.com", "url": "https://www.linkedin.com/in/deriantokusuma/"}, {"name": "Ipsheeta", "email": "ipsheeta@tempyl.com", "url": "https://linkedin.com/in/ipsheeta"}, {"name": "Wenjie Fu", "email": "wenjiefu8@gmail.com", "url": "https://www.linkedin.com/in/wenjiefu"}, {"name": "Ivan Nikolov", "email": "ivan@fantasticstay.com", "url": "https://linkedin.com/in/ivannikolov"}, {"name": "Al Park", "email": "alberto.s.park@gmail.com", "url": "https://www.linkedin.com/in/alspark"}, {"name": "Connie Xu", "email": "connie@findhalo.com", "url": "https://www.linkedin.com/in/conniexu"}, {"name": "Joan Kim", "email": "jk@fortitudevc.com", "url": "https://linkedin.com/in/joan-kim-3000"}, {"name": "Helena Wang", "email": "helenajwang@yahoo.com", "url": "https://www.linkedin.com/in/helenajuewang/"}, {"name": "Ling Li", "email": "08lling@gmail.com", "url": "https://www.linkedin.com/in/ling-li-9a035a42"}, {"name": "Lake Dai", "email": "lake@sancusvc.com", "url": "https://www.linkedin.com/in/lakedai/"}, {"name": "Monica Xie", "email": "xiey.monica@gmail.com", "url": "https://www.linkedin.com/in/monicaxie/"}, {"name": "Ryota Sekine", "email": "ryotageo@gmail.com", "url": "https://linkedin.com/in/ryotasekine"}, {"name": "Pradeep Banavara", "email": "pbanavara@gmail.com", "url": "https://linkedin.com/in/pbanavara"}, {"name": "Kathy Wang", "email": "kathy@pressclub.app", "url": "https://www.linkedin.com/in/kathytwang/"}, {"name": "Garrett Chan", "email": "budoka05@gmail.com", "url": "https://www.linkedin.com/in/chan-garrett"}, {"name": "James Murdza-Kennedy", "email": "twittermetaverse@gmail.com", "url": "https://linkedin.com/in/jamesmurdza"}, {"name": "Ivy Nguyen", "email": "ivy@gft.vc", "url": "https://www.linkedin.com/in/ivyknguyen"}, {"name": "Jonathan O'Connell", "email": "joconnell@crowell.com", "url": "https://www.linkedin.com/in/jonathan-o-connell-3269537/"}, {"name": "Anchit Jain", "email": "anchit.jain@berkeley.edu", "url": "https://www.linkedin.com/in/anchitjaincfa/"}, {"name": "Josh Ueberroth", "email": "josh@surtona.com", "url": "https://www.linkedin.com/in/joshueberroth/"}, {"name": "Linus Liang", "email": "linus@kyberknight.com", "url": "https://www.linkedin.com/in/linusliang/"}, {"name": "Franklin Marcelo | Flexi", "email": "franklin@flexi.cx", "url": "https://www.linkedin.com/in/franklinmarcelo"}, {"name": "Pietro Decio", "email": "pdecio@tower-research.com", "url": "https://www.linkedin.com/in/pietrodecio/"}, {"name": "Nhat Nguyen", "email": "nhat.tc.nguyen@gmail.com", "url": "https://linkedin.com/in/nhattnguyen"}, {"name": "Erich Hilkemeyer", "email": "hilk@comcast.net", "url": "https://linkedin.com/in/hilkemeyer"}, {"name": "Brijesh Dutta", "email": "brijeshdutta@gmail.com", "url": "https://www.linkedin.com/in/brijeshdutta"}, {"name": "brandon in", "email": "brandonin@me.com", "url": "https://linkedin.com/in/brandonin"}, {"name": "Fintech Next / Sheela Ursal", "email": "sheela@fintechnextventures.com", "url": "http://www.linkedin.com/in/sheelaursal"}, {"name": "Rajesh Karmani", "email": "raj@askwhai.com", "url": "https://linkedin.com/in/karmani"}, {"name": "Peter.P", "email": "peterp@hat-trickcapital.com", "url": "https://www.linkedin.com/in/junguang-peter-pan-1254a359/"}, {"name": "John Nelligan", "email": "jn@nvsa.vc", "url": "https://www.linkedin.com/in/jnelligan/"}, {"name": "Marco Boerries", "email": "marco@boerries.com", "url": "https://www.linkedin.com/in/marcoboerries/"}, {"name": "Armen Berjikly", "email": "armen@emersoncollective.com", "url": "http://linkedin.com/in/armenb"}, {"name": "Nicolas El Baze", "email": "neb@tektonventures.com", "url": "https://www.linkedin.com/in/nicolaselbaze/"}, {"name": "Lidiya Dervisheva", "email": "lidiya@chromium.vc", "url": "https://www.linkedin.com/in/lidiyadervisheva/"}, {"name": "Ben Hutchinson", "email": "ben@fourcitiescapital.com", "url": "https://www.linkedin.com/in/benjaminhutchinson/"}, {"name": "Roy Peterkofsky", "email": "panther@alum.mit.edu", "url": "https://linkedin.com/in/peterkofsky"}, {"name": "Patricia Liu", "email": "patriciajliu@gmail.com", "url": "https://www.linkedin.com/in/pjlconsulting/"}, {"name": "Mark Klibanov", "email": "mark.klibanov@workday.com", "url": "https://www.linkedin.com/in/mark-klibanov-60a9626a/"}, {"name": "Lily Chen", "email": "loivy0225@gmail.com", "url": "https://www.linkedin.com/in/huili-c-a0b99784?"}, {"name": "Lonnissa Nguyen", "email": "lomavantage@gmail.com", "url": "https://www.linkedin.com/in/lonnissa-nguyen"}, {"name": "Joshua Elkington", "email": "ceo@grepone.com", "url": "https://www.linkedin.com/in/elkingtonjoshua"}, {"name": "Sankari Dhandapani", "email": "sankarid@gmail.com", "url": "https://www.linkedin.com/in/sankari-dhandapani-483b43b/"}, {"name": "Elaine (Yile) Liu", "email": "agptjourney@gmail.com", "url": "https://www.linkedin.com/in/elaine-prosgrow"}, {"name": "John Allan", "email": "john@surtona.com", "url": "https://linkedin.com/in/johndeeptech"}, {"name": "Jiayang cheng", "email": "jiayangcheng21@gmail.com", "url": "https://www.linkedin.com/in/jiayangcheng/"}, {"name": "Jacob Smith", "email": "incepta@inceptapartners.com", "url": "https://www.linkedin.com/in/jacob-smith-a21a61259"}, {"name": "Sruthi Davuluri", "email": "sruthi.davuluri@gmail.com", "url": "https://www.linkedin.com/in/sruthi-davuluri/"}, {"name": "Rachit Nandwani", "email": "rachit504@gmail.com", "url": "https://www.linkedin.com/in/rachit-nandwani/"}, {"name": "Alex Kaufman", "email": "alex.kaufman@bancofcal.com", "url": "https://linkedin.com/in/calexkaufman"}, {"name": "Pragya Saboo", "email": "pragya@therubric.ai", "url": "https://www.linkedin.com/in/pragyasaboo?utm_source=share&utm_campaign=share_via&utm_content=profile&utm_medium=ios_app"}, {"name": "Spandana Govindgari", "email": "team@therubric.ai", "url": "https://linkedin.com/in/sgovindgari"}, {"name": "Paul Shaburov", "email": "paul@glamlabs.app", "url": "https://www.linkedin.com/in/paul-shaburov-5a24bb210/"}, {"name": "Eagle", "email": "eaglextong@gmail.com", "url": "https://linkedin.com/in/xin-eagle-tong/"}, {"name": "Sunna Mo", "email": "sunna.mo@mitsubishicorp.com", "url": "https://www.linkedin.com/in/sunna-mo-1777a2101/"}, {"name": "Deborah Pandra", "email": "deb@matebio.ai", "url": "https://www.linkedin.com/in/deborahpandra/"}, {"name": "Tobias Boelter", "email": "tobias@t11r.com", "url": "https://www.linkedin.com/in/tobias-boelter/"}, {"name": "Mohak Saxena", "email": "mohaksaxena@gmail.com", "url": "https://www.linkedin.com/in/mohak-saxena/"}, {"name": "Akash Aggarwal", "email": "akash.aggarwal1001@gmail.com", "url": "https://www.linkedin.com/in/akash-agg/"}, {"name": "Grace Ge", "email": "grace@amplifypartners.com", "url": "https://www.linkedin.com/in/gracewenge/"}, {"name": "Luke Seq", "email": "lksq@pm.me", "url": "https://linkedin.com/in/lksq"}, {"name": "Diana Kotenko", "email": "diana.kotenko1@gmail.com", "url": "https://www.linkedin.com/in/diana-kotenko-761b4093/"}, {"name": "Hao Xue", "email": "hao@kidooo.ai", "url": "https://www.linkedin.com/in/hao-xue-aiecd/"}, {"name": "Jake Schwartz", "email": "jake@jakeschwartz.com", "url": "https://www.linkedin.com/in/jakesc"}];
+let scrapedUrls = new Set();
+
+async function loadScrapedUrls() {
+  try {
+    const r = await fetch(`${API}/linkedin/database`);
+    const d = await r.json();
+    for (const item of (d.items || [])) {
+      // Normalize URL for matching
+      const m = item.url.match(/linkedin\.com\/in\/([^/?&#\s]+)/);
+      if (m) scrapedUrls.add(m[1].replace(/\/$/, '').toLowerCase());
+    }
+  } catch(e) {}
+  renderQueue();
+}
+
+function renderQueue() {
+  const search = (document.getElementById('queueSearch').value || '').toLowerCase();
+  const list = document.getElementById('queueList');
+  
+  let pending = 0;
+  let html = '';
+  for (const p of CSV_PROFILES) {
+    const slug = (p.url.match(/linkedin\.com\/in\/([^/?&#\s]+)/) || [])[1] || '';
+    const done = scrapedUrls.has(slug.replace(/\/$/, '').toLowerCase());
+    if (!done) pending++;
+    
+    if (search && !p.name.toLowerCase().includes(search) && !p.email.toLowerCase().includes(search)) continue;
+    
+    const bg = done ? 'background:#0a0a0a;opacity:0.5;' : 'background:#111;cursor:pointer;';
+    const status = done ? '<span style="color:#4caf50;font-size:10px;">done</span>' : '';
+    
+    html += `<div onclick="${done ? '' : `pickProfile('${p.url.replace(/'/g,"\'")}','${p.email.replace(/'/g,"\'")}','${p.name.replace(/'/g,"\'")}')`}" style="${bg}padding:8px 12px;border-bottom:1px solid #1a1a1a;display:flex;align-items:center;gap:8px;">
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:12px;font-weight:600;color:${done?'#555':'#ccc'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${p.name}</div>
+        <div style="font-size:10px;color:#555;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${p.email}</div>
+      </div>
+      ${status}
+    </div>`;
+  }
+  
+  list.innerHTML = html;
+  document.getElementById('queueStats').textContent = `${pending} remaining of ${CSV_PROFILES.length}`;
+}
+
+function pickProfile(url, email, name) {
+  document.getElementById('url').value = url;
+  document.getElementById('email').value = email;
+  document.getElementById('content').focus();
+}
+
+document.getElementById('queueSearch').addEventListener('input', renderQueue);
+
+// Override saveProfile to also update queue
+const _origSave = saveProfile;
+saveProfile = async function() {
+  await _origSave();
+  // Mark as done
+  const url = document.getElementById('url').value;
+  const slug = (url.match(/linkedin\.com\/in\/([^/?&#\s]+)/) || [])[1] || '';
+  if (slug) scrapedUrls.add(slug.replace(/\/$/, '').toLowerCase());
+  renderQueue();
+};
+
+loadScrapedUrls();
+
 </script>
 </body>
 </html>
