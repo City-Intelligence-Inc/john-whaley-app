@@ -3,15 +3,17 @@ import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   KeyboardAvoidingView, Platform, ActivityIndicator, ScrollView,
 } from 'react-native';
-import { useSignIn, useOAuth, useAuth } from '@clerk/clerk-expo';
+import { useSignIn, useSignUp, useOAuth, useAuth } from '@clerk/clerk-expo';
 import { useRouter } from 'expo-router';
+import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import { colors } from '../lib/theme';
 
 WebBrowser.maybeCompleteAuthSession();
 
 export default function SignInScreen() {
-  const { signIn, setActive, isLoaded } = useSignIn();
+  const { signIn, setActive: setSignInActive, isLoaded } = useSignIn();
+  const { signUp, setActive: setSignUpActive } = useSignUp();
   const { isSignedIn } = useAuth();
   const { startOAuthFlow: startGoogleAuth } = useOAuth({ strategy: 'oauth_google' });
   const { startOAuthFlow: startAppleAuth } = useOAuth({ strategy: 'oauth_apple' });
@@ -33,16 +35,33 @@ export default function SignInScreen() {
     setError('');
     try {
       const startFlow = provider === 'google' ? startGoogleAuth : startAppleAuth;
-      const { createdSessionId, setActive: setActiveSession } = await startFlow({
-        redirectUrl: 'selecta://oauth-callback',
-      });
-      if (createdSessionId && setActiveSession) {
-        await setActiveSession({ session: createdSessionId });
+      const redirectUrl = Linking.createURL('/(tabs)/events');
+
+      const { createdSessionId, setActive, signUp: oauthSignUp, signIn: oauthSignIn } = await startFlow({ redirectUrl });
+
+      if (createdSessionId && setActive) {
+        await setActive({ session: createdSessionId });
         router.replace('/(tabs)/events');
+      } else if (oauthSignUp?.verifications?.externalAccount?.status === 'transferable') {
+        // User exists with a different strategy, transfer
+        if (oauthSignIn) {
+          const transfer = await oauthSignIn.create({ transfer: true });
+          if (transfer.status === 'complete' && setActive) {
+            await setActive({ session: transfer.createdSessionId });
+            router.replace('/(tabs)/events');
+          }
+        }
+      } else if (oauthSignUp?.status === 'missing_requirements') {
+        // New user — complete sign up
+        if (setActive && oauthSignUp.createdSessionId) {
+          await setActive({ session: oauthSignUp.createdSessionId });
+          router.replace('/(tabs)/events');
+        }
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : `${provider} sign in failed.`;
-      if (!msg.includes('cancelled') && !msg.includes('canceled')) {
+      // Don't show error for user cancellation
+      if (!msg.toLowerCase().includes('cancel')) {
         setError(msg);
       }
     } finally {
@@ -50,14 +69,14 @@ export default function SignInScreen() {
     }
   }, [startGoogleAuth, startAppleAuth, router]);
 
-  const handleSignIn = useCallback(async () => {
+  const handleEmailSignIn = useCallback(async () => {
     if (!isLoaded) return;
     setError('');
     setLoading(true);
     try {
       const result = await signIn.create({ identifier: email.trim(), password });
       if (result.status === 'complete') {
-        await setActive({ session: result.createdSessionId });
+        await setSignInActive({ session: result.createdSessionId });
         router.replace('/(tabs)/events');
       } else {
         setError('Sign in incomplete. Please try again.');
@@ -67,7 +86,7 @@ export default function SignInScreen() {
     } finally {
       setLoading(false);
     }
-  }, [isLoaded, email, password, signIn, setActive, router]);
+  }, [isLoaded, email, password, signIn, setSignInActive, router]);
 
   return (
     <KeyboardAvoidingView
@@ -79,87 +98,85 @@ export default function SignInScreen() {
           <Text style={styles.title}>Selecta</Text>
           <Text style={styles.subtitle}>Inception Studio</Text>
 
-          <View style={styles.divider} />
+          <View style={styles.spacer} />
 
-          {/* Social Sign In */}
+          {/* Apple Sign In */}
           <TouchableOpacity
             style={styles.appleButton}
             onPress={() => handleSocialSignIn('apple')}
             disabled={!!socialLoading}
-            activeOpacity={0.7}
+            activeOpacity={0.8}
           >
             {socialLoading === 'apple' ? (
               <ActivityIndicator color="#fff" size="small" />
             ) : (
-              <>
-                <Text style={styles.appleIcon}>{'\uF8FF'}</Text>
-                <Text style={styles.appleText}>Continue with Apple</Text>
-              </>
+              <Text style={styles.appleButtonText}> Sign in with Apple</Text>
             )}
           </TouchableOpacity>
 
+          {/* Google Sign In */}
           <TouchableOpacity
             style={styles.googleButton}
             onPress={() => handleSocialSignIn('google')}
             disabled={!!socialLoading}
-            activeOpacity={0.7}
+            activeOpacity={0.8}
           >
             {socialLoading === 'google' ? (
               <ActivityIndicator color="#333" size="small" />
             ) : (
-              <>
-                <Text style={styles.googleIcon}>G</Text>
-                <Text style={styles.googleText}>Continue with Google</Text>
-              </>
+              <View style={styles.googleInner}>
+                {/* Google "G" logo colors */}
+                <View style={styles.googleLogoWrap}>
+                  <Text style={styles.googleG}>G</Text>
+                </View>
+                <Text style={styles.googleButtonText}>Sign in with Google</Text>
+              </View>
             )}
           </TouchableOpacity>
 
           {/* Or divider */}
-          <View style={styles.orDivider}>
+          <View style={styles.orRow}>
             <View style={styles.orLine} />
-            <Text style={styles.orText}>or sign in with email</Text>
+            <Text style={styles.orText}>or</Text>
             <View style={styles.orLine} />
           </View>
 
-          {/* Email/Password */}
-          <View style={styles.form}>
-            <TextInput
-              style={styles.input}
-              value={email}
-              onChangeText={setEmail}
-              placeholder="Email address"
-              placeholderTextColor={colors.muted}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="email-address"
-              textContentType="emailAddress"
-            />
+          {/* Email / Password */}
+          <TextInput
+            style={styles.input}
+            value={email}
+            onChangeText={setEmail}
+            placeholder="Email"
+            placeholderTextColor={colors.muted}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="email-address"
+            textContentType="emailAddress"
+          />
+          <TextInput
+            style={styles.input}
+            value={password}
+            onChangeText={setPassword}
+            placeholder="Password"
+            placeholderTextColor={colors.muted}
+            secureTextEntry
+            textContentType="password"
+          />
 
-            <TextInput
-              style={styles.input}
-              value={password}
-              onChangeText={setPassword}
-              placeholder="Password"
-              placeholderTextColor={colors.muted}
-              secureTextEntry
-              textContentType="password"
-            />
+          {error ? <Text style={styles.error}>{error}</Text> : null}
 
-            {error ? <Text style={styles.error}>{error}</Text> : null}
-
-            <TouchableOpacity
-              style={[styles.signInButton, loading && styles.buttonDisabled]}
-              onPress={handleSignIn}
-              disabled={loading || !email.trim() || !password}
-              activeOpacity={0.7}
-            >
-              {loading ? (
-                <ActivityIndicator color={colors.background} size="small" />
-              ) : (
-                <Text style={styles.signInText}>Sign In</Text>
-              )}
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity
+            style={[styles.emailButton, (loading || !email.trim() || !password) && styles.disabled]}
+            onPress={handleEmailSignIn}
+            disabled={loading || !email.trim() || !password}
+            activeOpacity={0.8}
+          >
+            {loading ? (
+              <ActivityIndicator color={colors.background} size="small" />
+            ) : (
+              <Text style={styles.emailButtonText}>Sign In</Text>
+            )}
+          </TouchableOpacity>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -170,40 +187,47 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   scroll: { flexGrow: 1, justifyContent: 'center' },
   inner: { paddingHorizontal: 28, paddingVertical: 40 },
-  title: { fontSize: 42, fontWeight: '800', color: colors.gold, textAlign: 'center', letterSpacing: 2 },
+  title: { fontSize: 44, fontWeight: '800', color: colors.gold, textAlign: 'center', letterSpacing: 1 },
   subtitle: { fontSize: 13, color: colors.muted, textAlign: 'center', marginTop: 6, letterSpacing: 1.5, textTransform: 'uppercase' },
-  divider: { height: 1, backgroundColor: colors.border, marginVertical: 32, marginHorizontal: 40 },
+  spacer: { height: 36 },
 
-  // Apple button — black with white text (standard Apple style)
+  // Apple — standard black pill
   appleButton: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
-    backgroundColor: '#000', borderRadius: 12, paddingVertical: 16, marginBottom: 12,
+    backgroundColor: '#000', borderRadius: 12, paddingVertical: 16,
+    alignItems: 'center', justifyContent: 'center', marginBottom: 12,
     borderWidth: 1, borderColor: '#333',
   },
-  appleIcon: { fontSize: 20, color: '#fff' },
-  appleText: { fontSize: 17, fontWeight: '600', color: '#fff' },
+  appleButtonText: { color: '#fff', fontSize: 18, fontWeight: '600' },
 
-  // Google button — white with dark text (standard Google style)
+  // Google — white pill with colored G
   googleButton: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
     backgroundColor: '#fff', borderRadius: 12, paddingVertical: 16,
+    alignItems: 'center', justifyContent: 'center', marginBottom: 4,
   },
-  googleIcon: { fontSize: 20, fontWeight: '700', color: '#4285F4' },
-  googleText: { fontSize: 17, fontWeight: '600', color: '#333' },
+  googleInner: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  googleLogoWrap: {
+    width: 22, height: 22, borderRadius: 11, backgroundColor: '#fff',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  googleG: { fontSize: 18, fontWeight: '800', color: '#4285F4' },
+  googleButtonText: { color: '#333', fontSize: 18, fontWeight: '600' },
 
   // Or
-  orDivider: { flexDirection: 'row', alignItems: 'center', marginVertical: 24, paddingHorizontal: 8 },
+  orRow: { flexDirection: 'row', alignItems: 'center', marginVertical: 20, paddingHorizontal: 12 },
   orLine: { flex: 1, height: 1, backgroundColor: colors.border },
-  orText: { color: colors.muted, fontSize: 12, fontWeight: '500', paddingHorizontal: 14 },
+  orText: { color: colors.muted, fontSize: 13, paddingHorizontal: 16 },
 
-  // Form
-  form: { gap: 12 },
+  // Email form
   input: {
     backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border,
-    borderRadius: 12, paddingHorizontal: 16, paddingVertical: 15, fontSize: 16, color: colors.text,
+    borderRadius: 12, paddingHorizontal: 16, paddingVertical: 15,
+    fontSize: 16, color: colors.text, marginBottom: 12,
   },
-  error: { color: colors.error, fontSize: 13, textAlign: 'center' },
-  signInButton: { backgroundColor: colors.gold, borderRadius: 12, paddingVertical: 16, alignItems: 'center', marginTop: 8 },
-  buttonDisabled: { opacity: 0.5 },
-  signInText: { color: colors.background, fontSize: 17, fontWeight: '700' },
+  error: { color: colors.error, fontSize: 13, textAlign: 'center', marginBottom: 8 },
+  emailButton: {
+    backgroundColor: colors.gold, borderRadius: 12, paddingVertical: 16,
+    alignItems: 'center', marginTop: 4,
+  },
+  disabled: { opacity: 0.4 },
+  emailButtonText: { color: colors.background, fontSize: 17, fontWeight: '700' },
 });
