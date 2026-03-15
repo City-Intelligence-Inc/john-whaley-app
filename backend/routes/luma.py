@@ -14,7 +14,7 @@ import db
 
 router = APIRouter(prefix="/luma", tags=["luma"])
 
-LUMA_API_BASE = "https://api.lu.ma/public/v1"
+LUMA_API_BASE = "https://public-api.luma.com/v1"
 
 
 def _luma_headers(api_key: str) -> dict:
@@ -51,7 +51,7 @@ async def get_event_guests(event_id: str, api_key: str | None = Query(None)):
     cursor = None
     async with httpx.AsyncClient(timeout=30) as client:
         while True:
-            params: dict = {"event_api_id": event_id}
+            params: dict = {"event_id": event_id}
             if cursor:
                 params["pagination_cursor"] = cursor
             resp = await client.get(
@@ -80,8 +80,22 @@ async def import_from_luma(
     guests = guests_resp["guests"]
 
     if not session_id:
+        # Try to get event name from Luma
+        event_name = "Luma Import"
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.get(
+                    f"{LUMA_API_BASE}/event/get",
+                    headers=_luma_headers(key),
+                    params={"event_id": event_id},
+                )
+                if resp.status_code == 200:
+                    event_data = resp.json()
+                    event_name = event_data.get("event", {}).get("name", event_name)
+        except Exception:
+            pass
         session = db.create_session({
-            "name": "Luma Import",
+            "name": event_name,
             "source": "luma",
             "source_detail": event_id,
         })
