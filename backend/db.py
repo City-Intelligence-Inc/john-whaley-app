@@ -251,7 +251,7 @@ def _parse_linkedin_paste(raw: str) -> dict:
     # The nav contains: notifications, Home, My Network, Jobs, Messaging, etc.
     # Find the LAST nav marker to skip past all of them.
     profile_start = 0
-    nav_end_markers = ["Try Premium", "For Business", "Get the app"]
+    nav_end_markers = ["Try Premium", "Retry Premium", "Reactivate Premium", "For Business", "Get the app"]
     for i, line in enumerate(lines):
         stripped = line.strip()
         if any(stripped.startswith(m) for m in nav_end_markers):
@@ -264,7 +264,7 @@ def _parse_linkedin_paste(raw: str) -> dict:
     footer_markers = ["More profiles for you", "People also viewed",
                        "Explore premium profiles", "LinkedIn Corporation",
                        "Talent Solutions", "Community Guidelines",
-                       "Marketing Solutions"]
+                       "Marketing Solutions", "Accessibility"]
     for i in range(profile_start, len(lines)):
         stripped = lines[i].strip()
         if any(stripped == m or stripped.startswith(m) for m in footer_markers):
@@ -279,8 +279,16 @@ def _parse_linkedin_paste(raw: str) -> dict:
     if not clean:
         return {}
 
-    # Name is first non-empty line after nav
-    result["name"] = clean[0][1]
+    # Name is first non-empty line after nav (skip any leftover nav junk)
+    nav_junk = {"Try Premium", "Retry Premium", "Reactivate Premium", "For Business",
+                "Get the app", "Home", "My Network", "Jobs", "Messaging", "Notifications",
+                "Post", "Profile", "More", "Search", "Open to"}
+    name_idx = 0
+    for idx, (_, text) in enumerate(clean):
+        if text not in nav_junk and not text.startswith("Try ") and not text.startswith("Retry "):
+            name_idx = idx
+            break
+    result["name"] = clean[name_idx][1]
 
     # Look through the next ~15 lines for headline, location, connections
     header_lines = clean[1:20]
@@ -430,39 +438,18 @@ def _parse_linkedin_paste(raw: str) -> dict:
 
 
 def save_manual_linkedin_scrape(data: dict) -> dict:
-    """Save a manually scraped LinkedIn profile. Parses raw paste into structured columns + uploads photo to S3."""
+    """Save a manually scraped LinkedIn profile. Stores raw paste + photo, no parsing."""
     url = data.get("url")
     if not url:
         return {}
-
-    # Parse the raw paste into structured fields
-    parsed = _parse_linkedin_paste(data.get("content", ""))
 
     item: dict = {
         "url": url,
         "scraped_at": datetime.now(timezone.utc).isoformat(),
         "email": data.get("email"),
+        "name": data.get("name"),
         "source": "manual",
         "raw_content": data.get("content"),
-        # Structured fields from parsing
-        "name": parsed.get("name") or data.get("name"),
-        "headline": parsed.get("headline"),
-        "location": parsed.get("location"),
-        "connections": parsed.get("connections"),
-        "about": parsed.get("about"),
-        "experience": parsed.get("experience"),
-        "company": parsed.get("company"),
-        "education": parsed.get("education"),
-        "skills": parsed.get("skills"),
-        "certifications": parsed.get("certifications"),
-        "languages": parsed.get("languages"),
-        "volunteer": parsed.get("volunteer"),
-        "recommendations": parsed.get("recommendations"),
-        "projects": parsed.get("projects"),
-        "publications": parsed.get("publications"),
-        "awards": parsed.get("awards"),
-        "courses": parsed.get("courses"),
-        "organizations": parsed.get("organizations"),
     }
 
     # Upload photo if provided as base64

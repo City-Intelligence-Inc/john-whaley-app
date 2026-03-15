@@ -23,14 +23,7 @@ app = FastAPI(title="John Whaley Applicant Reviewer")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://localhost:8080",
-        "http://127.0.0.1:8080",
-        "https://*.vercel.app",
-        "null",  # file:// origin
-    ],
+    allow_origins=["*"],
     allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
@@ -54,7 +47,7 @@ class ManualScrapeIn(BaseModel):
 def manual_scrape_noauth(body: ManualScrapeIn):
     import db as _db
     result = _db.save_manual_linkedin_scrape(body.model_dump())
-    return {"status": "ok", "photo_url": result.get("photo_url"), "url": result.get("url")}
+    return {"status": "ok", **result}
 
 
 @app.get("/sessions", tags=["sessions"])
