@@ -1189,7 +1189,7 @@ export default function LinkedInPage() {
                 key={p.url}
                 p={p}
                 onClick={() => setSelected(p)}
-                onNavigate={() => slug ? router.push(`/dashboard/linkedin/${slug}`) : setSelected(p)}
+                onNavigate={() => slug ? router.push(`/dashboard/linkedin/${encodeURIComponent(slug)}`) : setSelected(p)}
               />
             );
           })}
@@ -1224,7 +1224,7 @@ export default function LinkedInPage() {
                   <TableRow
                     key={p.url}
                     p={p}
-                    onClick={() => slug ? router.push(`/dashboard/linkedin/${slug}`) : setSelected(p)}
+                    onClick={() => slug ? router.push(`/dashboard/linkedin/${encodeURIComponent(slug)}`) : setSelected(p)}
                   />
                 );
               })}

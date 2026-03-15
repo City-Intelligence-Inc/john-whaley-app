@@ -332,7 +332,14 @@ function renderQueue() {
   
   let pending = 0;
   let html = '';
-  for (const p of CSV_PROFILES) {
+  const sorted = [...CSV_PROFILES].sort((a, b) => {
+    const aSlug = (a.url.match(/linkedin\.com\/in\/([^/?&#\s]+)/) || [])[1] || '';
+    const bSlug = (b.url.match(/linkedin\.com\/in\/([^/?&#\s]+)/) || [])[1] || '';
+    const aDone = scrapedUrls.has(aSlug.replace(/\/$/, '').toLowerCase());
+    const bDone = scrapedUrls.has(bSlug.replace(/\/$/, '').toLowerCase());
+    return aDone - bDone;
+  });
+  for (const p of sorted) {
     const slug = (p.url.match(/linkedin\.com\/in\/([^/?&#\s]+)/) || [])[1] || '';
     const done = scrapedUrls.has(slug.replace(/\/$/, '').toLowerCase());
     if (!done) pending++;

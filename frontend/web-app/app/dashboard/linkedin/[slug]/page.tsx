@@ -299,9 +299,12 @@ export default function ProfilePage({ params }: { params: Promise<{ slug: string
         const r = await fetch(`${API}/linkedin/database`);
         const d = await r.json();
         const items: Profile[] = d.items || [];
+        const decodedSlug = decodeURIComponent(slug);
         const match = items.find((p) => {
           const m = p.url.match(/linkedin\.com\/in\/([^/?&#\s]+)/);
-          return m && m[1].replace(/\/$/, "") === slug;
+          if (!m) return false;
+          const profileSlug = m[1].replace(/\/$/, "");
+          return profileSlug === decodedSlug || profileSlug === slug;
         });
         setProfile(match || null);
       } catch (e) {
