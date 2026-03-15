@@ -14,11 +14,8 @@ export default function IndexRedirect() {
     );
   }
 
-  if (isSignedIn) {
-    return <Redirect href="/(tabs)/events" />;
-  }
-
-  return <Redirect href="/sign-in" />;
+  // Always go to events — auth is optional for now
+  return <Redirect href="/(tabs)/events" />;
 }
 
 const styles = StyleSheet.create({

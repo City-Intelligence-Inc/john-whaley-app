@@ -7,8 +7,7 @@ import { colors } from '../../lib/theme';
 export default function TabLayout() {
   const { isSignedIn, isLoaded } = useAuth();
 
-  if (!isLoaded) return null;
-  if (!isSignedIn) return <Redirect href="/sign-in" />;
+  // Skip auth guard — allow browsing without sign-in
 
   return (
     <Tabs
