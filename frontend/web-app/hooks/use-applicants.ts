@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { api, type Applicant, type Stats, type PromptSettings, type Session, type AdminSession } from "@/lib/api";
+import { api } from "@/lib/api";
+import type { Applicant, Stats, PromptSettings, Session, AdminSession } from "@/lib/api";
 
 export function useApplicants(sessionId?: string) {
   const [applicants, setApplicants] = useState<Applicant[]>([]);
@@ -21,10 +22,7 @@ export function useApplicants(sessionId?: string) {
     }
   }, [sessionId]);
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
+  useEffect(() => { refresh(); }, [refresh]);
   return { applicants, loading, error, refresh };
 }
 
@@ -46,10 +44,7 @@ export function useApplicant(id: string) {
     }
   }, [id]);
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
+  useEffect(() => { refresh(); }, [refresh]);
   return { applicant, loading, error, refresh };
 }
 
@@ -71,10 +66,7 @@ export function useStats(sessionId?: string) {
     }
   }, [sessionId]);
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
+  useEffect(() => { refresh(); }, [refresh]);
   return { stats, loading, error, refresh };
 }
 
@@ -96,10 +88,7 @@ export function useSessions() {
     }
   }, []);
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
+  useEffect(() => { refresh(); }, [refresh]);
   return { sessions, loading, error, refresh };
 }
 
@@ -121,10 +110,7 @@ export function usePromptSettings() {
     }
   }, []);
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
+  useEffect(() => { refresh(); }, [refresh]);
   return { settings, loading, error, refresh };
 }
 
@@ -146,9 +132,6 @@ export function useAdminSessions() {
     }
   }, []);
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
+  useEffect(() => { refresh(); }, [refresh]);
   return { sessions, loading, error, refresh };
 }

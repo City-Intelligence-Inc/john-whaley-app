@@ -11,10 +11,10 @@ export default function NotFound() {
         </p>
         <div className="mt-8 flex gap-3 justify-center">
           <Link
-            href="/dashboard"
-            className="rounded-lg bg-[#1e293b] px-5 py-2.5 text-sm font-medium text-white hover:bg-[#334155] transition-colors"
+            href="/events"
+            className="rounded-lg bg-gold px-5 py-2.5 text-sm font-medium text-gold-foreground hover:bg-gold/90 transition-colors"
           >
-            Go to Dashboard
+            Go to Events
           </Link>
           <Link
             href="/"

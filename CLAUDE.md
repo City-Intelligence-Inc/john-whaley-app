@@ -10,11 +10,12 @@ gh api user --jq .login
 
 ## Project Overview
 
-This is the **john-whaley-app** — an AI-powered event applicant review/selection platform for Inception Studio.
+This is **Selecta** (john-whaley-app) — an AI-powered event applicant review/selection platform for Inception Studio.
 
 ## Tech Stack
 
-- **Frontend:** Next.js 16 (App Router), React 19, Tailwind CSS v4, shadcn/ui, Clerk auth
+- **Frontend Web:** Next.js 16 (App Router), React 19, Tailwind CSS v4, shadcn/ui, Clerk auth
+- **Frontend Mobile:** Expo (React Native), Expo Router, NativeWind, Clerk Expo SDK
 - **Backend:** FastAPI (Python), uvicorn
 - **Database:** AWS DynamoDB (4 tables: applicants, sessions, settings, linkedin-scrapes)
 - **Storage:** S3 (`john-whaley-linkedin-photos` bucket for profile photos)
@@ -33,9 +34,14 @@ cd frontend/web-app && pnpm dev --port 3000
 ## Key Directories
 
 - `backend/` — FastAPI app, routes, db helpers, AI analysis pipeline
-- `frontend/web-app/` — Next.js app
-- `frontend/web-app/app/dashboard/` — Main pages (review, calendar, linkedin, settings, admin)
-- `frontend/web-app/components/` — UI components (app-shell.tsx has the sidebar layout)
+- `frontend/shared/` — Shared TypeScript types, constants, judge personas (used by web + mobile)
+- `frontend/web-app/` — Next.js web app
+- `frontend/web-app/app/(app)/events/` — Event-centric pages (event list, workspace, analyze, settings)
+- `frontend/web-app/app/(app)/linkedin/` — LinkedIn database browser
+- `frontend/web-app/app/(app)/settings/` — Global settings (API keys, personas)
+- `frontend/web-app/app/(marketing)/` — Landing page
+- `frontend/web-app/components/` — UI components (app-shell, event-provider, applicant-table, etc.)
+- `frontend/mobile/` — Expo React Native mobile app
 - `infra/` — Terraform IaC (DynamoDB, App Runner, etc.)
 - `tools/` — Standalone HTML scraper tools (linkedin-manual-add, linkedin-scraper, linkedin-db-viewer)
 - `data/` — CSVs, tickets, and other project data files

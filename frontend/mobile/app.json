@@ -1,0 +1,49 @@
+{
+  "expo": {
+    "name": "Selecta",
+    "slug": "selecta",
+    "owner": "arihantchoudhary",
+    "scheme": "selecta",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0f1118"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.inceptionstudio.selecta",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.inceptionstudio.selecta",
+      "adaptiveIcon": {
+        "backgroundColor": "#0f1118",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-web-browser"
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "cc6e6683-547f-469d-a555-41e37ffec6d8"
+      }
+    }
+  }
+}

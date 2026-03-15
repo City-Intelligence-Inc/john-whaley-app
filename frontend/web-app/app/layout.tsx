@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AI Select",
-  description: "Turn applications into decisions — automatically.",
+  title: "Selecta",
+  description: "AI-powered event guest selection for Inception Studio.",
 };
 
 export default function RootLayout({

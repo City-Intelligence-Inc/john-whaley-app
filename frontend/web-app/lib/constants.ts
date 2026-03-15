@@ -1,0 +1,12 @@
+// Re-export from shared
+export {
+  APP_NAME,
+  ATTENDEE_TYPES,
+  OTHER_COLORS,
+  ANTHROPIC_MODELS,
+  OPENAI_MODELS,
+  PANEL_SIZES,
+  DEFAULT_SELECTION_PREFERENCES,
+  DEFAULT_PANEL_CONFIG,
+  STATUS_COLORS,
+} from "../../shared/constants";

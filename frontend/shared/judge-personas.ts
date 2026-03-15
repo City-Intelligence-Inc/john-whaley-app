@@ -1,0 +1,133 @@
+export interface JudgePersona {
+  id: string;
+  name: string;
+  emoji: string;
+  specialty: string;
+  description: string;
+  preferred_types: string[];
+  shape: "circle" | "square" | "diamond" | "hexagon" | "rounded" | "pill";
+  color: string;
+}
+
+export const JUDGE_PERSONAS: JudgePersona[] = [
+  {
+    id: "technical_purist",
+    name: "The Technical Purist",
+    emoji: "\u{1F52C}",
+    specialty: "Deep AI/ML expertise",
+    description: "Boosts: published papers, models built, ML systems deployed, specific technical skills. Penalizes: vague 'passionate about AI' with no hands-on proof.",
+    preferred_types: ["faculty", "student", "entrepreneur"],
+    shape: "circle",
+    color: "bg-blue-100 dark:bg-blue-900/40",
+  },
+  {
+    id: "venture_eye",
+    name: "The Venture Eye",
+    emoji: "\u{1F4B0}",
+    specialty: "Commercial potential & investment",
+    description: "Boosts: startup founders, VCs, fundraising history, revenue metrics, AI portfolio companies. Penalizes: purely academic profiles with no commercial lens.",
+    preferred_types: ["vc", "entrepreneur"],
+    shape: "diamond",
+    color: "bg-amber-100 dark:bg-amber-900/40",
+  },
+  {
+    id: "academic",
+    name: "The Academic",
+    emoji: "\u{1F393}",
+    specialty: "Research & scholarly work",
+    description: "Boosts: faculty positions, PhD programs, research publications, grants, conference talks. Penalizes: purely commercial profiles with no research curiosity.",
+    preferred_types: ["faculty", "student"],
+    shape: "square",
+    color: "bg-green-100 dark:bg-green-900/40",
+  },
+  {
+    id: "diversity_champion",
+    name: "The Diversity Champion",
+    emoji: "\u{1F30D}",
+    specialty: "Diverse backgrounds & inclusion",
+    description: "Boosts: non-traditional backgrounds, international perspectives, interdisciplinary work (AI + healthcare, art, etc.). Penalizes: cookie-cutter Silicon Valley profiles.",
+    preferred_types: ["student", "other"],
+    shape: "hexagon",
+    color: "bg-emerald-100 dark:bg-emerald-900/40",
+  },
+  {
+    id: "networker",
+    name: "The Networker",
+    emoji: "\u{1F91D}",
+    specialty: "Connections & influence",
+    description: "Boosts: senior titles, board memberships, advisory roles, event speakers, industry connectors. Penalizes: junior or isolated professionals who won't generate connections.",
+    preferred_types: ["vc", "entrepreneur", "press"],
+    shape: "rounded",
+    color: "bg-purple-100 dark:bg-purple-900/40",
+  },
+  {
+    id: "industry_insider",
+    name: "The Industry Insider",
+    emoji: "\u{1F3ED}",
+    specialty: "Practical deployment experience",
+    description: "Boosts: production ML systems, shipped AI products, MLOps/infra experience, engineering leadership at tech cos. Penalizes: purely theoretical work with no deployment.",
+    preferred_types: ["entrepreneur", "other"],
+    shape: "pill",
+    color: "bg-slate-100 dark:bg-slate-900/40",
+  },
+  {
+    id: "student_advocate",
+    name: "The Student Advocate",
+    emoji: "\u{1F4DA}",
+    specialty: "Learning potential & fresh ideas",
+    description: "Boosts: current students, recent grads, hackathon participants, course projects, early-career enthusiasm. Penalizes: overqualified executives who won't engage with students.",
+    preferred_types: ["student", "alumni"],
+    shape: "circle",
+    color: "bg-violet-100 dark:bg-violet-900/40",
+  },
+  {
+    id: "press_secretary",
+    name: "The Press Secretary",
+    emoji: "\u{1F4F0}",
+    specialty: "Media potential & coverage",
+    description: "Boosts: journalists, newsletter authors, content creators, public speakers, social media presence. Penalizes: low-profile attendees who won't generate visibility.",
+    preferred_types: ["press", "entrepreneur"],
+    shape: "diamond",
+    color: "bg-pink-100 dark:bg-pink-900/40",
+  },
+  {
+    id: "innovator",
+    name: "The Innovator",
+    emoji: "\u{1F4A1}",
+    specialty: "Novel ideas & creative approaches",
+    description: "Boosts: novel AI use cases, creative intersections, patents, hackathon winners, unconventional approaches. Penalizes: 'me too' enterprise AI, incremental improvements.",
+    preferred_types: ["entrepreneur", "student", "faculty"],
+    shape: "hexagon",
+    color: "bg-yellow-100 dark:bg-yellow-900/40",
+  },
+  {
+    id: "pragmatist",
+    name: "The Pragmatist",
+    emoji: "\u{1F4CA}",
+    specialty: "Proven track record & results",
+    description: "Boosts: quantifiable achievements, successful exits, high-impact publications, awards, well-known company names. Penalizes: aspirational language with no concrete track record.",
+    preferred_types: ["entrepreneur", "vc", "faculty"],
+    shape: "square",
+    color: "bg-orange-100 dark:bg-orange-900/40",
+  },
+  {
+    id: "visionary",
+    name: "The Visionary",
+    emoji: "\u{1F52E}",
+    specialty: "Big-picture & future potential",
+    description: "Boosts: AGI/safety/governance research, ambitious moonshot projects, paradigm-shifting vision. Penalizes: narrow incremental work that won't shape the field's future.",
+    preferred_types: ["entrepreneur", "faculty", "student"],
+    shape: "rounded",
+    color: "bg-indigo-100 dark:bg-indigo-900/40",
+  },
+  {
+    id: "community_builder",
+    name: "The Community Builder",
+    emoji: "\u{1F3E0}",
+    specialty: "Event engagement & energy",
+    description: "Boosts: mentors, community organizers, teachers/coaches, event participants, collaborative roles. Penalizes: passive observers who would sit quietly and leave.",
+    preferred_types: ["alumni", "other", "student"],
+    shape: "pill",
+    color: "bg-rose-100 dark:bg-rose-900/40",
+  },
+];

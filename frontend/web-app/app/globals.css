@@ -49,7 +49,7 @@
   --radius-4xl: calc(var(--radius) + 16px);
 }
 
-/* ── AI Select: Dark luxury theme (always dark) ── */
+/* ── Selecta: Dark luxury theme (always dark) ── */
 :root {
   --radius: 0.625rem;
 
