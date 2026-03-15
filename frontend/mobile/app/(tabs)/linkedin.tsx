@@ -29,8 +29,8 @@ export default function LinkedInScreen() {
   const fetchProfiles = useCallback(async () => {
     try {
       setError(null);
-      const data = (await getLinkedInProfiles()) as LinkedInProfile[];
-      // Sort by name
+      const res = await getLinkedInProfiles() as { items: LinkedInProfile[]; count: number };
+      const data = res.items || [];
       const sorted = [...data].sort((a, b) =>
         (a.name || '').localeCompare(b.name || '')
       );

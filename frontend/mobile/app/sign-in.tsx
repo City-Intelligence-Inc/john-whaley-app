@@ -35,28 +35,13 @@ export default function SignInScreen() {
     setError('');
     try {
       const startFlow = provider === 'google' ? startGoogleAuth : startAppleAuth;
-      const redirectUrl = Linking.createURL('/(tabs)/events');
+      const redirectUrl = Linking.createURL('/');
 
-      const { createdSessionId, setActive, signUp: oauthSignUp, signIn: oauthSignIn } = await startFlow({ redirectUrl });
+      const { createdSessionId, setActive } = await startFlow({ redirectUrl });
 
       if (createdSessionId && setActive) {
         await setActive({ session: createdSessionId });
-        router.replace('/(tabs)/events');
-      } else if (oauthSignUp?.verifications?.externalAccount?.status === 'transferable') {
-        // User exists with a different strategy, transfer
-        if (oauthSignIn) {
-          const transfer = await oauthSignIn.create({ transfer: true });
-          if (transfer.status === 'complete' && setActive) {
-            await setActive({ session: transfer.createdSessionId });
-            router.replace('/(tabs)/events');
-          }
-        }
-      } else if (oauthSignUp?.status === 'missing_requirements') {
-        // New user — complete sign up
-        if (setActive && oauthSignUp.createdSessionId) {
-          await setActive({ session: oauthSignUp.createdSessionId });
-          router.replace('/(tabs)/events');
-        }
+        // Don't navigate — the index.tsx redirect will handle it on next render
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : `${provider} sign in failed.`;
