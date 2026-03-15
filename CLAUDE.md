@@ -36,6 +36,10 @@ cd frontend/web-app && pnpm dev --port 3000
 - `frontend/web-app/` — Next.js app
 - `frontend/web-app/app/dashboard/` — Main pages (review, calendar, linkedin, settings, admin)
 - `frontend/web-app/components/` — UI components (app-shell.tsx has the sidebar layout)
+- `infra/` — Terraform IaC (DynamoDB, App Runner, etc.)
+- `tools/` — Standalone HTML scraper tools (linkedin-manual-add, linkedin-scraper, linkedin-db-viewer)
+- `data/` — CSVs, tickets, and other project data files
+- `testing/` — Tests
 
 ## DynamoDB Tables
 
@@ -57,7 +61,7 @@ cd frontend/web-app && pnpm dev --port 3000
 - **App Runner URL:** `https://aicm3pweed.us-east-1.awsapprunner.com`
 - **ECR image:** `050451400186.dkr.ecr.us-east-1.amazonaws.com/john-whaley-backend:latest`
 - **Deploy flow:** `docker build --platform linux/amd64 -t <ecr-url> backend/` → `docker push <ecr-url>` → `aws apprunner start-deployment --service-arn arn:aws:apprunner:us-east-1:050451400186:service/john-whaley-backend/5c7bdf6d38694a539210c02dc242cf06 --region us-east-1`
-- HTML scraper tools (`linkedin-manual-add.html`, `linkedin-scraper.html`) POST to the deployed URL, no local backend needed
+- HTML scraper tools (`tools/linkedin-manual-add.html`, `tools/linkedin-scraper.html`) POST to the deployed URL, no local backend needed
 - CORS is set to `allow_origins=["*"]` so file:// HTML tools work
 
 ## LinkedIn Scrape DB Cleanup Procedure
@@ -128,7 +132,7 @@ Marketing Solutions, Accessibility
 | photo_url | S3 URL from uploaded base64 | nice to have |
 
 ### 7. Updating the HTML scraper queue
-When a new CSV is provided (from Luma), update `CSV_PROFILES` in `linkedin-manual-add.html` and `PROFILES` in `linkedin-scraper.html`:
+When a new CSV is provided (from Luma), update `CSV_PROFILES` in `tools/linkedin-manual-add.html` and `PROFILES` in `tools/linkedin-scraper.html`:
 ```python
 import csv, json
 profiles = []
@@ -147,7 +151,7 @@ Manual scraping workflow: Ari pastes LinkedIn profiles into Claude Code CLI, Cla
 
 ### Quick-start (when Ari says "let's scrape" or "add profiles")
 
-1. **Check what's already scraped** — hit `GET /linkedin/database` and compare against `CSV_PROFILES` in `linkedin-manual-add.html`
+1. **Check what's already scraped** — hit `GET /linkedin/database` and compare against `CSV_PROFILES` in `tools/linkedin-manual-add.html`
 2. **Show the first remaining URL** — print it so Ari can open it in Chrome
 3. **Wait for paste** — Ari does Cmd+A → Cmd+C on the LinkedIn page and pastes the raw text
 4. **Save immediately** — write paste to `/tmp/li_paste.txt`, POST to backend, print confirmation
@@ -199,7 +203,7 @@ Open ↑ in Chrome, Cmd+A, Cmd+C, paste here
 - **If Ari pastes without a URL context**, ask which profile it's for
 - **DynamoDB key is `url`** — re-saving same URL overwrites (safe to retry)
 - **Name/email come from CSV list**, not from parsing the paste
-- **Photos are skipped** in this flow — added later via `linkedin-manual-add.html`
+- **Photos are skipped** in this flow — added later via `tools/linkedin-manual-add.html`
 - **DB cleanup happens separately** — Ari will ask to parse `raw_content` into structured fields later
 
 ## CS 224G Demo Day LinkedIn Scrape — COMPLETED

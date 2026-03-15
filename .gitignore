@@ -6,3 +6,6 @@ __pycache__/
 .next/
 .env
 .env.local
+*.tfstate
+*.tfstate.backup
+.terraform/
