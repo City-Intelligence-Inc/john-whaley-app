@@ -113,7 +113,7 @@ export default function EventsScreen() {
     >
       <View style={styles.cardHeader}>
         <View style={styles.cardIcon}>
-          <Text style={{ fontSize: 20 }}>📅</Text>
+          <Text style={{ fontSize: 15, fontWeight: '700', color: colors.gold }}>E</Text>
         </View>
         <View style={styles.cardContent}>
           <Text style={styles.cardTitle} numberOfLines={2}>{item.name}</Text>
@@ -123,7 +123,7 @@ export default function EventsScreen() {
       </View>
       <View style={styles.cardFooter}>
         <View style={styles.stat}>
-          <Text style={{ fontSize: 14 }}>👥</Text>
+          <Text style={{ fontSize: 13, color: colors.muted, fontWeight: '600' }}>{'\u2022'}</Text>
           <Text style={styles.statText}>{item.applicant_count} applicant{item.applicant_count !== 1 ? 's' : ''}</Text>
         </View>
         <View style={[styles.statusBadge, { backgroundColor: colors.gold + '20' }]}>
@@ -142,7 +142,7 @@ export default function EventsScreen() {
       {/* Action buttons */}
       <View style={styles.actions}>
         <TouchableOpacity style={styles.lumaButton} onPress={handleOpenLuma} activeOpacity={0.8}>
-          <Text style={styles.lumaButtonText}>📅 Import from Luma</Text>
+          <Text style={styles.lumaButtonText}>Import from Luma</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.createButton} onPress={() => setShowCreate(true)} activeOpacity={0.8}>
           <Text style={styles.createButtonText}>+ New</Text>
@@ -157,7 +157,7 @@ export default function EventsScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.gold} />}
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Text style={{ fontSize: 48 }}>📅</Text>
+            <Text style={{ fontSize: 32, fontWeight: '300', color: colors.muted }}>No events</Text>
             <Text style={styles.emptyText}>No events yet</Text>
             <Text style={styles.emptySubtext}>Import from Luma or create a new event</Text>
           </View>
@@ -253,7 +253,7 @@ const styles = StyleSheet.create({
   lumaButtonText: { color: colors.background, fontSize: 15, fontWeight: '700' },
   createButton: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingVertical: 14, paddingHorizontal: 20, alignItems: 'center' },
   createButtonText: { color: colors.text, fontSize: 15, fontWeight: '600' },
-  list: { padding: 16, paddingBottom: 32 },
+  list: { padding: 16, paddingBottom: 110 },
   card: { backgroundColor: colors.card, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 16, marginBottom: 12 },
   cardHeader: { flexDirection: 'row', alignItems: 'center' },
   cardIcon: { width: 40, height: 40, borderRadius: 10, backgroundColor: colors.gold + '15', justifyContent: 'center', alignItems: 'center', marginRight: 12 },

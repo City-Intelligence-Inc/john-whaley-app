@@ -4,10 +4,28 @@ import {
   Animated, PanResponder, Dimensions, Alert,
 } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
-// Icon helpers (no native SVG dependency)
-const Icon = ({ emoji, size = 16 }: { emoji: string; size?: number }) => (
-  <Text style={{ fontSize: size }}>{emoji}</Text>
-);
+// Clean text icon helper (no emoji, no SVG dependency)
+const iconMap: Record<string, { char: string; weight?: string }> = {
+  company: { char: '\u25A0', weight: '400' },   // small square
+  location: { char: '\u25CB', weight: '400' },   // circle
+  sparkle: { char: '\u2726', weight: '400' },     // four-pointed star
+  done: { char: '\u2713', weight: '700' },        // checkmark
+  reject: { char: '\u2715', weight: '700' },      // cross
+  waitlist: { char: '\u2013', weight: '700' },     // en dash
+  accept: { char: '\u2713', weight: '700' },       // checkmark
+  thumbsdown: { char: '\u2715', weight: '700' },
+  thumbsup: { char: '\u2713', weight: '700' },
+  hourglass: { char: '\u2014', weight: '700' },    // em dash
+};
+
+const Icon = ({ name, size = 16, color }: { name: string; size?: number; color?: string }) => {
+  const entry = iconMap[name] || { char: name, weight: '400' };
+  return (
+    <Text style={{ fontSize: size, color: color || colors.muted, fontWeight: (entry.weight as any) || '400' }}>
+      {entry.char}
+    </Text>
+  );
+};
 import { getSession, getApplicants, updateApplicantStatus } from '../../../lib/api';
 import { colors, getStatusColor } from '../../../lib/theme';
 import type { Session, Applicant } from '../../../lib/api';
@@ -146,14 +164,14 @@ function SwipeCard({
 
       {applicant.company && (
         <View style={cardStyles.infoRow}>
-          <Icon emoji="🏢" size={14} />
+          <Icon name="company" size={12} color={colors.muted} />
           <Text style={cardStyles.infoText} numberOfLines={1}>{applicant.company}</Text>
         </View>
       )}
 
       {applicant.location && (
         <View style={cardStyles.infoRow}>
-          <Icon emoji="📍" size={14} />
+          <Icon name="location" size={12} color={colors.muted} />
           <Text style={cardStyles.infoText} numberOfLines={1}>{applicant.location}</Text>
         </View>
       )}
@@ -170,7 +188,7 @@ function SwipeCard({
       {applicant.ai_reasoning && (
         <View style={cardStyles.reasoningBox}>
           <View style={cardStyles.reasoningHeader}>
-            <Icon emoji="✨" size={14} />
+            <Icon name="sparkle" size={13} color={colors.gold} />
             <Text style={cardStyles.reasoningLabel}>AI Assessment</Text>
           </View>
           <Text style={cardStyles.reasoningText} numberOfLines={6}>
@@ -339,7 +357,7 @@ export default function SessionDetailScreen() {
           </>
         ) : (
           <View style={styles.doneContainer}>
-            <Icon emoji="🎉" size={64} />
+            <Icon name="done" size={48} color={colors.gold} />
             <Text style={styles.doneText}>All reviewed!</Text>
             <Text style={styles.doneSubtext}>{applicants.length} applicants processed</Text>
             <TouchableOpacity style={styles.resetButton} onPress={() => setCurrentIndex(0)}>
@@ -353,15 +371,15 @@ export default function SessionDetailScreen() {
       {remaining > 0 && (
         <View style={styles.actions}>
           <TouchableOpacity style={[styles.actionBtn, styles.rejectBtn]} onPress={() => handleSwipe('rejected')}>
-            <Icon emoji="👎" size={28} />
+            <Icon name="reject" size={22} color={colors.error} />
             <Text style={[styles.actionLabel, { color: colors.error }]}>Reject</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.actionBtn, styles.waitlistBtn]} onPress={() => handleSwipe('waitlisted')}>
-            <Icon emoji="⏳" size={24} />
+            <Icon name="hourglass" size={20} color={colors.warning} />
             <Text style={[styles.actionLabel, { color: colors.warning }]}>Waitlist</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.actionBtn, styles.acceptBtn]} onPress={() => handleSwipe('accepted')}>
-            <Icon emoji="👍" size={28} />
+            <Icon name="accept" size={22} color={colors.success} />
             <Text style={[styles.actionLabel, { color: colors.success }]}>Accept</Text>
           </TouchableOpacity>
         </View>
