@@ -152,7 +152,7 @@ export default function SettingsScreen() {
         {/* API Key */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={{ fontSize: 18 }}>🔑</Text>
+            <Text style={{ fontSize: 15, fontWeight: '700', color: colors.gold }}>{'\u2022'}</Text>
             <Text style={styles.sectionTitle}>API Key</Text>
           </View>
           <Text style={styles.sectionDescription}>
@@ -174,7 +174,6 @@ export default function SettingsScreen() {
             disabled={saving}
             activeOpacity={0.7}
           >
-            <Text style={{ fontSize: 16 }}>💾</Text>
             <Text style={styles.saveButtonText}>Save API Key</Text>
           </TouchableOpacity>
         </View>
@@ -182,7 +181,7 @@ export default function SettingsScreen() {
         {/* Whitelist / Blacklist */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={{ fontSize: 18 }}>🛡️</Text>
+            <Text style={{ fontSize: 15, fontWeight: '700', color: colors.gold }}>{'\u2022'}</Text>
             <Text style={styles.sectionTitle}>Global Lists</Text>
           </View>
 
@@ -220,7 +219,6 @@ export default function SettingsScreen() {
             disabled={saving}
             activeOpacity={0.7}
           >
-            <Text style={{ fontSize: 16 }}>💾</Text>
             <Text style={styles.saveButtonText}>Save Lists</Text>
           </TouchableOpacity>
         </View>
@@ -231,11 +229,10 @@ export default function SettingsScreen() {
           onPress={handleSignOut}
           activeOpacity={0.7}
         >
-          <Text style={{ fontSize: 18 }}>🚪</Text>
           <Text style={styles.signOutText}>Sign Out</Text>
         </TouchableOpacity>
 
-        <View style={{ height: 40 }} />
+        <View style={{ height: 110 }} />
       </ScrollView>
     </KeyboardAvoidingView>
   );

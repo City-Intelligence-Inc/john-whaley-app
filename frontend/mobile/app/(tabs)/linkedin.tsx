@@ -53,7 +53,7 @@ export default function LinkedInScreen() {
   const renderProfile = ({ item }: { item: LinkedInProfile }) => (
     <View style={styles.profileCard}>
       <View style={styles.profileIcon}>
-        <Text style={{ fontSize: 18 }}>👤</Text>
+        <Text style={{ fontSize: 14, fontWeight: '600', color: colors.muted }}>{(item.name || '?')[0]?.toUpperCase()}</Text>
       </View>
       <View style={styles.profileContent}>
         <Text style={styles.profileName} numberOfLines={1}>
@@ -70,7 +70,7 @@ export default function LinkedInScreen() {
           </Text>
         ) : null}
       </View>
-      <Text style={{ fontSize: 14 }}>🔗</Text>
+      <Text style={{ fontSize: 16, color: colors.muted }}>{'\u203A'}</Text>
     </View>
   );
 
@@ -108,7 +108,7 @@ export default function LinkedInScreen() {
         ListHeaderComponent={
           <View style={styles.header}>
             <View style={styles.headerIcon}>
-              <Text style={{ fontSize: 20 }}>🗄️</Text>
+              <Text style={{ fontSize: 14, fontWeight: '700', color: colors.gold }}>LI</Text>
             </View>
             <View>
               <Text style={styles.headerTitle}>LinkedIn Database</Text>
@@ -120,7 +120,7 @@ export default function LinkedInScreen() {
         }
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Text style={{ fontSize: 48 }}>🔗</Text>
+            <Text style={{ fontSize: 28, fontWeight: '300', color: colors.muted }}>No profiles</Text>
             <Text style={styles.emptyText}>No profiles yet</Text>
             <Text style={styles.emptySubtext}>
               Profiles scraped from the web dashboard will appear here
@@ -145,7 +145,7 @@ const styles = StyleSheet.create({
     padding: 32,
   },
   list: {
-    paddingBottom: 32,
+    paddingBottom: 110,
   },
   header: {
     flexDirection: 'row',

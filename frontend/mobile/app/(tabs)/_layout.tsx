@@ -1,8 +1,6 @@
 import { Tabs } from 'expo-router';
 import { useAuth } from '@clerk/clerk-expo';
-import { Redirect } from 'expo-router';
-import { View, Text, StyleSheet, Platform } from 'react-native';
-import { BlurView } from 'expo-blur';
+import { View, Text, StyleSheet } from 'react-native';
 import { colors } from '../../lib/theme';
 
 // Custom tab bar icon components (no SVG/lucide dependencies)

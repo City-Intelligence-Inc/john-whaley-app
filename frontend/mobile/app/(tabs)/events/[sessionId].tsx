@@ -4,6 +4,10 @@ import {
   Animated, PanResponder, Dimensions, Alert,
 } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
+import { getSession, getApplicants, updateApplicantStatus } from '../../../lib/api';
+import { colors, getStatusColor } from '../../../lib/theme';
+import type { Session, Applicant } from '../../../lib/api';
+
 // Clean text icon helper (no emoji, no SVG dependency)
 const iconMap: Record<string, { char: string; weight?: string }> = {
   company: { char: '\u25A0', weight: '400' },   // small square
@@ -26,9 +30,6 @@ const Icon = ({ name, size = 16, color }: { name: string; size?: number; color?:
     </Text>
   );
 };
-import { getSession, getApplicants, updateApplicantStatus } from '../../../lib/api';
-import { colors, getStatusColor } from '../../../lib/theme';
-import type { Session, Applicant } from '../../../lib/api';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const SWIPE_THRESHOLD = SCREEN_WIDTH * 0.3;
