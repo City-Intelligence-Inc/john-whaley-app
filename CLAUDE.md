@@ -62,6 +62,24 @@ cd frontend/web-app && pnpm dev --port 3000
 - Profile photos are uploaded to S3 as base64 and stored as public URLs
 - The analysis pipeline merges global + per-event whitelist/blacklist before scoring
 
+## Deploying
+
+### Frontend (Vercel)
+Auto-deploys on push to `main`. Just commit and push:
+```bash
+git add <files>
+git commit -m "message"
+git push
+```
+
+### Backend (AWS App Runner)
+```bash
+# Build, push to ECR, and trigger App Runner deployment
+docker build --platform linux/amd64 -t 050451400186.dkr.ecr.us-east-1.amazonaws.com/john-whaley-backend:latest backend/
+docker push 050451400186.dkr.ecr.us-east-1.amazonaws.com/john-whaley-backend:latest
+aws apprunner start-deployment --service-arn arn:aws:apprunner:us-east-1:050451400186:service/john-whaley-backend/5c7bdf6d38694a539210c02dc242cf06 --region us-east-1
+```
+
 ## Deployed Backend
 
 - **App Runner URL:** `https://aicm3pweed.us-east-1.awsapprunner.com`
