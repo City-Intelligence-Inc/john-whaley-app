@@ -11,6 +11,10 @@ import {
   ShieldAlert,
   Pencil,
   Trash2,
+  Key,
+  Eye,
+  EyeOff,
+  Check,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -77,6 +81,13 @@ export default function GlobalSettingsPage() {
   });
   const [creatingPersona, setCreatingPersona] = useState(false);
 
+  /* ---- Luma API Key state ---- */
+  const [lumaKey, setLumaKey] = useState("");
+  const [hasLumaKey, setHasLumaKey] = useState(false);
+  const [loadingLumaKey, setLoadingLumaKey] = useState(true);
+  const [savingLumaKey, setSavingLumaKey] = useState(false);
+  const [showLumaKey, setShowLumaKey] = useState(false);
+
   /* ---- Global Whitelist / Blacklist state ---- */
   const [wlEmails, setWlEmails] = useState("");
   const [blEmails, setBlEmails] = useState("");
@@ -122,6 +133,18 @@ export default function GlobalSettingsPage() {
     }
   }, []);
 
+  const loadLumaKey = useCallback(async () => {
+    setLoadingLumaKey(true);
+    try {
+      const data = await api.getLumaKey();
+      setHasLumaKey(data.has_key);
+    } catch {
+      // ignore
+    } finally {
+      setLoadingLumaKey(false);
+    }
+  }, []);
+
   const loadLists = useCallback(async () => {
     setLoadingLists(true);
     try {
@@ -141,8 +164,9 @@ export default function GlobalSettingsPage() {
   useEffect(() => {
     loadPromptSettings();
     loadPersonas();
+    loadLumaKey();
     loadLists();
-  }, [loadPromptSettings, loadPersonas, loadLists]);
+  }, [loadPromptSettings, loadPersonas, loadLumaKey, loadLists]);
 
   /* ---------------------------------------------------------------- */
   /*  Helpers                                                          */
@@ -259,6 +283,25 @@ export default function GlobalSettingsPage() {
       toast.error("Failed to create persona");
     } finally {
       setCreatingPersona(false);
+    }
+  };
+
+  const saveLumaKey = async () => {
+    if (!lumaKey.trim()) {
+      toast.error("Please enter a Luma API key");
+      return;
+    }
+    setSavingLumaKey(true);
+    try {
+      await api.setLumaKey(lumaKey.trim());
+      setHasLumaKey(true);
+      setLumaKey("");
+      setShowLumaKey(false);
+      toast.success("Luma API key saved");
+    } catch {
+      toast.error("Failed to save Luma API key");
+    } finally {
+      setSavingLumaKey(false);
     }
   };
 
@@ -671,7 +714,101 @@ export default function GlobalSettingsPage() {
       </section>
 
       {/* ================================================================ */}
-      {/*  SECTION 3 — Global Whitelist & Blacklist                        */}
+      {/*  SECTION 3 — Luma API Key                                        */}
+      {/* ================================================================ */}
+
+      <section>
+        <div className="flex items-center gap-2 mb-5">
+          <div className="flex size-8 items-center justify-center rounded-lg bg-gold/10">
+            <Key className="size-4 text-gold" />
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">
+              Luma API Key
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              Required for importing events and syncing guest decisions with Luma.
+            </p>
+          </div>
+        </div>
+
+        {loadingLumaKey ? (
+          <div className="flex items-center justify-center py-16">
+            <Loader2 className="size-6 animate-spin text-gold" />
+          </div>
+        ) : (
+          <Card className="border-border/50 bg-card/50">
+            <CardContent className="pt-6 space-y-4">
+              {hasLumaKey && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5">
+                  <Check className="size-4 text-emerald-400" />
+                  <span className="text-sm text-emerald-400">
+                    API key is configured
+                  </span>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Label className="text-sm font-medium text-foreground">
+                  {hasLumaKey ? "Replace API Key" : "API Key"}
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Get your API key from your{" "}
+                  <a
+                    href="https://lu.ma/settings"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-gold hover:underline"
+                  >
+                    Luma dashboard
+                  </a>
+                  . Requires a Luma Plus subscription.
+                </p>
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <Input
+                      type={showLumaKey ? "text" : "password"}
+                      placeholder="luma-api-key-..."
+                      value={lumaKey}
+                      onChange={(e) => setLumaKey(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") saveLumaKey();
+                      }}
+                      className="bg-background border-border/50 focus-visible:ring-gold/40 text-sm font-mono pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowLumaKey(!showLumaKey)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      {showLumaKey ? (
+                        <EyeOff className="size-4" />
+                      ) : (
+                        <Eye className="size-4" />
+                      )}
+                    </button>
+                  </div>
+                  <Button
+                    onClick={saveLumaKey}
+                    disabled={savingLumaKey || !lumaKey.trim()}
+                    className="bg-gold hover:bg-gold/90 text-gold-foreground shrink-0"
+                  >
+                    {savingLumaKey ? (
+                      <Loader2 className="size-4 mr-2 animate-spin" />
+                    ) : (
+                      <Save className="size-4 mr-2" />
+                    )}
+                    Save
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </section>
+
+      {/* ================================================================ */}
+      {/*  SECTION 4 — Global Whitelist & Blacklist                        */}
       {/* ================================================================ */}
 
       <section>
