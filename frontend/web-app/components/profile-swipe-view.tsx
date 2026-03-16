@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Mail,
   Linkedin,
@@ -15,10 +15,11 @@ import {
   SkipForward,
   ExternalLink,
   Briefcase,
-  Info,
-  X,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  Keyboard,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -36,21 +37,40 @@ function getName(a: Applicant): string {
   return a.name || (a[`linkedin_name`] as string) || a.email || "No name";
 }
 
+function statusLabel(s: string) {
+  switch (s) {
+    case "accepted": return "Accepted";
+    case "rejected": return "Rejected";
+    case "waitlisted": return "Waitlisted";
+    default: return "Pending";
+  }
+}
+
+function statusDot(s: string) {
+  switch (s) {
+    case "accepted": return "bg-emerald-500";
+    case "rejected": return "bg-red-500";
+    case "waitlisted": return "bg-amber-500";
+    default: return "bg-blue-500";
+  }
+}
+
 export function ProfileSwipeView({
   applicants,
   statusFilter,
   sessionId,
   onStatusChange,
-  onSelectApplicant,
 }: ProfileSwipeViewProps) {
   const [index, setIndex] = useState(0);
-  const [showTutorial, setShowTutorial] = useState(true);
+  const [showKeys, setShowKeys] = useState(false);
+  const [animDir, setAnimDir] = useState<"left" | "right" | null>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
 
   // Whitelist / blacklist
-  const [whitelistEmails, setWhitelistEmails] = useState<Set<string>>(new Set());
-  const [blacklistEmails, setBlacklistEmails] = useState<Set<string>>(new Set());
-  const [whitelistUrls, setWhitelistUrls] = useState<Set<string>>(new Set());
-  const [blacklistUrls, setBlacklistUrls] = useState<Set<string>>(new Set());
+  const [wlEmails, setWlEmails] = useState<Set<string>>(new Set());
+  const [blEmails, setBlEmails] = useState<Set<string>>(new Set());
+  const [wlUrls, setWlUrls] = useState<Set<string>>(new Set());
+  const [blUrls, setBlUrls] = useState<Set<string>>(new Set());
 
   const loadLists = useCallback(async () => {
     try {
@@ -58,119 +78,82 @@ export function ProfileSwipeView({
         api.getSessionWhitelist(sessionId),
         api.getSessionBlacklist(sessionId),
       ]);
-      setWhitelistEmails(new Set((wl.emails || []).map((e: string) => e.toLowerCase())));
-      setBlacklistEmails(new Set((bl.emails || []).map((e: string) => e.toLowerCase())));
-      setWhitelistUrls(new Set((wl.linkedin_urls || []).map((u: string) => u.toLowerCase())));
-      setBlacklistUrls(new Set((bl.linkedin_urls || []).map((u: string) => u.toLowerCase())));
+      setWlEmails(new Set((wl.emails || []).map((e: string) => e.toLowerCase())));
+      setBlEmails(new Set((bl.emails || []).map((e: string) => e.toLowerCase())));
+      setWlUrls(new Set((wl.linkedin_urls || []).map((u: string) => u.toLowerCase())));
+      setBlUrls(new Set((bl.linkedin_urls || []).map((u: string) => u.toLowerCase())));
     } catch { /* ignore */ }
   }, [sessionId]);
 
   useEffect(() => { loadLists(); }, [loadLists]);
 
-  // Dismiss tutorial after first interaction or localStorage
-  useEffect(() => {
-    if (typeof window !== "undefined" && localStorage.getItem("swipe_tutorial_seen")) {
-      setShowTutorial(false);
-    }
-  }, []);
-
-  const dismissTutorial = () => {
-    setShowTutorial(false);
-    localStorage.setItem("swipe_tutorial_seen", "1");
-  };
-
-  const filtered = applicants.filter((a) => {
-    if (statusFilter !== "all" && a.status !== statusFilter) return false;
-    return true;
-  });
-
-  const sorted = [...filtered].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  const filtered = applicants.filter((a) => statusFilter === "all" || a.status === statusFilter);
+  const sorted = [...filtered].sort((a, b) => getName(a).localeCompare(getName(b)));
   const current = sorted[index];
 
-  const isWhitelisted = (a: Applicant) => {
-    const email = (a.email || "").toLowerCase();
-    const url = (a.linkedin_url || "").toLowerCase();
-    return (email && whitelistEmails.has(email)) || (url && whitelistUrls.has(url));
+  const isWl = (a: Applicant) => {
+    const e = (a.email || "").toLowerCase(), u = (a.linkedin_url || "").toLowerCase();
+    return (e && wlEmails.has(e)) || (u && wlUrls.has(u));
+  };
+  const isBl = (a: Applicant) => {
+    const e = (a.email || "").toLowerCase(), u = (a.linkedin_url || "").toLowerCase();
+    return (e && blEmails.has(e)) || (u && blUrls.has(u));
   };
 
-  const isBlacklisted = (a: Applicant) => {
-    const email = (a.email || "").toLowerCase();
-    const url = (a.linkedin_url || "").toLowerCase();
-    return (email && blacklistEmails.has(email)) || (url && blacklistUrls.has(url));
-  };
+  const advance = useCallback((dir: "left" | "right") => {
+    setAnimDir(dir);
+    setTimeout(() => {
+      if (index < sorted.length - 1) setIndex(index + 1);
+      setAnimDir(null);
+    }, 150);
+  }, [index, sorted.length]);
 
   const addToList = async (a: Applicant, list: "whitelist" | "blacklist") => {
-    const email = (a.email || "").toLowerCase();
-    const url = (a.linkedin_url || "").toLowerCase();
-
-    const newWlEmails = new Set(whitelistEmails);
-    const newWlUrls = new Set(whitelistUrls);
-    const newBlEmails = new Set(blacklistEmails);
-    const newBlUrls = new Set(blacklistUrls);
-
+    const email = (a.email || "").toLowerCase(), url = (a.linkedin_url || "").toLowerCase();
+    const nwE = new Set(wlEmails), nwU = new Set(wlUrls), nbE = new Set(blEmails), nbU = new Set(blUrls);
     if (list === "whitelist") {
-      if (email) { newWlEmails.add(email); newBlEmails.delete(email); }
-      if (url) { newWlUrls.add(url); newBlUrls.delete(url); }
+      if (email) { nwE.add(email); nbE.delete(email); }
+      if (url) { nwU.add(url); nbU.delete(url); }
     } else {
-      if (email) { newBlEmails.add(email); newWlEmails.delete(email); }
-      if (url) { newBlUrls.add(url); newWlUrls.delete(url); }
+      if (email) { nbE.add(email); nwE.delete(email); }
+      if (url) { nbU.add(url); nwU.delete(url); }
     }
-
-    setWhitelistEmails(newWlEmails);
-    setWhitelistUrls(newWlUrls);
-    setBlacklistEmails(newBlEmails);
-    setBlacklistUrls(newBlUrls);
-
+    setWlEmails(nwE); setWlUrls(nwU); setBlEmails(nbE); setBlUrls(nbU);
     try {
       await Promise.all([
-        api.updateSessionWhitelist(sessionId, { emails: [...newWlEmails], linkedin_urls: [...newWlUrls] }),
-        api.updateSessionBlacklist(sessionId, { emails: [...newBlEmails], linkedin_urls: [...newBlUrls] }),
+        api.updateSessionWhitelist(sessionId, { emails: [...nwE], linkedin_urls: [...nwU] }),
+        api.updateSessionBlacklist(sessionId, { emails: [...nbE], linkedin_urls: [...nbU] }),
       ]);
-      toast.success(
-        list === "whitelist"
-          ? `Whitelisted ${getName(a)}`
-          : `Blacklisted ${getName(a)}`
-      );
-    } catch {
-      toast.error("Failed to update list");
-      loadLists();
-    }
-
-    // Auto-advance
-    if (index < sorted.length - 1) setIndex(index + 1);
+    } catch { toast.error("Failed to update list"); loadLists(); }
+    advance(list === "whitelist" ? "right" : "left");
   };
 
-  const skip = () => {
-    if (index < sorted.length - 1) setIndex(index + 1);
-  };
+  const handleAccept = (a: Applicant) => { onStatusChange(a.applicant_id, "accepted"); advance("right"); };
+  const handleReject = (a: Applicant) => { onStatusChange(a.applicant_id, "rejected"); advance("left"); };
+  const handlePass = () => advance("right");
 
-  // Keyboard shortcuts
+  // Keyboard
   useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => {
-      if (!current || showTutorial) return;
-      if (e.key === "ArrowRight" || e.key === "d") {
-        addToList(current, "whitelist");
-      } else if (e.key === "ArrowLeft" || e.key === "a") {
-        addToList(current, "blacklist");
-      } else if (e.key === "ArrowDown" || e.key === "s" || e.key === " ") {
-        e.preventDefault();
-        skip();
-      } else if (e.key === "ArrowUp" || e.key === "w") {
-        if (index > 0) setIndex(index - 1);
+    const h = (e: KeyboardEvent) => {
+      if (!current) return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      switch (e.key) {
+        case "ArrowRight": case "d": handleAccept(current); break;
+        case "ArrowLeft": case "a": handleReject(current); break;
+        case " ": case "s": case "ArrowDown": e.preventDefault(); handlePass(); break;
+        case "ArrowUp": case "w": if (index > 0) setIndex(index - 1); break;
+        case "e": addToList(current, "whitelist"); break;
+        case "q": addToList(current, "blacklist"); break;
       }
     };
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
   });
 
   if (sorted.length === 0) {
-    return (
-      <div className="text-center py-16 text-sm text-muted-foreground">
-        No profiles to review with the current filter.
-      </div>
-    );
+    return <div className="text-center py-16 text-sm text-muted-foreground">No profiles to review.</div>;
   }
-
   if (!current) return null;
 
   const photo = (current[`linkedin_image`] as string) || (current[`photo_url`] as string) || "";
@@ -180,243 +163,228 @@ export function ProfileSwipeView({
   const education = (current[`linkedin_education`] as string) || "";
   const company = current.company || (current[`linkedin_company`] as string) || "";
   const location = current.location || (current[`linkedin_location`] as string) || "";
-  const wl = isWhitelisted(current);
-  const bl = isBlacklisted(current);
-
-  const wlCount = sorted.filter(isWhitelisted).length;
-  const blCount = sorted.filter(isBlacklisted).length;
+  const score = current.ai_score ? parseInt(current.ai_score) : 0;
+  const wl = isWl(current), bl = isBl(current);
+  const wlCount = sorted.filter(isWl).length, blCount = sorted.filter(isBl).length;
+  const acceptedCount = sorted.filter((a) => a.status === "accepted").length;
+  const rejectedCount = sorted.filter((a) => a.status === "rejected").length;
+  const hasContent = !!(about || experience || education);
 
   return (
-    <div className="flex flex-col items-center gap-4">
-      {/* Tutorial overlay */}
-      {showTutorial && (
-        <div className="w-full max-w-xl rounded-xl border border-gold/30 bg-gold/5 p-5 relative">
-          <button
-            onClick={dismissTutorial}
-            className="absolute top-3 right-3 p-1 rounded-md hover:bg-muted text-muted-foreground"
-          >
-            <X className="size-4" />
+    <div className="flex gap-6 items-start">
+      {/* ── Main card area ── */}
+      <div className="flex-1 flex flex-col items-center gap-3 max-w-2xl mx-auto">
+        {/* Progress */}
+        <div className="w-full flex items-center gap-3 text-xs text-muted-foreground">
+          <span className="tabular-nums font-medium">{index + 1}/{sorted.length}</span>
+          <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+            <div className="h-full bg-gold rounded-full transition-all" style={{ width: `${((index + 1) / sorted.length) * 100}%` }} />
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="flex items-center gap-1 text-emerald-500"><CheckCircle2 className="size-3" />{acceptedCount}</span>
+            <span className="flex items-center gap-1 text-red-500"><XCircle className="size-3" />{rejectedCount}</span>
+            {wlCount > 0 && <span className="flex items-center gap-1 text-emerald-400"><ShieldCheck className="size-3" />{wlCount}</span>}
+            {blCount > 0 && <span className="flex items-center gap-1 text-red-400"><ShieldAlert className="size-3" />{blCount}</span>}
+          </div>
+          <button onClick={() => setShowKeys(!showKeys)} className="p-1 rounded hover:bg-muted" title="Keyboard shortcuts">
+            <Keyboard className="size-3.5" />
           </button>
-          <div className="flex items-start gap-3">
-            <Info className="size-5 text-gold shrink-0 mt-0.5" />
-            <div className="space-y-2 text-sm">
-              <p className="font-medium text-foreground">Review profiles one at a time</p>
-              <div className="text-muted-foreground space-y-1">
-                <p>Go through each attendee and decide who gets priority access:</p>
-                <div className="grid grid-cols-2 gap-2 mt-2">
-                  <div className="flex items-center gap-2">
-                    <ShieldCheck className="size-4 text-emerald-500" />
-                    <span><strong>Whitelist</strong> = auto-accept in analysis</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <ShieldAlert className="size-4 text-red-500" />
-                    <span><strong>Blacklist</strong> = auto-reject in analysis</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <SkipForward className="size-4 text-muted-foreground" />
-                    <span><strong>Skip</strong> = let AI decide</span>
-                  </div>
+        </div>
+
+        {/* Keyboard hint */}
+        {showKeys && (
+          <div className="w-full text-xs text-muted-foreground bg-muted/50 rounded-lg px-4 py-2 flex flex-wrap gap-x-4 gap-y-1">
+            <span><kbd className="px-1 py-0.5 rounded bg-muted font-mono text-[10px]">D</kbd> / <kbd className="px-1 py-0.5 rounded bg-muted font-mono text-[10px]">&rarr;</kbd> Accept</span>
+            <span><kbd className="px-1 py-0.5 rounded bg-muted font-mono text-[10px]">A</kbd> / <kbd className="px-1 py-0.5 rounded bg-muted font-mono text-[10px]">&larr;</kbd> Reject</span>
+            <span><kbd className="px-1 py-0.5 rounded bg-muted font-mono text-[10px]">Space</kbd> / <kbd className="px-1 py-0.5 rounded bg-muted font-mono text-[10px]">S</kbd> Pass</span>
+            <span><kbd className="px-1 py-0.5 rounded bg-muted font-mono text-[10px]">E</kbd> Whitelist</span>
+            <span><kbd className="px-1 py-0.5 rounded bg-muted font-mono text-[10px]">Q</kbd> Blacklist</span>
+            <span><kbd className="px-1 py-0.5 rounded bg-muted font-mono text-[10px]">W</kbd> / <kbd className="px-1 py-0.5 rounded bg-muted font-mono text-[10px]">&uarr;</kbd> Back</span>
+          </div>
+        )}
+
+        {/* Card */}
+        <div
+          ref={cardRef}
+          className={`w-full rounded-2xl border bg-card overflow-hidden transition-all duration-150 ${
+            animDir === "left" ? "-translate-x-4 opacity-50" :
+            animDir === "right" ? "translate-x-4 opacity-50" : ""
+          } ${
+            wl ? "ring-2 ring-emerald-500/30 border-emerald-500/20" :
+            bl ? "ring-2 ring-red-500/30 border-red-500/20" :
+            "border-border/50"
+          }`}
+        >
+          {/* Profile header */}
+          <div className="p-5">
+            <div className="flex items-start gap-4">
+              {photo ? (
+                <img src={photo} alt="" className="size-16 rounded-xl object-cover shrink-0" />
+              ) : (
+                <div className="size-16 rounded-xl bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center shrink-0 text-2xl font-bold text-muted-foreground/60">
+                  {getName(current).charAt(0).toUpperCase()}
                 </div>
-                <p className="text-xs mt-2 text-muted-foreground/70">
-                  Keyboard: <kbd className="px-1 py-0.5 rounded bg-muted text-[10px]">D</kbd> or <kbd className="px-1 py-0.5 rounded bg-muted text-[10px]">→</kbd> whitelist
-                  {" "}<kbd className="px-1 py-0.5 rounded bg-muted text-[10px]">A</kbd> or <kbd className="px-1 py-0.5 rounded bg-muted text-[10px]">←</kbd> blacklist
-                  {" "}<kbd className="px-1 py-0.5 rounded bg-muted text-[10px]">S</kbd> or <kbd className="px-1 py-0.5 rounded bg-muted text-[10px]">Space</kbd> skip
-                  {" "}<kbd className="px-1 py-0.5 rounded bg-muted text-[10px]">W</kbd> or <kbd className="px-1 py-0.5 rounded bg-muted text-[10px]">↑</kbd> go back
+              )}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-bold text-foreground truncate">{getName(current)}</h2>
+                  {score > 0 && (
+                    <span className={`text-lg font-bold tabular-nums ${score >= 70 ? "text-emerald-500" : score >= 40 ? "text-amber-500" : "text-red-500"}`}>{score}</span>
+                  )}
+                </div>
+                {headline && <p className="text-sm text-muted-foreground mt-0.5 line-clamp-2">{headline}</p>}
+
+                {/* Status + list badges */}
+                <div className="flex items-center gap-2 mt-2 flex-wrap">
+                  <span className="flex items-center gap-1.5 text-xs">
+                    <span className={`size-2 rounded-full ${statusDot(current.status)}`} />
+                    {statusLabel(current.status)}
+                  </span>
+                  {wl && <Badge className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20 text-[10px]"><ShieldCheck className="size-2.5 mr-0.5" />WL</Badge>}
+                  {bl && <Badge className="bg-red-500/10 text-red-500 border-red-500/20 text-[10px]"><ShieldAlert className="size-2.5 mr-0.5" />BL</Badge>}
+                  {current.attendee_type && <Badge variant="outline" className="text-[10px]">{current.attendee_type_detail || current.attendee_type}</Badge>}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Info chips */}
+          <div className="px-5 pb-3 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
+            {company && <span className="flex items-center gap-1"><Building2 className="size-3" />{company}</span>}
+            {location && <span className="flex items-center gap-1"><MapPin className="size-3" />{location}</span>}
+            {current.email && <a href={`mailto:${current.email}`} className="flex items-center gap-1 hover:text-foreground"><Mail className="size-3" />{current.email}</a>}
+            {current.linkedin_url && <a href={current.linkedin_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-blue-500 hover:text-blue-400"><Linkedin className="size-3" />Profile<ExternalLink className="size-2.5" /></a>}
+          </div>
+
+          {/* Content sections */}
+          {hasContent && (
+            <div className="px-5 pb-4 space-y-3 border-t border-border/30 pt-3">
+              {about && (
+                <div>
+                  <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1">About</h4>
+                  <p className="text-sm text-foreground/80 leading-relaxed">{about}</p>
+                </div>
+              )}
+              {experience && (
+                <div>
+                  <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1 flex items-center gap-1"><Briefcase className="size-3" />Experience</h4>
+                  <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-line line-clamp-6">{experience}</p>
+                </div>
+              )}
+              {education && (
+                <div>
+                  <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1 flex items-center gap-1"><GraduationCap className="size-3" />Education</h4>
+                  <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-line line-clamp-3">{education}</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* No data message */}
+          {!hasContent && !headline && !company && (
+            <div className="px-5 pb-4 text-xs text-muted-foreground/50 italic">
+              No LinkedIn profile data available. Run LinkedIn enrichment to populate.
+            </div>
+          )}
+
+          {/* AI reasoning */}
+          {current.ai_reasoning && (
+            <div className="px-5 pb-4">
+              <div className="rounded-lg bg-gold/5 border border-gold/10 p-3">
+                <p className="text-sm text-foreground/80 flex items-start gap-2">
+                  <Sparkles className="size-4 mt-0.5 shrink-0 text-gold" />
+                  {current.ai_reasoning}
                 </p>
               </div>
             </div>
+          )}
+
+          {/* ── Primary actions: Accept / Pass / Reject ── */}
+          <div className="border-t border-border/50 p-3 flex items-center gap-2">
+            <button
+              onClick={() => handleReject(current)}
+              className="flex-1 h-11 rounded-xl flex items-center justify-center gap-2 text-sm font-medium border border-red-500/20 text-red-500 hover:bg-red-500/10 transition-colors"
+            >
+              <XCircle className="size-4" /> Reject
+            </button>
+            <button
+              onClick={handlePass}
+              className="flex-1 h-11 rounded-xl flex items-center justify-center gap-2 text-sm font-medium border border-border/50 text-muted-foreground hover:bg-muted/50 transition-colors"
+            >
+              <SkipForward className="size-4" /> Pass
+            </button>
+            <button
+              onClick={() => handleAccept(current)}
+              className="flex-1 h-11 rounded-xl flex items-center justify-center gap-2 text-sm font-medium border border-emerald-500/20 text-emerald-500 hover:bg-emerald-500/10 transition-colors"
+            >
+              <CheckCircle2 className="size-4" /> Accept
+            </button>
+          </div>
+
+          {/* ── Secondary: Whitelist / Blacklist ── */}
+          <div className="px-3 pb-3 flex items-center gap-2">
+            <button
+              onClick={() => addToList(current, "blacklist")}
+              className={`flex-1 h-8 rounded-lg flex items-center justify-center gap-1.5 text-xs font-medium transition-colors ${
+                bl ? "bg-red-600 text-white" : "text-muted-foreground hover:text-red-500 hover:bg-red-500/5"
+              }`}
+            >
+              <ShieldAlert className="size-3" />{bl ? "Blacklisted" : "Blacklist"}
+            </button>
+            <button
+              onClick={() => addToList(current, "whitelist")}
+              className={`flex-1 h-8 rounded-lg flex items-center justify-center gap-1.5 text-xs font-medium transition-colors ${
+                wl ? "bg-emerald-600 text-white" : "text-muted-foreground hover:text-emerald-500 hover:bg-emerald-500/5"
+              }`}
+            >
+              <ShieldCheck className="size-3" />{wl ? "Whitelisted" : "Whitelist"}
+            </button>
           </div>
         </div>
-      )}
 
-      {/* Progress bar */}
-      <div className="w-full max-w-xl flex items-center gap-3 text-xs text-muted-foreground">
-        <span className="tabular-nums font-medium">{index + 1} / {sorted.length}</span>
-        <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
-          <div
-            className="h-full bg-gold rounded-full transition-all"
-            style={{ width: `${((index + 1) / sorted.length) * 100}%` }}
-          />
-        </div>
-        <div className="flex items-center gap-3">
-          {wlCount > 0 && (
-            <span className="flex items-center gap-1 text-emerald-500">
-              <ShieldCheck className="size-3" />{wlCount}
-            </span>
-          )}
-          {blCount > 0 && (
-            <span className="flex items-center gap-1 text-red-500">
-              <ShieldAlert className="size-3" />{blCount}
-            </span>
-          )}
+        {/* Nav */}
+        <div className="flex items-center gap-4">
+          <button disabled={index === 0} onClick={() => setIndex(index - 1)}
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors">
+            <ChevronLeft className="size-4" />Prev
+          </button>
+          <button disabled={index >= sorted.length - 1} onClick={() => setIndex(index + 1)}
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors">
+            Next<ChevronRight className="size-4" />
+          </button>
         </div>
       </div>
 
-      {/* Card */}
-      <div className={`w-full max-w-xl rounded-2xl border bg-card/80 overflow-hidden transition-all ${
-        wl ? "ring-2 ring-emerald-500/40 border-emerald-500/30" :
-        bl ? "ring-2 ring-red-500/40 border-red-500/30" :
-        "border-border/50"
-      }`}>
-        {/* Header */}
-        <div className="p-6 pb-4">
-          <div className="flex items-start gap-4">
-            {photo ? (
-              <img
-                src={photo}
-                alt=""
-                className="size-20 rounded-xl object-cover shrink-0 ring-2 ring-border/50"
-              />
-            ) : (
-              <div className="size-20 rounded-xl bg-muted flex items-center justify-center shrink-0 text-2xl font-bold text-muted-foreground">
-                {getName(current).charAt(0).toUpperCase()}
-              </div>
-            )}
-            <div className="flex-1 min-w-0">
-              <h2 className="text-xl font-bold text-foreground truncate">
-                {getName(current)}
-              </h2>
-              {headline && (
-                <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{headline}</p>
+      {/* ── Mini sidebar list (desktop) ── */}
+      <div className="hidden lg:block w-56 shrink-0 space-y-1 max-h-[calc(100vh-200px)] overflow-y-auto rounded-xl border border-border/50 p-2">
+        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest px-2 py-1">All Guests</p>
+        {sorted.map((a, i) => {
+          const active = i === index;
+          const photo = (a[`linkedin_image`] as string) || "";
+          return (
+            <button
+              key={a.applicant_id}
+              onClick={() => setIndex(i)}
+              className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left transition-colors ${
+                active ? "bg-gold/10" : "hover:bg-muted/50"
+              }`}
+            >
+              {photo ? (
+                <img src={photo} alt="" className="size-6 rounded-full object-cover shrink-0" />
+              ) : (
+                <div className="size-6 rounded-full bg-muted flex items-center justify-center shrink-0 text-[10px] font-medium text-muted-foreground">
+                  {getName(a).charAt(0).toUpperCase()}
+                </div>
               )}
-              <div className="flex items-center gap-3 mt-2 flex-wrap">
-                {wl && (
-                  <Badge className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20">
-                    <ShieldCheck className="size-3 mr-1" /> Whitelisted
-                  </Badge>
-                )}
-                {bl && (
-                  <Badge className="bg-red-500/10 text-red-500 border-red-500/20">
-                    <ShieldAlert className="size-3 mr-1" /> Blacklisted
-                  </Badge>
-                )}
-                {current.attendee_type && (
-                  <Badge variant="outline" className="text-xs">
-                    {current.attendee_type_detail || current.attendee_type}
-                  </Badge>
-                )}
+              <div className="flex-1 min-w-0">
+                <p className={`text-xs truncate ${active ? "font-medium text-foreground" : "text-muted-foreground"}`}>
+                  {getName(a)}
+                </p>
               </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Details */}
-        <div className="px-6 pb-4 space-y-3">
-          {/* Info chips */}
-          <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
-            {company && (
-              <span className="flex items-center gap-1.5">
-                <Building2 className="size-3.5" />{company}
-              </span>
-            )}
-            {location && (
-              <span className="flex items-center gap-1.5">
-                <MapPin className="size-3.5" />{location}
-              </span>
-            )}
-            {current.email && (
-              <a href={`mailto:${current.email}`} className="flex items-center gap-1.5 hover:text-foreground">
-                <Mail className="size-3.5" />{current.email}
-              </a>
-            )}
-            {current.linkedin_url && (
-              <a href={current.linkedin_url} target="_blank" rel="noopener noreferrer"
-                className="flex items-center gap-1.5 text-blue-500 hover:text-blue-400">
-                <Linkedin className="size-3.5" />LinkedIn <ExternalLink className="size-3" />
-              </a>
-            )}
-          </div>
-
-          {/* About */}
-          {about && (
-            <div>
-              <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">About</h4>
-              <p className="text-sm text-foreground/80 leading-relaxed line-clamp-4">{about}</p>
-            </div>
-          )}
-
-          {/* Experience */}
-          {experience && (
-            <div>
-              <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1">
-                <Briefcase className="size-3" /> Experience
-              </h4>
-              <p className="text-sm text-foreground/80 leading-relaxed line-clamp-4 whitespace-pre-line">{experience}</p>
-            </div>
-          )}
-
-          {/* Education */}
-          {education && (
-            <div>
-              <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1">
-                <GraduationCap className="size-3" /> Education
-              </h4>
-              <p className="text-sm text-foreground/80 leading-relaxed line-clamp-2 whitespace-pre-line">{education}</p>
-            </div>
-          )}
-
-          {/* AI reasoning if exists */}
-          {current.ai_reasoning && (
-            <div className="rounded-lg bg-muted/50 p-3">
-              <p className="text-sm text-muted-foreground flex items-start gap-2">
-                <Sparkles className="size-4 mt-0.5 shrink-0 text-gold" />
-                {current.ai_reasoning}
-              </p>
-            </div>
-          )}
-        </div>
-
-        {/* Action buttons */}
-        <div className="border-t border-border/50 p-4 flex items-center gap-3">
-          <Button
-            onClick={() => addToList(current, "blacklist")}
-            variant={bl ? "default" : "outline"}
-            className={`flex-1 h-12 text-base ${bl ? "bg-red-600 hover:bg-red-700 text-white" : "border-red-500/30 text-red-500 hover:bg-red-500/10"}`}
-          >
-            <ShieldAlert className="size-5 mr-2" />
-            Blacklist
-          </Button>
-
-          <Button
-            onClick={skip}
-            variant="outline"
-            className="h-12 px-6 text-base border-border/50"
-          >
-            <SkipForward className="size-5 mr-1" />
-            Skip
-          </Button>
-
-          <Button
-            onClick={() => addToList(current, "whitelist")}
-            variant={wl ? "default" : "outline"}
-            className={`flex-1 h-12 text-base ${wl ? "bg-emerald-600 hover:bg-emerald-700 text-white" : "border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/10"}`}
-          >
-            <ShieldCheck className="size-5 mr-2" />
-            Whitelist
-          </Button>
-        </div>
-      </div>
-
-      {/* Navigation */}
-      <div className="flex items-center gap-2">
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={index === 0}
-          onClick={() => setIndex(index - 1)}
-          className="text-muted-foreground"
-        >
-          <ChevronLeft className="size-4 mr-1" /> Previous
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={index >= sorted.length - 1}
-          onClick={() => setIndex(index + 1)}
-          className="text-muted-foreground"
-        >
-          Next <ChevronRight className="size-4 ml-1" />
-        </Button>
+              <span className={`size-2 rounded-full shrink-0 ${statusDot(a.status)}`} />
+            </button>
+          );
+        })}
       </div>
     </div>
   );
