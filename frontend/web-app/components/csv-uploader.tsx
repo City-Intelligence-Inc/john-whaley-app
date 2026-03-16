@@ -1,108 +1,100 @@
 "use client";
 
 import { useState, useCallback, useRef } from "react";
-import { Upload, FileText, X } from "lucide-react";
+import { Upload, FileText, X, Loader2, Check } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { api } from "@/lib/api";
 
-export function CSVUploader({ onUploadSuccess, sessionId }: { onUploadSuccess?: (count: number, sessionId: string) => void; sessionId?: string } = {}) {
+// Only show these columns in preview (in order)
+const PREVIEW_COLS = ["name", "email", "linkedin_url", "status", "company", "title"];
+const COL_LABELS: Record<string, string> = {
+  name: "Name", email: "Email", linkedin_url: "LinkedIn",
+  status: "Status", company: "Company", title: "Title",
+};
+
+function normalizeHeader(h: string): string {
+  const low = h.trim().toLowerCase().replace(/\s+/g, "_");
+  if (low === "full_name" || low === "attendee" || low === "candidate") return "name";
+  if (low.includes("linkedin")) return "linkedin_url";
+  if (low === "approval_status" || low === "rsvp_status") return "status";
+  return low;
+}
+
+export function CSVUploader({ onUploadSuccess, sessionId }: {
+  onUploadSuccess?: (count: number, sessionId: string) => void;
+  sessionId?: string;
+}) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<Record<string, string>[]>([]);
-  const [headers, setHeaders] = useState<string[]>([]);
+  const [totalRows, setTotalRows] = useState(0);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const parseLine = (line: string): string[] => {
+    const result: string[] = [];
+    let current = "";
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') inQuotes = !inQuotes;
+      else if (c === "," && !inQuotes) { result.push(current.trim()); current = ""; }
+      else current += c;
+    }
+    result.push(current.trim());
+    return result;
+  };
+
   const parseCSV = useCallback((text: string) => {
-    // Strip BOM and normalize line endings
     const cleaned = text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
     const lines = cleaned.split("\n").filter((l) => l.trim());
-    if (lines.length === 0) return;
+    if (lines.length < 2) return;
 
-    // Simple CSV parsing — handles quoted fields
-    const parseLine = (line: string): string[] => {
-      const result: string[] = [];
-      let current = "";
-      let inQuotes = false;
-      for (let i = 0; i < line.length; i++) {
-        const char = line[i];
-        if (char === '"') {
-          inQuotes = !inQuotes;
-        } else if (char === "," && !inQuotes) {
-          result.push(current.trim());
-          current = "";
-        } else {
-          current += char;
-        }
-      }
-      result.push(current.trim());
-      return result;
-    };
+    const rawHeaders = parseLine(lines[0]);
+    const headers = rawHeaders.map(normalizeHeader);
+    setTotalRows(lines.length - 1);
 
-    const hdrs = parseLine(lines[0]);
-    setHeaders(hdrs);
-
+    // Auto-detect linkedin URL in values for columns not caught by header normalization
     const rows = lines.slice(1, 6).map((line) => {
       const values = parseLine(line);
       const row: Record<string, string> = {};
-      hdrs.forEach((h, i) => {
-        row[h] = values[i] || "";
+      headers.forEach((h, i) => {
+        const val = values[i] || "";
+        if (h === "linkedin_url" || val.includes("linkedin.com/")) {
+          row["linkedin_url"] = val;
+        }
+        row[h] = val;
       });
+      // Build name from first_name + last_name if missing
+      if (!row["name"] && (row["first_name"] || row["last_name"])) {
+        row["name"] = `${row["first_name"] || ""} ${row["last_name"] || ""}`.trim();
+      }
       return row;
     });
     setPreview(rows);
   }, []);
 
-  const handleFile = useCallback(
-    (f: File) => {
-      console.log("[CSVUploader] File selected:", f.name, f.size, "bytes");
-      if (!f.name.endsWith(".csv")) {
-        toast.error("Please select a CSV file");
-        return;
-      }
-      setFile(f);
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const text = e.target?.result as string;
-        parseCSV(text);
-      };
-      reader.readAsText(f);
-    },
-    [parseCSV]
-  );
-
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      console.log("[CSVUploader] File dropped");
-      e.preventDefault();
-      setDragOver(false);
-      const f = e.dataTransfer.files[0];
-      if (f) handleFile(f);
-    },
-    [handleFile]
-  );
+  const handleFile = useCallback((f: File) => {
+    if (!f.name.endsWith(".csv")) { toast.error("Please select a CSV file"); return; }
+    setFile(f);
+    const reader = new FileReader();
+    reader.onload = (e) => parseCSV(e.target?.result as string);
+    reader.readAsText(f);
+  }, [parseCSV]);
 
   const handleUpload = async () => {
-    console.log("[CSVUploader] Upload CSV clicked:", file?.name);
     if (!file) return;
     setUploading(true);
     try {
       const result = await api.uploadCSV(file, sessionId);
-      toast.success(`Uploaded ${result.count} applicants`);
+      const enrichMsg = (result as Record<string, unknown>).enriched
+        ? ` (${(result as Record<string, unknown>).enriched} enriched from LinkedIn DB)`
+        : "";
+      toast.success(`Imported ${result.count} guests${enrichMsg}`);
       onUploadSuccess?.(result.count, result.session_id);
       setFile(null);
       setPreview([]);
-      setHeaders([]);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Upload failed");
     } finally {
@@ -110,109 +102,95 @@ export function CSVUploader({ onUploadSuccess, sessionId }: { onUploadSuccess?: 
     }
   };
 
+  // Which preview columns actually have data?
+  const visibleCols = PREVIEW_COLS.filter((col) =>
+    preview.some((row) => row[col] && row[col].trim())
+  );
+
   return (
-    <div className="space-y-6">
-      <Card
-        className={`border-2 border-dashed transition-colors ${
-          dragOver ? "border-primary bg-primary/5" : "border-muted-foreground/25"
-        }`}
-      >
-        <CardContent
-          className="flex flex-col items-center justify-center py-12 cursor-pointer"
-          onClick={() => { console.log("[CSVUploader] Drop zone clicked, opening file picker"); inputRef.current?.click(); }}
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDragOver(true);
-          }}
+    <div className="space-y-4">
+      {!file ? (
+        <div
+          className={`flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-8 cursor-pointer transition-colors ${
+            dragOver ? "border-gold bg-gold/5" : "border-border/50 hover:border-gold/30 hover:bg-gold/5"
+          }`}
+          onClick={() => inputRef.current?.click()}
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
           onDragLeave={() => setDragOver(false)}
-          onDrop={handleDrop}
+          onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
         >
-          <Upload className="size-10 text-muted-foreground mb-4" />
-          <p className="text-sm font-medium mb-1">
-            Drag and drop your CSV file here
-          </p>
-          <p className="text-xs text-muted-foreground">
-            or click to browse files
-          </p>
-          <input
-            ref={inputRef}
-            type="file"
-            accept=".csv"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) handleFile(f);
-            }}
-          />
-        </CardContent>
-      </Card>
-
-      {file && (
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <FileText className="size-4 text-muted-foreground" />
-                <span className="text-sm font-medium">{file.name}</span>
-                <span className="text-xs text-muted-foreground">
-                  ({(file.size / 1024).toFixed(1)} KB)
-                </span>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => {
-                  console.log("[CSVUploader] Clear file clicked");
-                  setFile(null);
-                  setPreview([]);
-                  setHeaders([]);
-                }}
-              >
-                <X className="size-4" />
-              </Button>
+          <Upload className="size-8 text-muted-foreground mb-3" />
+          <p className="text-sm font-medium">Drop a CSV file here or click to browse</p>
+          <p className="text-xs text-muted-foreground mt-1">Luma exports, spreadsheets, or any CSV with names and emails</p>
+          <input ref={inputRef} type="file" accept=".csv" className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+        </div>
+      ) : (
+        <div className="rounded-xl border border-border/50 bg-card/50 overflow-hidden">
+          {/* File header */}
+          <div className="flex items-center justify-between px-4 py-3 border-b border-border/50">
+            <div className="flex items-center gap-2">
+              <FileText className="size-4 text-gold" />
+              <span className="text-sm font-medium">{file.name}</span>
+              <span className="text-xs text-muted-foreground">
+                {totalRows} {totalRows === 1 ? "row" : "rows"}
+              </span>
             </div>
+            <button onClick={() => { setFile(null); setPreview([]); }}
+              className="p-1 rounded hover:bg-muted text-muted-foreground">
+              <X className="size-4" />
+            </button>
+          </div>
 
-            {preview.length > 0 && (
-              <>
-                <p className="text-xs text-muted-foreground mb-2">
-                  Preview (first {preview.length} rows)
-                </p>
-                <div className="rounded-md border overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        {headers.map((h, idx) => (
-                          <TableHead key={idx} className="whitespace-nowrap">
-                            {h}
-                          </TableHead>
-                        ))}
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {preview.map((row, i) => (
-                        <TableRow key={i}>
-                          {headers.map((h, idx) => (
-                            <TableCell key={idx} className="whitespace-nowrap">
-                              {row[h]}
-                            </TableCell>
-                          ))}
-                        </TableRow>
+          {/* Clean preview - only key columns */}
+          {preview.length > 0 && visibleCols.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border/50 bg-muted/30">
+                    {visibleCols.map((col) => (
+                      <th key={col} className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">
+                        {COL_LABELS[col] || col}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.map((row, i) => (
+                    <tr key={i} className="border-b border-border/30 last:border-0">
+                      {visibleCols.map((col) => (
+                        <td key={col} className="px-4 py-2 text-sm truncate max-w-[200px]">
+                          {col === "linkedin_url" && row[col] ? (
+                            <span className="text-blue-500 text-xs">{row[col].replace(/https?:\/\/(www\.)?linkedin\.com\/in\//, "")}</span>
+                          ) : (
+                            row[col] || <span className="text-muted-foreground/30">--</span>
+                          )}
+                        </td>
                       ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              </>
-            )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {totalRows > 5 && (
+                <p className="px-4 py-2 text-xs text-muted-foreground border-t border-border/30">
+                  + {totalRows - 5} more rows
+                </p>
+              )}
+            </div>
+          )}
 
-            <Button
-              className="mt-4 w-full"
-              onClick={handleUpload}
-              disabled={uploading}
-            >
-              {uploading ? "Uploading..." : "Upload CSV"}
+          {/* Upload button */}
+          <div className="px-4 py-3 border-t border-border/50">
+            <Button onClick={handleUpload} disabled={uploading}
+              className="w-full bg-gold hover:bg-gold/90 text-gold-foreground">
+              {uploading ? (
+                <><Loader2 className="size-4 mr-2 animate-spin" />Importing...</>
+              ) : (
+                <><Check className="size-4 mr-2" />Import {totalRows} Guests</>
+              )}
             </Button>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       )}
     </div>
   );

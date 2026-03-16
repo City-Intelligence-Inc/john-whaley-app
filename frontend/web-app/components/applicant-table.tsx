@@ -82,10 +82,11 @@ const HIDDEN_KEYS = new Set([
   "linkedin_experience",
 ]);
 
-/** Columns hidden by default (e.g. Luma CSV noise). */
+/** Columns hidden by default — all the Luma CSV noise + LinkedIn raw fields. */
 const DEFAULT_HIDDEN = new Set([
   "amount",
   "amount_discount",
+  "amount_tax",
   "tax",
   "currency",
   "created_at",
@@ -99,6 +100,33 @@ const DEFAULT_HIDDEN = new Set([
   "utm_campaign",
   "investor_professional",
   "vc_seniority_tier",
+  "api_id",
+  "first_name",
+  "last_name",
+  "phone_number",
+  "checked_in_at",
+  "custom_source",
+  "qr_code_url",
+  "eth_address",
+  "solana_address",
+  "survey_response_rating",
+  "survey_response_feedback",
+  "ticket_type_id",
+  "ticket_name",
+  "what_is_your_linkedin_profile?",
+  "linkedin_about",
+  "linkedin_location",
+  "linkedin_education",
+  "linkedin_experience",
+  "linkedin_company",
+  "linkedin_name",
+  "linkedin_image",
+  "photo_url",
+  "image",
+  "ai_review",
+  "panel_votes",
+  "accepting_judges",
+  "attendance_mode",
 ]);
 
 /** Columns that appear first when present. */
