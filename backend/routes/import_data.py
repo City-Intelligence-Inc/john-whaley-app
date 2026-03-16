@@ -46,7 +46,40 @@ async def upload_csv(file: UploadFile = File(...), session_id: str | None = Quer
 
     db._update_session_count(session_id)
 
-    return {"count": len(items), "items": items, "session_id": session_id}
+    # Auto-enrich from linkedin-scrapes DB
+    enriched = 0
+    linkedin_urls = [it.get("linkedin_url", "") for it in items if it.get("linkedin_url")]
+    if linkedin_urls:
+        scrapes = db.batch_get_linkedin_scrapes(linkedin_urls)
+        for item in items:
+            li_url = item.get("linkedin_url", "")
+            if li_url and li_url in scrapes:
+                profile = scrapes[li_url]
+                fields: dict = {}
+                if profile.get("headline"):
+                    fields["linkedin_headline"] = profile["headline"]
+                if profile.get("photo_url"):
+                    fields["linkedin_image"] = profile["photo_url"]
+                if profile.get("location"):
+                    fields["linkedin_location"] = profile["location"]
+                if profile.get("experience"):
+                    fields["linkedin_experience"] = profile["experience"]
+                if profile.get("company"):
+                    fields["linkedin_company"] = profile["company"]
+                    if not item.get("company"):
+                        fields["company"] = profile["company"]
+                if profile.get("education"):
+                    fields["linkedin_education"] = profile["education"]
+                if profile.get("about"):
+                    fields["linkedin_about"] = profile["about"]
+                if profile.get("name") and not item.get("linkedin_name"):
+                    fields["linkedin_name"] = profile["name"]
+                if fields:
+                    db.update_applicant_fields(item["applicant_id"], fields)
+                    item.update(fields)
+                    enriched += 1
+
+    return {"count": len(items), "items": items, "session_id": session_id, "enriched": enriched}
 
 
 # ── Google Sheets Import ──

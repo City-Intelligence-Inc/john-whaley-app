@@ -195,6 +195,38 @@ def scan_existing_emails(session_id: str | None = None) -> dict[str, str]:
 
 # ── LinkedIn scrape operations ──
 
+def get_linkedin_scrape(url: str) -> dict | None:
+    """Look up a single LinkedIn profile from the scrapes table by URL."""
+    resp = linkedin_scrapes_table.get_item(Key={"url": url})
+    return resp.get("Item")
+
+
+def batch_get_linkedin_scrapes(urls: list[str]) -> dict[str, dict]:
+    """Look up multiple LinkedIn profiles. Returns {url: profile_dict} for found profiles."""
+    results: dict[str, dict] = {}
+    if not urls:
+        return results
+    # Try both with and without trailing slash, with/without www
+    normalized_urls = set()
+    url_map: dict[str, str] = {}  # normalized -> original
+    for u in urls:
+        norm = u.rstrip("/")
+        normalized_urls.add(norm)
+        url_map[norm] = u
+        # Also try with https://
+        if not norm.startswith("http"):
+            norm2 = "https://" + norm
+            normalized_urls.add(norm2)
+            url_map[norm2] = u
+
+    for url in normalized_urls:
+        item = linkedin_scrapes_table.get_item(Key={"url": url}).get("Item")
+        if item:
+            original = url_map.get(url, url)
+            results[original] = item
+    return results
+
+
 def save_linkedin_scrape(result: dict) -> None:
     """
     Upsert a LinkedIn scrape result into the linkedin-scrapes table.

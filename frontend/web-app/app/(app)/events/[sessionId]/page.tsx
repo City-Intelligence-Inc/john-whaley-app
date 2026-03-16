@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useMemo } from "react";
-import { Upload, Linkedin, Loader2, Brain, Download, Sheet } from "lucide-react";
+import { Upload, Linkedin, Loader2, Brain, Download, Sheet, LayoutGrid, Table2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,7 @@ import { Switch } from "@/components/ui/switch";
 import { useEvent } from "@/components/event-provider";
 import { StatsCards } from "@/components/stats-cards";
 import { ApplicantTable } from "@/components/applicant-table";
+import { ProfileCardGrid } from "@/components/profile-card-grid";
 import { ApplicantDetailSheet } from "@/components/applicant-detail-sheet";
 import { CSVUploader } from "@/components/csv-uploader";
 import { api } from "@/lib/api";
@@ -47,6 +48,7 @@ export default function EventWorkspacePage() {
 
   // UI state
   const [statusFilter, setStatusFilter] = useState("all");
+  const [viewMode, setViewMode] = useState<"table" | "cards">("cards");
   const [selectedApplicantId, setSelectedApplicantId] = useState<string | null>(
     null
   );
@@ -440,14 +442,49 @@ export default function EventWorkspacePage() {
             onFilterChange={setStatusFilter}
           />
 
-          {/* ── Applicant Table ── */}
-          <ApplicantTable
-            applicants={applicants}
-            statusFilter={statusFilter}
-            onStatusFilterChange={setStatusFilter}
-            onStatusChange={handleStatusChange}
-            onSelectApplicant={setSelectedApplicantId}
-          />
+          {/* ── View Toggle ── */}
+          <div className="flex items-center gap-1 border border-border/50 rounded-lg p-0.5 w-fit">
+            <button
+              onClick={() => setViewMode("cards")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                viewMode === "cards"
+                  ? "bg-gold/10 text-gold"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <LayoutGrid className="size-3.5" />
+              Cards
+            </button>
+            <button
+              onClick={() => setViewMode("table")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                viewMode === "table"
+                  ? "bg-gold/10 text-gold"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Table2 className="size-3.5" />
+              Table
+            </button>
+          </div>
+
+          {/* ── Applicant Views ── */}
+          {viewMode === "table" ? (
+            <ApplicantTable
+              applicants={applicants}
+              statusFilter={statusFilter}
+              onStatusFilterChange={setStatusFilter}
+              onStatusChange={handleStatusChange}
+              onSelectApplicant={setSelectedApplicantId}
+            />
+          ) : (
+            <ProfileCardGrid
+              applicants={applicants}
+              statusFilter={statusFilter}
+              onStatusChange={handleStatusChange}
+              onSelectApplicant={setSelectedApplicantId}
+            />
+          )}
         </>
       )}
 
