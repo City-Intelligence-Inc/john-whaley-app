@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useMemo } from "react";
-import { Upload, Linkedin, Loader2, Brain, Download, Sheet, LayoutGrid, Table2 } from "lucide-react";
+import { Upload, Linkedin, Loader2, Brain, Download, Sheet, LayoutGrid, Table2, CreditCard } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,7 @@ import { useEvent } from "@/components/event-provider";
 import { StatsCards } from "@/components/stats-cards";
 import { ApplicantTable } from "@/components/applicant-table";
 import { ProfileCardGrid } from "@/components/profile-card-grid";
+import { ProfileSwipeView } from "@/components/profile-swipe-view";
 import { ApplicantDetailSheet } from "@/components/applicant-detail-sheet";
 import { CSVUploader } from "@/components/csv-uploader";
 import { api } from "@/lib/api";
@@ -48,7 +49,7 @@ export default function EventWorkspacePage() {
 
   // UI state
   const [statusFilter, setStatusFilter] = useState("all");
-  const [viewMode, setViewMode] = useState<"table" | "cards">("cards");
+  const [viewMode, setViewMode] = useState<"table" | "cards" | "swipe">("swipe");
   const [selectedApplicantId, setSelectedApplicantId] = useState<string | null>(
     null
   );
@@ -444,32 +445,28 @@ export default function EventWorkspacePage() {
 
           {/* ── View Toggle ── */}
           <div className="flex items-center gap-1 border border-border/50 rounded-lg p-0.5 w-fit">
-            <button
-              onClick={() => setViewMode("cards")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                viewMode === "cards"
-                  ? "bg-gold/10 text-gold"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <LayoutGrid className="size-3.5" />
-              Cards
-            </button>
-            <button
-              onClick={() => setViewMode("table")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                viewMode === "table"
-                  ? "bg-gold/10 text-gold"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <Table2 className="size-3.5" />
-              Table
-            </button>
+            {([
+              { key: "swipe" as const, icon: CreditCard, label: "Review" },
+              { key: "cards" as const, icon: LayoutGrid, label: "Cards" },
+              { key: "table" as const, icon: Table2, label: "Table" },
+            ]).map(({ key, icon: Icon, label }) => (
+              <button
+                key={key}
+                onClick={() => setViewMode(key)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                  viewMode === key
+                    ? "bg-gold/10 text-gold"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Icon className="size-3.5" />
+                {label}
+              </button>
+            ))}
           </div>
 
           {/* ── Applicant Views ── */}
-          {viewMode === "table" ? (
+          {viewMode === "table" && (
             <ApplicantTable
               applicants={applicants}
               statusFilter={statusFilter}
@@ -477,8 +474,18 @@ export default function EventWorkspacePage() {
               onStatusChange={handleStatusChange}
               onSelectApplicant={setSelectedApplicantId}
             />
-          ) : (
+          )}
+          {viewMode === "cards" && (
             <ProfileCardGrid
+              applicants={applicants}
+              statusFilter={statusFilter}
+              sessionId={sessionId}
+              onStatusChange={handleStatusChange}
+              onSelectApplicant={setSelectedApplicantId}
+            />
+          )}
+          {viewMode === "swipe" && (
+            <ProfileSwipeView
               applicants={applicants}
               statusFilter={statusFilter}
               sessionId={sessionId}
