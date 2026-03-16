@@ -176,34 +176,81 @@ async def my_events(
     return {"events": matched}
 
 
+def _extract_event_id_or_slug(raw: str) -> tuple[str | None, str | None]:
+    """Parse a Luma URL/ID into (event_api_id, slug).
+
+    Handles:
+      evt-XXXX                             -> (evt-XXXX, None)
+      https://luma.com/event/manage/evt-X  -> (evt-X, None)
+      https://lu.ma/abc123                 -> (None, abc123)
+      https://luma.com/abc123              -> (None, abc123)
+      abc123                               -> (None, abc123)
+    """
+    raw = raw.strip().rstrip("/")
+
+    # Direct event API ID
+    if raw.startswith("evt-"):
+        return (raw, None)
+
+    # Management URL: https://luma.com/event/manage/evt-XXXX
+    import re
+    m = re.search(r"(evt-[A-Za-z0-9]+)", raw)
+    if m:
+        return (m.group(1), None)
+
+    # Strip protocol and domain to get slug
+    for prefix in [
+        "https://lu.ma/", "http://lu.ma/",
+        "https://luma.com/", "http://luma.com/",
+        "https://www.luma.com/", "http://www.luma.com/",
+        "lu.ma/", "luma.com/",
+    ]:
+        if raw.lower().startswith(prefix):
+            slug = raw[len(prefix):].split("?")[0].split("#")[0].rstrip("/")
+            return (None, slug)
+
+    # Bare slug
+    return (None, raw)
+
+
 @router.get("/lookup-event")
 async def lookup_event(url: str = Query(...)):
-    """Look up a Luma event by URL. Uses calendar/lookup-event to resolve,
-    then event/get for full details."""
+    """Look up a Luma event by URL, slug, or event ID."""
     key = _get_luma_key()
+    event_id, slug = _extract_event_id_or_slug(url)
 
     async with httpx.AsyncClient(timeout=15) as client:
-        # Use the official calendar/lookup-event endpoint
-        resp = await client.get(
-            f"{LUMA_API_BASE}/calendar/lookup-event",
-            headers=_luma_headers(key),
-            params={"url": url.strip(), "platform": "luma"},
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            cal_event = data.get("event")
-            if cal_event and cal_event.get("api_id"):
-                # Got the api_id, now fetch full details
-                full = await _get_event_by_id(client, cal_event["api_id"], key)
-                if full:
-                    return full
+        # If we have a direct event ID, fetch it
+        if event_id:
+            full = await _get_event_by_id(client, event_id, key)
+            if full:
+                return full
 
-        # Fallback: check our calendar events for a URL match
+        # Try the official calendar/lookup-event with various URL forms
+        if slug:
+            for try_url in [f"https://lu.ma/{slug}", url.strip()]:
+                resp = await client.get(
+                    f"{LUMA_API_BASE}/calendar/lookup-event",
+                    headers=_luma_headers(key),
+                    params={"url": try_url, "platform": "luma"},
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    cal_event = data.get("event")
+                    if cal_event and cal_event.get("api_id"):
+                        full = await _get_event_by_id(client, cal_event["api_id"], key)
+                        if full:
+                            return full
+
+        # Fallback: check our calendar events for a URL/slug match
         events = await _fetch_all_events(key)
         url_clean = url.strip().rstrip("/").lower()
+        search_slug = (slug or "").lower()
         for event in events:
             event_url = (event.get("url") or "").lower()
             if event_url and (url_clean in event_url or event_url in url_clean):
+                return event
+            if search_slug and search_slug in event_url:
                 return event
 
     raise HTTPException(404, "Event not found. Make sure Stardrop has been added as a host to this event.")
