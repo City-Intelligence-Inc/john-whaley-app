@@ -481,6 +481,7 @@ export default function EventWorkspacePage() {
             <ProfileCardGrid
               applicants={applicants}
               statusFilter={statusFilter}
+              sessionId={sessionId}
               onStatusChange={handleStatusChange}
               onSelectApplicant={setSelectedApplicantId}
             />
