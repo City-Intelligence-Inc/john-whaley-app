@@ -289,6 +289,10 @@ export const api = {
     fetchAPI<{ detail: string }>("/settings/luma-key", { method: "PUT", body: JSON.stringify({ api_key }) }),
   listLumaEvents: (api_key?: string) =>
     fetchAPI<{ entries: { api_id: string; name: string; start_at: string; cover_url?: string }[] }>(`/luma/events${api_key ? `?api_key=${api_key}` : ""}`),
+  myLumaEvents: (email?: string) =>
+    fetchAPI<{ events: { api_id: string; name: string; start_at: string; cover_url?: string; guest_status?: string }[] }>(`/luma/my-events${email ? `?email=${encodeURIComponent(email)}` : ""}`),
+  lookupLumaEvent: (url: string) =>
+    fetchAPI<{ api_id: string; name: string; start_at: string; cover_url?: string; url?: string }>(`/luma/lookup-event?url=${encodeURIComponent(url)}`),
   importFromLuma: (event_id: string, session_id?: string, api_key?: string) => {
     const params = new URLSearchParams({ event_id });
     if (session_id) params.set("session_id", session_id);

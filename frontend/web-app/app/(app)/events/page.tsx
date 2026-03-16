@@ -2,13 +2,16 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { useUser } from "@clerk/nextjs";
 import {
   Plus,
   Loader2,
   Calendar,
   Users,
-  ExternalLink,
   Trash2,
+  Download,
+  Check,
+  Search,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -36,27 +39,37 @@ interface LumaEvent {
   name: string;
   start_at: string;
   cover_url?: string;
+  url?: string;
+  guest_status?: string;
 }
 
 export default function EventsPage() {
   const router = useRouter();
+  const { user, isLoaded: userLoaded } = useUser();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Luma import dialog
-  const [lumaOpen, setLumaOpen] = useState(false);
-  const [lumaEvents, setLumaEvents] = useState<LumaEvent[]>([]);
+  // Luma events matched to user's email
+  const [myLumaEvents, setMyLumaEvents] = useState<LumaEvent[]>([]);
   const [lumaLoading, setLumaLoading] = useState(false);
+  const [lumaChecked, setLumaChecked] = useState(false);
+
+  // Manual event lookup
+  const [lookupUrl, setLookupUrl] = useState("");
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookedUpEvent, setLookedUpEvent] = useState<LumaEvent | null>(null);
+  const [lookupError, setLookupError] = useState("");
+
   const [importing, setImporting] = useState<string | null>(null);
 
-  // Create event dialog
+  // Dialogs
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
-
-  // Delete confirmation
   const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  /* ── Data loading ── */
 
   const fetchSessions = useCallback(async () => {
     try {
@@ -69,21 +82,71 @@ export default function EventsPage() {
     }
   }, []);
 
+  const fetchMyLumaEvents = useCallback(async () => {
+    const email = user?.emailAddresses?.[0]?.emailAddress;
+    if (!email) {
+      setLumaChecked(true);
+      return;
+    }
+    setLumaLoading(true);
+    try {
+      const res = await api.myLumaEvents(email);
+      setMyLumaEvents(res.events || []);
+    } catch {
+      // Silently fail -- Luma key may not be configured
+    } finally {
+      setLumaLoading(false);
+      setLumaChecked(true);
+    }
+  }, [user]);
+
   useEffect(() => {
     fetchSessions();
   }, [fetchSessions]);
 
-  // ── Luma Import ──
-  const openLumaDialog = async () => {
-    setLumaOpen(true);
-    setLumaLoading(true);
+  useEffect(() => {
+    if (userLoaded) fetchMyLumaEvents();
+  }, [userLoaded, fetchMyLumaEvents]);
+
+  /* ── Derived state ── */
+
+  const importedLumaIds = new Set(
+    sessions
+      .filter((s) => s.source === "luma" && s.source_detail)
+      .map((s) => s.source_detail!)
+  );
+
+  // Deduplicate: don't show in "Your Luma Events" if already imported
+  const unimportedLumaEvents = myLumaEvents.filter(
+    (e) => !importedLumaIds.has(e.api_id)
+  );
+
+  /* ── Actions ── */
+
+  const lookupEvent = async () => {
+    const url = lookupUrl.trim();
+    if (!url) return;
+    setLookupLoading(true);
+    setLookedUpEvent(null);
+    setLookupError("");
     try {
-      const res = await api.listLumaEvents();
-      setLumaEvents(res.entries || []);
-    } catch {
-      toast.error("Failed to fetch Luma events. Check your API key in Settings.");
+      const event = await api.lookupLumaEvent(url);
+      if (importedLumaIds.has(event.api_id)) {
+        const match = sessions.find((s) => s.source_detail === event.api_id);
+        if (match) {
+          router.push(`/events/${match.session_id}`);
+          return;
+        }
+      }
+      setLookedUpEvent(event);
+    } catch (err) {
+      setLookupError(
+        err instanceof Error
+          ? err.message
+          : "Event not found. Make sure Stardrop has been added as a host."
+      );
     } finally {
-      setLumaLoading(false);
+      setLookupLoading(false);
     }
   };
 
@@ -92,7 +155,9 @@ export default function EventsPage() {
     try {
       const res = await api.importFromLuma(event.api_id);
       toast.success(`Imported ${res.count} guests from "${event.name}"`);
-      setLumaOpen(false);
+      setLookedUpEvent(null);
+      setLookupUrl("");
+      await fetchSessions();
       router.push(`/events/${res.session_id}`);
     } catch (err) {
       toast.error(
@@ -103,7 +168,6 @@ export default function EventsPage() {
     }
   };
 
-  // ── Create Manual Event ──
   const createEvent = async () => {
     if (!newName.trim()) return;
     setCreating(true);
@@ -112,7 +176,6 @@ export default function EventsPage() {
         name: newName.trim(),
         source: "manual",
       });
-      toast.success(`Created "${session.name}"`);
       setCreateOpen(false);
       setNewName("");
       router.push(`/events/${session.session_id}`);
@@ -125,7 +188,6 @@ export default function EventsPage() {
     }
   };
 
-  // ── Delete Event ──
   const deleteEvent = async () => {
     if (!deleteTarget) return;
     setDeleting(true);
@@ -143,6 +205,8 @@ export default function EventsPage() {
     }
   };
 
+  /* ── Helpers ── */
+
   const formatDate = (iso: string) => {
     try {
       return new Date(iso).toLocaleDateString("en-US", {
@@ -155,6 +219,10 @@ export default function EventsPage() {
     }
   };
 
+  const isPageLoading = loading || (!lumaChecked && userLoaded);
+
+  /* ── Render ── */
+
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -164,38 +232,179 @@ export default function EventsPage() {
             Events
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Manage your events and guest lists
+            Import from Luma or create a new event
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <Button
-            variant="outline"
-            onClick={openLumaDialog}
-            className="border-border/50 hover:border-gold/30 hover:bg-gold/5"
-          >
-            <ExternalLink className="size-4 mr-2" />
-            Import from Luma
-          </Button>
-          <Button
-            onClick={() => setCreateOpen(true)}
-            className="bg-gold hover:bg-gold/90 text-gold-foreground"
-          >
-            <Plus className="size-4 mr-2" />
-            New Event
-          </Button>
-        </div>
+        <Button
+          onClick={() => setCreateOpen(true)}
+          variant="outline"
+          className="border-border/50 hover:border-gold/30 hover:bg-gold/5"
+        >
+          <Plus className="size-4 mr-2" />
+          New Event
+        </Button>
       </div>
 
-      {/* Loading */}
-      {loading && (
-        <div className="flex items-center justify-center py-20">
+      {/* ── Luma Event Lookup ── */}
+      <Card className="border-border/50 bg-card/50">
+        <CardContent className="pt-5 pb-5">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="flex size-8 items-center justify-center rounded-lg bg-purple-500/10">
+              <Search className="size-4 text-purple-400" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-foreground">
+                Import from Luma
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Paste your Luma event link to import the guest list
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Input
+              placeholder="https://lu.ma/your-event"
+              value={lookupUrl}
+              onChange={(e) => {
+                setLookupUrl(e.target.value);
+                setLookupError("");
+                setLookedUpEvent(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") lookupEvent();
+              }}
+              className="bg-background border-border/50 focus-visible:ring-purple-500/40 text-sm"
+            />
+            <Button
+              onClick={lookupEvent}
+              disabled={lookupLoading || !lookupUrl.trim()}
+              className="bg-purple-600 hover:bg-purple-700 text-white shrink-0"
+            >
+              {lookupLoading ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <>
+                  <Search className="size-4 mr-2" />
+                  Look up
+                </>
+              )}
+            </Button>
+          </div>
+
+          {/* Lookup error */}
+          {lookupError && (
+            <p className="text-xs text-destructive mt-2">{lookupError}</p>
+          )}
+
+          {/* Lookup result */}
+          {lookedUpEvent && (
+            <div className="mt-3 p-3 rounded-lg border border-purple-500/20 bg-purple-500/5 flex items-center gap-3">
+              {lookedUpEvent.cover_url && (
+                <img
+                  src={lookedUpEvent.cover_url}
+                  alt=""
+                  className="size-12 rounded-md object-cover shrink-0"
+                />
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-foreground truncate">
+                  {lookedUpEvent.name}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {formatDate(lookedUpEvent.start_at)}
+                </p>
+              </div>
+              <Button
+                size="sm"
+                disabled={importing === lookedUpEvent.api_id}
+                onClick={() => importLumaEvent(lookedUpEvent)}
+                className="bg-purple-600 hover:bg-purple-700 text-white shrink-0"
+              >
+                {importing === lookedUpEvent.api_id ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <>
+                    <Download className="size-3.5 mr-1.5" />
+                    Import
+                  </>
+                )}
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Auto-detected Luma events (unimported only) ── */}
+      {lumaLoading && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
+          <Loader2 className="size-3.5 animate-spin" />
+          Checking Luma for events with your email...
+        </div>
+      )}
+
+      {!lumaLoading && unimportedLumaEvents.length > 0 && (
+        <section>
+          <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">
+            Available to import
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {unimportedLumaEvents.map((event) => (
+              <Card
+                key={event.api_id}
+                className="border-border/50 bg-card/50 hover:border-purple-500/30 transition-all"
+              >
+                <CardHeader className="pb-2">
+                  <div className="flex items-start gap-3">
+                    {event.cover_url && (
+                      <img
+                        src={event.cover_url}
+                        alt=""
+                        className="size-10 rounded-md object-cover shrink-0"
+                      />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <CardTitle className="text-sm font-semibold text-foreground leading-snug truncate">
+                        {event.name}
+                      </CardTitle>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {formatDate(event.start_at)}
+                      </p>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="pt-1">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={importing === event.api_id}
+                    onClick={() => importLumaEvent(event)}
+                    className="w-full border-purple-500/20 text-purple-400 hover:bg-purple-500/10 hover:border-purple-500/30"
+                  >
+                    {importing === event.api_id ? (
+                      <Loader2 className="size-3.5 mr-2 animate-spin" />
+                    ) : (
+                      <Download className="size-3.5 mr-2" />
+                    )}
+                    Import Guests
+                  </Button>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* ── Loading state ── */}
+      {isPageLoading && (
+        <div className="flex items-center justify-center py-16">
           <Loader2 className="size-6 animate-spin text-gold" />
         </div>
       )}
 
-      {/* Empty state */}
-      {!loading && sessions.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-20 text-center">
+      {/* ── Empty state ── */}
+      {!isPageLoading && sessions.length === 0 && unimportedLumaEvents.length === 0 && !lookedUpEvent && (
+        <div className="flex flex-col items-center justify-center py-16 text-center">
           <div className="flex size-14 items-center justify-center rounded-2xl bg-gold/10 mb-4">
             <Calendar className="size-7 text-gold" />
           </div>
@@ -203,135 +412,79 @@ export default function EventsPage() {
             No events yet
           </h2>
           <p className="text-sm text-muted-foreground max-w-sm">
-            Create a new event or import one from Luma to get started with guest
-            selection.
+            Paste a Luma event link above to import guests, or create a blank event.
           </p>
         </div>
       )}
 
-      {/* Events grid */}
-      {!loading && sessions.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {sessions.map((session) => (
-            <Card
-              key={session.session_id}
-              className="group relative cursor-pointer border-border/50 bg-card/50 hover:border-gold/30 hover:bg-card/80 transition-all"
-              onClick={() => router.push(`/events/${session.session_id}`)}
-            >
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between">
-                  <CardTitle className="text-[15px] font-semibold text-foreground leading-snug pr-8">
-                    {session.name}
-                  </CardTitle>
-                  <Badge
-                    variant={
-                      session.status === "active" ? "default" : "secondary"
-                    }
-                    className={
-                      session.status === "active"
-                        ? "bg-gold/15 text-gold border-gold/20 hover:bg-gold/20"
-                        : ""
-                    }
-                  >
-                    {session.status}
-                  </Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="pt-0">
-                <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                  <span className="flex items-center gap-1.5">
-                    <Users className="size-3.5" />
-                    {session.applicant_count}{" "}
-                    {session.applicant_count === 1 ? "guest" : "guests"}
-                  </span>
-                  {session.created_at && (
-                    <span className="flex items-center gap-1.5">
-                      <Calendar className="size-3.5" />
-                      {formatDate(session.created_at)}
-                    </span>
-                  )}
-                </div>
-
-                {/* Source badge */}
-                {session.source && (
-                  <div className="mt-3">
+      {/* ── Imported events grid ── */}
+      {!isPageLoading && sessions.length > 0 && (
+        <section>
+          <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">
+            Your events
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {sessions.map((session) => (
+              <Card
+                key={session.session_id}
+                className="group relative cursor-pointer border-border/50 bg-card/50 hover:border-gold/30 hover:bg-card/80 transition-all"
+                onClick={() => router.push(`/events/${session.session_id}`)}
+              >
+                <CardHeader className="pb-3">
+                  <div className="flex items-start justify-between">
+                    <CardTitle className="text-[15px] font-semibold text-foreground leading-snug pr-8">
+                      {session.name}
+                    </CardTitle>
                     <Badge
-                      variant="secondary"
-                      className="text-[10px] uppercase tracking-wider"
+                      variant={session.status === "active" ? "default" : "secondary"}
+                      className={
+                        session.status === "active"
+                          ? "bg-gold/15 text-gold border-gold/20 hover:bg-gold/20"
+                          : ""
+                      }
                     >
-                      {session.source}
+                      {session.status}
                     </Badge>
                   </div>
-                )}
-
-                {/* Delete button (shown on hover) */}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setDeleteTarget(session);
-                  }}
-                  className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
-                >
-                  <Trash2 className="size-3.5" />
-                </button>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-
-      {/* ── Luma Import Dialog ── */}
-      <Dialog open={lumaOpen} onOpenChange={setLumaOpen}>
-        <DialogContent className="sm:max-w-lg bg-card border-border/50">
-          <DialogHeader>
-            <DialogTitle>Import from Luma</DialogTitle>
-            <DialogDescription>
-              Select a Luma event to import its guest list.
-            </DialogDescription>
-          </DialogHeader>
-
-          {lumaLoading ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="size-6 animate-spin text-gold" />
-            </div>
-          ) : lumaEvents.length === 0 ? (
-            <div className="py-8 text-center text-sm text-muted-foreground">
-              No Luma events found. Make sure your API key is configured in
-              Settings.
-            </div>
-          ) : (
-            <div className="max-h-[400px] overflow-y-auto -mx-6 px-6 space-y-2">
-              {lumaEvents.map((event) => (
-                <button
-                  key={event.api_id}
-                  disabled={importing !== null}
-                  onClick={() => importLumaEvent(event)}
-                  className="w-full flex items-center gap-3 p-3 rounded-lg border border-border/50 hover:border-gold/30 hover:bg-gold/5 transition-all text-left disabled:opacity-50"
-                >
-                  {event.cover_url && (
-                    <img
-                      src={event.cover_url}
-                      alt=""
-                      className="size-10 rounded-md object-cover shrink-0"
-                    />
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-foreground truncate">
-                      {event.name}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      {formatDate(event.start_at)}
-                    </div>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                    <span className="flex items-center gap-1.5">
+                      <Users className="size-3.5" />
+                      {session.applicant_count}{" "}
+                      {session.applicant_count === 1 ? "guest" : "guests"}
+                    </span>
+                    {session.created_at && (
+                      <span className="flex items-center gap-1.5">
+                        <Calendar className="size-3.5" />
+                        {formatDate(session.created_at)}
+                      </span>
+                    )}
                   </div>
-                  {importing === event.api_id && (
-                    <Loader2 className="size-4 animate-spin text-gold shrink-0" />
+
+                  {session.source && (
+                    <div className="mt-3">
+                      <Badge variant="secondary" className="text-[10px] uppercase tracking-wider">
+                        {session.source}
+                      </Badge>
+                    </div>
                   )}
-                </button>
-              ))}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeleteTarget(session);
+                    }}
+                    className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
+                  >
+                    <Trash2 className="size-3.5" />
+                  </button>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* ── Create Event Dialog ── */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
@@ -339,7 +492,7 @@ export default function EventsPage() {
           <DialogHeader>
             <DialogTitle>New Event</DialogTitle>
             <DialogDescription>
-              Create a blank event to start adding guests.
+              Create a blank event to start adding guests manually.
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
@@ -373,7 +526,7 @@ export default function EventsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Delete Confirmation Dialog ── */}
+      {/* ── Delete Confirmation ── */}
       <Dialog
         open={!!deleteTarget}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
@@ -383,8 +536,7 @@ export default function EventsPage() {
             <DialogTitle>Delete Event</DialogTitle>
             <DialogDescription>
               Are you sure you want to delete &ldquo;{deleteTarget?.name}&rdquo;?
-              This will remove all associated guest data. This action cannot be
-              undone.
+              This will remove all guest data and cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
