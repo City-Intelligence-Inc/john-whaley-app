@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ActivityIndicator,
-  Dimensions, Alert, ScrollView,
+  Dimensions, Alert, ScrollView, Image,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { getSession, getApplicants, updateApplicantStatus, batchUpdateStatus } from '../../../lib/api';
+import { getSession, getApplicants, updateApplicantStatus, batchUpdateStatus, getLinkedInProfiles } from '../../../lib/api';
 import { colors, getStatusColor } from '../../../lib/theme';
 import type { Session, Applicant } from '../../../lib/api';
 
@@ -42,6 +42,7 @@ export default function SessionDetailScreen() {
   const router = useRouter();
   const [session, setSession] = useState<Session | null>(null);
   const [applicants, setApplicants] = useState<Applicant[]>([]);
+  const [photoMap, setPhotoMap] = useState<Record<string, string>>({});
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -51,10 +52,23 @@ export default function SessionDetailScreen() {
     if (!sessionId) return;
     try {
       setError(null);
-      const [sessionData, applicantData] = await Promise.all([
-        getSession(sessionId), getApplicants(sessionId),
+      const [sessionData, applicantData, linkedInData] = await Promise.all([
+        getSession(sessionId),
+        getApplicants(sessionId),
+        getLinkedInProfiles().catch(() => ({ items: [], count: 0 })),
       ]);
       setSession(sessionData);
+
+      // Build URL → photo_url map from LinkedIn DB
+      const photos: Record<string, string> = {};
+      const liItems = (linkedInData as { items: { url?: string; photo_url?: string }[] }).items || [];
+      for (const li of liItems) {
+        if (li.url && li.photo_url && String(li.photo_url).startsWith('http')) {
+          const normalized = li.url.toLowerCase().replace(/\/$/, '');
+          photos[normalized] = li.photo_url as string;
+        }
+      }
+      setPhotoMap(photos);
       // Pending first, then by score desc
       const sorted = [...applicantData].sort((a, b) => {
         const order: Record<string, number> = { pending: 0, waitlisted: 1, accepted: 2, rejected: 3 };
@@ -168,11 +182,20 @@ export default function SessionDetailScreen() {
 
             {/* Avatar overlapping banner */}
             <View style={styles.avatarWrap}>
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>
-                  {(current.name || current.linkedin_name as string || current.email || '?')[0]?.toUpperCase()}
-                </Text>
-              </View>
+              {(() => {
+                const url = current.linkedin_url ? current.linkedin_url.toLowerCase().replace(/\/$/, '') : '';
+                const photo = photoMap[url];
+                if (photo) {
+                  return <Image source={{ uri: photo }} style={styles.avatarImg} />;
+                }
+                return (
+                  <View style={styles.avatar}>
+                    <Text style={styles.avatarText}>
+                      {(current.name || current.linkedin_name as string || current.email || '?')[0]?.toUpperCase()}
+                    </Text>
+                  </View>
+                );
+              })()}
               {/* Score pill next to avatar */}
               {current.ai_score && parseFloat(String(current.ai_score)) > 0 && (() => {
                 const score = parseFloat(String(current.ai_score));
@@ -354,6 +377,9 @@ const styles = StyleSheet.create({
     width: 72, height: 72, borderRadius: 36, backgroundColor: colors.background,
     justifyContent: 'center', alignItems: 'center',
     borderWidth: 3, borderColor: colors.card,
+  },
+  avatarImg: {
+    width: 72, height: 72, borderRadius: 36, borderWidth: 3, borderColor: colors.card,
   },
   avatarText: { fontSize: 28, fontWeight: '700', color: colors.gold },
   scorePill: {
