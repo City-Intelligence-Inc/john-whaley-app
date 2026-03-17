@@ -60,6 +60,8 @@ const SKIP_KEYS = new Set([
 
 export interface ApplicantDetailSheetProps {
   applicant: Applicant | null;
+  /** URL→photo_url map from LinkedIn DB */
+  photoMap?: Record<string, string>;
   /**
    * Called when the user clicks Accept / Waitlist / Reject.
    * Can accept either (id, status) or just (status) -- both are supported.
@@ -74,6 +76,7 @@ export interface ApplicantDetailSheetProps {
 
 export function ApplicantDetailSheet({
   applicant,
+  photoMap,
   onStatusChange,
   onClose,
 }: ApplicantDetailSheetProps) {
@@ -81,6 +84,13 @@ export function ApplicantDetailSheet({
 
   const score = applicant.ai_score ? parseInt(applicant.ai_score) : 0;
   const scc = scoreColorClass(score);
+
+  // Get photo from LinkedIn DB
+  const photoUrl = (() => {
+    if (!photoMap || !applicant.linkedin_url) return null;
+    const normalized = applicant.linkedin_url.toLowerCase().replace(/\/$/, "");
+    return photoMap[normalized] || null;
+  })();
 
   const name =
     applicant.name ||
@@ -113,12 +123,29 @@ export function ApplicantDetailSheet({
     >
       <SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto">
         <SheetHeader>
-          <SheetTitle className="text-xl">{name}</SheetTitle>
-          {subtitle && (
-            <SheetDescription className="text-base">
-              {subtitle}
-            </SheetDescription>
-          )}
+          <div className="flex items-center gap-4">
+            {photoUrl ? (
+              <img
+                src={photoUrl}
+                alt={String(name)}
+                className="size-14 rounded-full object-cover ring-2 ring-border shrink-0"
+              />
+            ) : (
+              <div className="size-14 rounded-full bg-gold/15 flex items-center justify-center ring-2 ring-border shrink-0">
+                <span className="text-xl font-bold text-gold">
+                  {String(name)[0]?.toUpperCase()}
+                </span>
+              </div>
+            )}
+            <div>
+              <SheetTitle className="text-xl">{name}</SheetTitle>
+              {subtitle && (
+                <SheetDescription className="text-base">
+                  {subtitle}
+                </SheetDescription>
+              )}
+            </div>
+          </div>
         </SheetHeader>
 
         <div className="space-y-5 px-4 pb-6">
