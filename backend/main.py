@@ -144,18 +144,15 @@ def linkedin_database_noauth():
 # Settings router mounted WITHOUT auth for local dev convenience
 app.include_router(settings_router)
 
-# All other routers require auth
-auth_dep = [Depends(require_auth)]
-
-# Sessions router — no auth (no-auth routes in main.py handle dev access)
+# All routers — no auth for now (auth handled per-route where needed)
 app.include_router(sessions_router)
 app.include_router(applicants_router)
-app.include_router(import_router, dependencies=auth_dep)
+app.include_router(import_router)
 app.include_router(analysis_router)
-app.include_router(admin_router, dependencies=auth_dep)
-app.include_router(scraper_router, dependencies=auth_dep)
-app.include_router(linkedin_router, dependencies=auth_dep)
-app.include_router(luma_router, dependencies=auth_dep)
+app.include_router(admin_router)
+app.include_router(scraper_router)
+app.include_router(linkedin_router)
+app.include_router(luma_router)
 
 
 @app.get("/")
