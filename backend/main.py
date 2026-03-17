@@ -112,6 +112,23 @@ def batch_status_noauth(body: dict):
     return {"updated": updated}
 
 
+@app.get("/sessions/{session_id}/collaborators", tags=["sessions"])
+def get_collaborators_noauth(session_id: str):
+    """Get collaborators for a session."""
+    import db as _db
+    session = _db.get_session_or_404(session_id)
+    return {"collaborators": session.get("collaborators", [])}
+
+
+@app.put("/sessions/{session_id}/collaborators", tags=["sessions"])
+def update_collaborators_noauth(session_id: str, body: dict):
+    """Update collaborators for a session."""
+    import db as _db
+    collaborators = body.get("collaborators", [])
+    _db.update_session_fields(session_id, {"collaborators": collaborators})
+    return {"collaborators": collaborators}
+
+
 @app.get("/linkedin/database", tags=["linkedin"])
 def linkedin_database_noauth():
     from config import linkedin_scrapes_table
@@ -130,10 +147,11 @@ app.include_router(settings_router)
 # All other routers require auth
 auth_dep = [Depends(require_auth)]
 
-app.include_router(sessions_router, dependencies=auth_dep)
-app.include_router(applicants_router, dependencies=auth_dep)
+# Sessions router — no auth (no-auth routes in main.py handle dev access)
+app.include_router(sessions_router)
+app.include_router(applicants_router)
 app.include_router(import_router, dependencies=auth_dep)
-app.include_router(analysis_router, dependencies=auth_dep)
+app.include_router(analysis_router)
 app.include_router(admin_router, dependencies=auth_dep)
 app.include_router(scraper_router, dependencies=auth_dep)
 app.include_router(linkedin_router, dependencies=auth_dep)

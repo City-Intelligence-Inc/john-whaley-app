@@ -9,6 +9,7 @@ import {
   Linkedin,
   Settings,
   LayoutDashboard,
+  Users,
   Brain,
   SlidersHorizontal,
 } from "lucide-react";
@@ -21,6 +22,7 @@ const TOP_NAV = [
 
 const EVENT_SUB_NAV = [
   { suffix: "", label: "Overview", icon: LayoutDashboard },
+  { suffix: "/review", label: "Review", icon: Users },
   { suffix: "/analyze", label: "Analyze", icon: Brain },
   { suffix: "/settings", label: "Event Settings", icon: SlidersHorizontal },
 ];

@@ -688,7 +688,13 @@ export default function EventSettingsPage() {
       </section>
 
       {/* ================================================================ */}
-      {/*  SECTION 3 — Luma Sync                                           */}
+      {/*  SECTION 3 — Team / Collaborators                                */}
+      {/* ================================================================ */}
+
+      <TeamSection sessionId={sessionId} />
+
+      {/* ================================================================ */}
+      {/*  SECTION 4 — Luma Sync                                           */}
       {/* ================================================================ */}
 
       <section>
@@ -825,5 +831,141 @@ export default function EventSettingsPage() {
         </Card>
       </section>
     </div>
+  );
+}
+
+/* ================================================================== */
+/*  Team / Collaborators Section                                       */
+/* ================================================================== */
+
+function TeamSection({ sessionId }: { sessionId: string }) {
+  const [collaborators, setCollaborators] = useState<string[]>([]);
+  const [newEmail, setNewEmail] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+  useEffect(() => {
+    fetch(`${API}/sessions/${sessionId}/collaborators`)
+      .then((r) => r.json())
+      .then((d) => setCollaborators(d.collaborators || []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [sessionId, API]);
+
+  const addCollaborator = async () => {
+    const email = newEmail.trim().toLowerCase();
+    if (!email || !email.includes("@")) return;
+    if (collaborators.includes(email)) {
+      toast.error("Already added");
+      return;
+    }
+    const updated = [...collaborators, email];
+    setSaving(true);
+    try {
+      await fetch(`${API}/sessions/${sessionId}/collaborators`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ collaborators: updated }),
+      });
+      setCollaborators(updated);
+      setNewEmail("");
+      toast.success(`Added ${email}`);
+    } catch {
+      toast.error("Failed to add");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeCollaborator = async (email: string) => {
+    const updated = collaborators.filter((e) => e !== email);
+    setSaving(true);
+    try {
+      await fetch(`${API}/sessions/${sessionId}/collaborators`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ collaborators: updated }),
+      });
+      setCollaborators(updated);
+      toast.success(`Removed ${email}`);
+    } catch {
+      toast.error("Failed to remove");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section>
+      <div className="flex items-center gap-2 mb-5">
+        <div className="flex size-8 items-center justify-center rounded-lg bg-blue-500/10">
+          <Users className="size-4 text-blue-400" />
+        </div>
+        <div>
+          <h2 className="text-lg font-semibold">Team</h2>
+          <p className="text-sm text-muted-foreground">
+            Add collaborators who can review applicants for this event
+          </p>
+        </div>
+      </div>
+
+      <Card>
+        <CardContent className="pt-6">
+          <div className="flex gap-2 mb-4">
+            <Input
+              placeholder="colleague@example.com"
+              value={newEmail}
+              onChange={(e) => setNewEmail(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && addCollaborator()}
+              className="flex-1"
+            />
+            <Button
+              onClick={addCollaborator}
+              disabled={saving || !newEmail.trim()}
+              className="bg-gold text-gold-foreground hover:bg-gold/90"
+            >
+              Add
+            </Button>
+          </div>
+
+          {loading ? (
+            <div className="flex justify-center py-4">
+              <Loader2 className="size-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : collaborators.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">
+              No collaborators yet. Add team members by email.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {collaborators.map((email) => (
+                <div
+                  key={email}
+                  className="flex items-center justify-between rounded-lg border border-border px-4 py-3"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="flex size-8 items-center justify-center rounded-full bg-gold/10 text-gold font-semibold text-sm">
+                      {email[0].toUpperCase()}
+                    </div>
+                    <span className="text-sm">{email}</span>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-muted-foreground hover:text-destructive"
+                    onClick={() => removeCollaborator(email)}
+                    disabled={saving}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </section>
   );
 }
