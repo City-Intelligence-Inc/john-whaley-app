@@ -32,6 +32,13 @@ export default function EventsLayout() {
           title: 'Applicants',
         }}
       />
+      <Stack.Screen
+        name="analyze"
+        options={{
+          title: 'Run Analysis',
+          presentation: 'modal',
+        }}
+      />
     </Stack>
   );
 }

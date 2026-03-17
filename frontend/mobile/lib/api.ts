@@ -147,6 +147,33 @@ export async function importFromLuma(eventId: string) {
   });
 }
 
+// Analysis
+export async function analyzeAll(data: {
+  api_key: string;
+  model: string;
+  provider: string;
+  prompt: string;
+  criteria: string[];
+  session_id: string;
+}) {
+  return fetchAPI<unknown>('/applicants/analyze-all', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+// Prompt settings
+export async function getPromptSettings() {
+  return fetchAPI<{ default_prompt: string; criteria: string[] }>('/settings/prompts');
+}
+
+export async function updatePromptSettings(data: { default_prompt: string; criteria: string[] }) {
+  return fetchAPI<unknown>('/settings/prompts', {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
 // SecureStore helpers
 export async function getStoredApiKey(): Promise<string | null> {
   try {
