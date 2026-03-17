@@ -1,38 +1,14 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ActivityIndicator,
-  Animated, PanResponder, Dimensions, Alert,
+  Dimensions, Alert, ScrollView,
 } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
-import { getSession, getApplicants, updateApplicantStatus } from '../../../lib/api';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { getSession, getApplicants, updateApplicantStatus, batchUpdateStatus } from '../../../lib/api';
 import { colors, getStatusColor } from '../../../lib/theme';
 import type { Session, Applicant } from '../../../lib/api';
 
-// Clean text icon helper (no emoji, no SVG dependency)
-const iconMap: Record<string, { char: string; weight?: string }> = {
-  company: { char: '\u25A0', weight: '400' },   // small square
-  location: { char: '\u25CB', weight: '400' },   // circle
-  sparkle: { char: '\u2726', weight: '400' },     // four-pointed star
-  done: { char: '\u2713', weight: '700' },        // checkmark
-  reject: { char: '\u2715', weight: '700' },      // cross
-  waitlist: { char: '\u2013', weight: '700' },     // en dash
-  accept: { char: '\u2713', weight: '700' },       // checkmark
-  thumbsdown: { char: '\u2715', weight: '700' },
-  thumbsup: { char: '\u2713', weight: '700' },
-  hourglass: { char: '\u2014', weight: '700' },    // em dash
-};
-
-const Icon = ({ name, size = 16, color }: { name: string; size?: number; color?: string }) => {
-  const entry = iconMap[name] || { char: name, weight: '400' };
-  return (
-    <Text style={{ fontSize: size, color: color || colors.muted, fontWeight: (entry.weight as any) || '400' }}>
-      {entry.char}
-    </Text>
-  );
-};
-
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const SWIPE_THRESHOLD = SCREEN_WIDTH * 0.3;
 
 function computeStats(applicants: Applicant[]) {
   const stats = { total: applicants.length, accepted: 0, rejected: 0, waitlisted: 0, pending: 0 };
@@ -61,204 +37,14 @@ const statStyles = StyleSheet.create({
   label: { fontSize: 10, fontWeight: '600', color: colors.muted, marginTop: 2, textTransform: 'uppercase', letterSpacing: 0.3 },
 });
 
-function SwipeCard({
-  applicant,
-  onSwipeLeft,
-  onSwipeRight,
-  onSwipeUp,
-  isTop,
-}: {
-  applicant: Applicant;
-  onSwipeLeft: () => void;
-  onSwipeRight: () => void;
-  onSwipeUp: () => void;
-  isTop: boolean;
-}) {
-  const pan = useRef(new Animated.ValueXY()).current;
-  const opacity = useRef(new Animated.Value(1)).current;
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => isTop,
-      onMoveShouldSetPanResponder: (_, g) => isTop && (Math.abs(g.dx) > 5 || Math.abs(g.dy) > 5),
-      onPanResponderMove: Animated.event([null, { dx: pan.x, dy: pan.y }], { useNativeDriver: false }),
-      onPanResponderRelease: (_, gesture) => {
-        if (gesture.dx > SWIPE_THRESHOLD) {
-          // Swipe right = Accept
-          Animated.parallel([
-            Animated.timing(pan.x, { toValue: SCREEN_WIDTH + 100, duration: 250, useNativeDriver: false }),
-            Animated.timing(opacity, { toValue: 0, duration: 250, useNativeDriver: false }),
-          ]).start(onSwipeRight);
-        } else if (gesture.dx < -SWIPE_THRESHOLD) {
-          // Swipe left = Reject
-          Animated.parallel([
-            Animated.timing(pan.x, { toValue: -SCREEN_WIDTH - 100, duration: 250, useNativeDriver: false }),
-            Animated.timing(opacity, { toValue: 0, duration: 250, useNativeDriver: false }),
-          ]).start(onSwipeLeft);
-        } else if (gesture.dy < -SWIPE_THRESHOLD) {
-          // Swipe up = Waitlist
-          Animated.parallel([
-            Animated.timing(pan.y, { toValue: -800, duration: 250, useNativeDriver: false }),
-            Animated.timing(opacity, { toValue: 0, duration: 250, useNativeDriver: false }),
-          ]).start(onSwipeUp);
-        } else {
-          Animated.spring(pan, { toValue: { x: 0, y: 0 }, useNativeDriver: false, friction: 5 }).start();
-        }
-      },
-    })
-  ).current;
-
-  const rotate = pan.x.interpolate({ inputRange: [-SCREEN_WIDTH, 0, SCREEN_WIDTH], outputRange: ['-15deg', '0deg', '15deg'] });
-  const acceptOpacity = pan.x.interpolate({ inputRange: [0, SWIPE_THRESHOLD], outputRange: [0, 1], extrapolate: 'clamp' });
-  const rejectOpacity = pan.x.interpolate({ inputRange: [-SWIPE_THRESHOLD, 0], outputRange: [1, 0], extrapolate: 'clamp' });
-  const waitlistOpacity = pan.y.interpolate({ inputRange: [-SWIPE_THRESHOLD, 0], outputRange: [1, 0], extrapolate: 'clamp' });
-
-  const score = applicant.ai_score ? parseFloat(String(applicant.ai_score)) : null;
-  const scoreColor = score !== null ? (score >= 70 ? colors.success : score >= 40 ? colors.warning : colors.error) : colors.muted;
-  const displayName = applicant.name || applicant.email || 'Unknown';
-
-  return (
-    <Animated.View
-      {...(isTop ? panResponder.panHandlers : {})}
-      style={[
-        cardStyles.card,
-        isTop && {
-          transform: [{ translateX: pan.x }, { translateY: pan.y }, { rotate }],
-          opacity,
-        },
-        !isTop && { top: 8, transform: [{ scale: 0.96 }] },
-      ]}
-    >
-      {/* Swipe indicators */}
-      {isTop && (
-        <>
-          <Animated.View style={[cardStyles.indicator, cardStyles.acceptIndicator, { opacity: acceptOpacity }]}>
-            <Text style={cardStyles.indicatorText}>ACCEPT</Text>
-          </Animated.View>
-          <Animated.View style={[cardStyles.indicator, cardStyles.rejectIndicator, { opacity: rejectOpacity }]}>
-            <Text style={[cardStyles.indicatorText, { color: colors.error }]}>REJECT</Text>
-          </Animated.View>
-          <Animated.View style={[cardStyles.indicator, cardStyles.waitlistIndicator, { opacity: waitlistOpacity }]}>
-            <Text style={[cardStyles.indicatorText, { color: colors.warning }]}>WAITLIST</Text>
-          </Animated.View>
-        </>
-      )}
-
-      {/* Avatar */}
-      <View style={cardStyles.avatarContainer}>
-        <View style={cardStyles.avatar}>
-          <Text style={cardStyles.avatarText}>{displayName[0]?.toUpperCase() || '?'}</Text>
-        </View>
-        {score !== null && (
-          <View style={[cardStyles.scoreBadge, { backgroundColor: scoreColor + '20', borderColor: scoreColor + '40' }]}>
-            <Text style={[cardStyles.scoreText, { color: scoreColor }]}>{Math.round(score)}</Text>
-          </View>
-        )}
-      </View>
-
-      {/* Name & Info */}
-      <Text style={cardStyles.name} numberOfLines={2}>{displayName}</Text>
-
-      {applicant.title && (
-        <Text style={cardStyles.title} numberOfLines={1}>{applicant.title}</Text>
-      )}
-
-      {applicant.company && (
-        <View style={cardStyles.infoRow}>
-          <Icon name="company" size={12} color={colors.muted} />
-          <Text style={cardStyles.infoText} numberOfLines={1}>{applicant.company}</Text>
-        </View>
-      )}
-
-      {applicant.location && (
-        <View style={cardStyles.infoRow}>
-          <Icon name="location" size={12} color={colors.muted} />
-          <Text style={cardStyles.infoText} numberOfLines={1}>{applicant.location}</Text>
-        </View>
-      )}
-
-      {applicant.attendee_type && (
-        <View style={cardStyles.typeBadge}>
-          <Text style={cardStyles.typeText}>
-            {applicant.attendee_type_detail || applicant.attendee_type}
-          </Text>
-        </View>
-      )}
-
-      {/* AI Reasoning */}
-      {applicant.ai_reasoning && (
-        <View style={cardStyles.reasoningBox}>
-          <View style={cardStyles.reasoningHeader}>
-            <Icon name="sparkle" size={13} color={colors.gold} />
-            <Text style={cardStyles.reasoningLabel}>AI Assessment</Text>
-          </View>
-          <Text style={cardStyles.reasoningText} numberOfLines={6}>
-            {applicant.ai_reasoning}
-          </Text>
-        </View>
-      )}
-
-      {/* Current status */}
-      <View style={[cardStyles.statusBar, { backgroundColor: getStatusColor(applicant.status || 'pending') + '15' }]}>
-        <Text style={[cardStyles.statusText, { color: getStatusColor(applicant.status || 'pending') }]}>
-          {(applicant.status || 'pending').toUpperCase()}
-        </Text>
-      </View>
-    </Animated.View>
-  );
-}
-
-const cardStyles = StyleSheet.create({
-  card: {
-    position: 'absolute', width: SCREEN_WIDTH - 32, alignSelf: 'center',
-    backgroundColor: colors.card, borderRadius: 20, borderWidth: 1, borderColor: colors.border,
-    padding: 24, paddingTop: 32, alignItems: 'center',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.3, shadowRadius: 16, elevation: 8,
-  },
-  indicator: { position: 'absolute', top: 24, zIndex: 10, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8, borderWidth: 2 },
-  acceptIndicator: { right: 24, borderColor: colors.success },
-  rejectIndicator: { left: 24, borderColor: colors.error },
-  waitlistIndicator: { alignSelf: 'center', top: 24, borderColor: colors.warning },
-  indicatorText: { fontSize: 20, fontWeight: '800', color: colors.success, letterSpacing: 2 },
-  avatarContainer: { alignItems: 'center', marginBottom: 16 },
-  avatar: {
-    width: 80, height: 80, borderRadius: 40, backgroundColor: colors.border,
-    justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: colors.gold + '30',
-  },
-  avatarText: { fontSize: 32, fontWeight: '700', color: colors.gold },
-  scoreBadge: {
-    position: 'absolute', bottom: -4, right: -4, paddingHorizontal: 8, paddingVertical: 2,
-    borderRadius: 12, borderWidth: 1, minWidth: 32, alignItems: 'center',
-  },
-  scoreText: { fontSize: 13, fontWeight: '700' },
-  name: { fontSize: 22, fontWeight: '700', color: colors.text, textAlign: 'center', marginBottom: 4 },
-  title: { fontSize: 15, color: colors.textSecondary, textAlign: 'center', marginBottom: 12 },
-  infoRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
-  infoText: { fontSize: 13, color: colors.muted },
-  typeBadge: {
-    marginTop: 8, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12,
-    backgroundColor: colors.gold + '15', borderWidth: 1, borderColor: colors.gold + '30',
-  },
-  typeText: { fontSize: 12, fontWeight: '600', color: colors.gold, textTransform: 'capitalize' },
-  reasoningBox: {
-    marginTop: 16, width: '100%', padding: 12, borderRadius: 12,
-    backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border,
-  },
-  reasoningHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
-  reasoningLabel: { fontSize: 11, fontWeight: '700', color: colors.gold, textTransform: 'uppercase', letterSpacing: 0.5 },
-  reasoningText: { fontSize: 13, color: colors.textSecondary, lineHeight: 18 },
-  statusBar: {
-    marginTop: 16, width: '100%', paddingVertical: 6, borderRadius: 8, alignItems: 'center',
-  },
-  statusText: { fontSize: 11, fontWeight: '700', letterSpacing: 1 },
-});
-
 export default function SessionDetailScreen() {
   const { sessionId } = useLocalSearchParams<{ sessionId: string }>();
+  const router = useRouter();
   const [session, setSession] = useState<Session | null>(null);
   const [applicants, setApplicants] = useState<Applicant[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
@@ -269,7 +55,7 @@ export default function SessionDetailScreen() {
         getSession(sessionId), getApplicants(sessionId),
       ]);
       setSession(sessionData);
-      // Show pending first, then by score descending
+      // Pending first, then by score desc
       const sorted = [...applicantData].sort((a, b) => {
         const order: Record<string, number> = { pending: 0, waitlisted: 1, accepted: 2, rejected: 3 };
         const oa = order[(a.status || 'pending').toLowerCase()] ?? 0;
@@ -286,21 +72,55 @@ export default function SessionDetailScreen() {
 
   useEffect(() => { fetchData().finally(() => setLoading(false)); }, [fetchData]);
 
-  const handleSwipe = useCallback(async (status: string) => {
+  const handleDecision = useCallback(async (status: string) => {
     const applicant = applicants[currentIndex];
-    if (!applicant) return;
+    if (!applicant || saving) return;
+    setSaving(true);
     try {
       await updateApplicantStatus(applicant.applicant_id, status);
+      // Update local state
       setApplicants(prev => prev.map(a =>
         a.applicant_id === applicant.applicant_id ? { ...a, status } : a
       ));
-    } catch {
-      Alert.alert('Error', 'Failed to update status');
+      // Move to next card
+      setCurrentIndex(prev => prev + 1);
+    } catch (err) {
+      Alert.alert('Failed to save', err instanceof Error ? err.message : 'Try again');
+    } finally {
+      setSaving(false);
     }
-    setCurrentIndex(prev => prev + 1);
-  }, [applicants, currentIndex]);
+  }, [applicants, currentIndex, saving]);
+
+  const handleResetAll = useCallback(() => {
+    Alert.alert(
+      'Reset All to Pending?',
+      'This will set all applicants back to pending so you can re-evaluate from scratch.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset All',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setSaving(true);
+              const allIds = applicants.map(a => a.applicant_id);
+              await batchUpdateStatus(allIds, 'pending');
+              // Refresh
+              await fetchData();
+              Alert.alert('Done', 'All applicants reset to pending');
+            } catch (err) {
+              Alert.alert('Error', err instanceof Error ? err.message : 'Failed to reset');
+            } finally {
+              setSaving(false);
+            }
+          },
+        },
+      ]
+    );
+  }, [applicants, fetchData]);
 
   const stats = computeStats(applicants);
+  const current = applicants[currentIndex];
   const remaining = applicants.length - currentIndex;
 
   if (loading) {
@@ -311,8 +131,8 @@ export default function SessionDetailScreen() {
     return (
       <View style={styles.center}>
         <Text style={styles.errorText}>{error}</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={fetchData}>
-          <Text style={styles.retryText}>Retry</Text>
+        <TouchableOpacity style={styles.goldBtn} onPress={fetchData}>
+          <Text style={styles.goldBtnText}>Retry</Text>
         </TouchableOpacity>
       </View>
     );
@@ -322,72 +142,155 @@ export default function SessionDetailScreen() {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        {session && <Text style={styles.sessionName} numberOfLines={1}>{session.name}</Text>}
+        <View style={styles.headerRow}>
+          {session && <Text style={styles.sessionName} numberOfLines={1}>{session.name}</Text>}
+          <TouchableOpacity onPress={handleResetAll} style={styles.resetLink}>
+            <Text style={styles.resetLinkText}>Reset All</Text>
+          </TouchableOpacity>
+        </View>
         <View style={styles.statsRow}>
           <StatBox label="Total" value={stats.total} color={colors.text} />
           <StatBox label="Accept" value={stats.accepted} color={colors.statusAccepted} />
           <StatBox label="Wait" value={stats.waitlisted} color={colors.statusWaitlisted} />
           <StatBox label="Reject" value={stats.rejected} color={colors.statusRejected} />
         </View>
-      </View>
-
-      {/* Card Stack */}
-      <View style={styles.cardStack}>
-        {remaining > 0 ? (
-          <>
-            {/* Next card (behind) */}
-            {currentIndex + 1 < applicants.length && (
-              <SwipeCard
-                key={applicants[currentIndex + 1].applicant_id}
-                applicant={applicants[currentIndex + 1]}
-                onSwipeLeft={() => {}}
-                onSwipeRight={() => {}}
-                onSwipeUp={() => {}}
-                isTop={false}
-              />
-            )}
-            {/* Top card */}
-            <SwipeCard
-              key={applicants[currentIndex].applicant_id}
-              applicant={applicants[currentIndex]}
-              onSwipeLeft={() => handleSwipe('rejected')}
-              onSwipeRight={() => handleSwipe('accepted')}
-              onSwipeUp={() => handleSwipe('waitlisted')}
-              isTop={true}
-            />
-          </>
-        ) : (
-          <View style={styles.doneContainer}>
-            <Icon name="done" size={48} color={colors.gold} />
-            <Text style={styles.doneText}>All reviewed!</Text>
-            <Text style={styles.doneSubtext}>{applicants.length} applicants processed</Text>
-            <TouchableOpacity style={styles.resetButton} onPress={() => setCurrentIndex(0)}>
-              <Text style={styles.resetText}>Start Over</Text>
-            </TouchableOpacity>
-          </View>
+        {remaining > 0 && (
+          <Text style={styles.remainingText}>{remaining} of {applicants.length} remaining</Text>
         )}
       </View>
 
-      {/* Bottom action buttons */}
-      {remaining > 0 && (
-        <View style={styles.actions}>
-          <TouchableOpacity style={[styles.actionBtn, styles.rejectBtn]} onPress={() => handleSwipe('rejected')}>
-            <Icon name="reject" size={22} color={colors.error} />
-            <Text style={[styles.actionLabel, { color: colors.error }]}>Reject</Text>
+      {/* Card or Done State */}
+      {current ? (
+        <ScrollView style={styles.cardScroll} contentContainerStyle={styles.cardScrollContent}>
+          <View style={styles.card}>
+            {/* Avatar */}
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>
+                {(current.name || current.email || '?')[0]?.toUpperCase()}
+              </Text>
+            </View>
+
+            {/* Score badge */}
+            {current.ai_score && parseFloat(String(current.ai_score)) > 0 && (
+              <View style={[styles.scoreBadge, {
+                backgroundColor: (parseFloat(String(current.ai_score)) >= 70 ? colors.success : parseFloat(String(current.ai_score)) >= 40 ? colors.warning : colors.error) + '20',
+              }]}>
+                <Text style={[styles.scoreText, {
+                  color: parseFloat(String(current.ai_score)) >= 70 ? colors.success : parseFloat(String(current.ai_score)) >= 40 ? colors.warning : colors.error,
+                }]}>
+                  {Math.round(parseFloat(String(current.ai_score)))}
+                </Text>
+              </View>
+            )}
+
+            {/* Name */}
+            <Text style={styles.cardName}>{current.name || current.email || 'Unknown'}</Text>
+
+            {/* Title + Company */}
+            {(current.title || current.company) && (
+              <Text style={styles.cardTitle}>
+                {current.title}{current.title && current.company ? ' at ' : ''}{current.company}
+              </Text>
+            )}
+
+            {/* Location */}
+            {current.location && (
+              <Text style={styles.cardLocation}>{current.location}</Text>
+            )}
+
+            {/* Type badge */}
+            {current.attendee_type && (
+              <View style={styles.typeBadge}>
+                <Text style={styles.typeText}>
+                  {current.attendee_type_detail || current.attendee_type}
+                </Text>
+              </View>
+            )}
+
+            {/* Current status */}
+            <View style={[styles.statusBar, { backgroundColor: getStatusColor(current.status || 'pending') + '15' }]}>
+              <Text style={[styles.statusBarText, { color: getStatusColor(current.status || 'pending') }]}>
+                {(current.status || 'pending').toUpperCase()}
+              </Text>
+            </View>
+
+            {/* AI Reasoning */}
+            {current.ai_reasoning && (
+              <View style={styles.reasoningBox}>
+                <Text style={styles.reasoningLabel}>AI ASSESSMENT</Text>
+                <Text style={styles.reasoningText}>{current.ai_reasoning}</Text>
+              </View>
+            )}
+
+            {/* Email */}
+            {current.email && (
+              <Text style={styles.cardMeta}>{current.email}</Text>
+            )}
+          </View>
+        </ScrollView>
+      ) : (
+        <View style={styles.doneContainer}>
+          <Text style={styles.doneCheck}>{'\u2713'}</Text>
+          <Text style={styles.doneText}>All reviewed!</Text>
+          <Text style={styles.doneSubtext}>{applicants.length} applicants processed</Text>
+          <TouchableOpacity style={styles.goldBtn} onPress={() => setCurrentIndex(0)}>
+            <Text style={styles.goldBtnText}>Review Again</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.actionBtn, styles.waitlistBtn]} onPress={() => handleSwipe('waitlisted')}>
-            <Icon name="hourglass" size={20} color={colors.warning} />
-            <Text style={[styles.actionLabel, { color: colors.warning }]}>Waitlist</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.actionBtn, styles.acceptBtn]} onPress={() => handleSwipe('accepted')}>
-            <Icon name="accept" size={22} color={colors.success} />
-            <Text style={[styles.actionLabel, { color: colors.success }]}>Accept</Text>
+          <TouchableOpacity style={styles.outlineBtn} onPress={handleResetAll}>
+            <Text style={styles.outlineBtnText}>Reset All to Pending</Text>
           </TouchableOpacity>
         </View>
       )}
 
-      {remaining > 0 && (
-        <Text style={styles.remainingText}>{remaining} remaining</Text>
+      {/* Decision Buttons */}
+      {current && (
+        <View style={styles.actions}>
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.rejectBtn]}
+            onPress={() => handleDecision('rejected')}
+            disabled={saving}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.rejectIcon}>{'\u2715'}</Text>
+            <Text style={[styles.actionLabel, { color: colors.error }]}>REJECT</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.waitlistBtn]}
+            onPress={() => handleDecision('waitlisted')}
+            disabled={saving}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.waitlistIcon}>{'\u2014'}</Text>
+            <Text style={[styles.actionLabel, { color: colors.warning }]}>WAITLIST</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.acceptBtn]}
+            onPress={() => handleDecision('accepted')}
+            disabled={saving}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.acceptIcon}>{'\u2713'}</Text>
+            <Text style={[styles.actionLabel, { color: colors.success }]}>ACCEPT</Text>
+          </TouchableOpacity>
+
+          {saving && (
+            <View style={styles.savingOverlay}>
+              <ActivityIndicator color={colors.gold} size="small" />
+            </View>
+          )}
+        </View>
+      )}
+
+      {/* Skip button */}
+      {current && (
+        <TouchableOpacity
+          style={styles.skipBtn}
+          onPress={() => setCurrentIndex(prev => prev + 1)}
+        >
+          <Text style={styles.skipText}>Skip {'\u203A'}</Text>
+        </TouchableOpacity>
       )}
     </View>
   );
@@ -396,29 +299,91 @@ export default function SessionDetailScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background, padding: 32 },
+
+  // Header
   header: { padding: 16, paddingBottom: 8 },
-  sessionName: { fontSize: 18, fontWeight: '700', color: colors.text, marginBottom: 12 },
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  sessionName: { fontSize: 18, fontWeight: '700', color: colors.text, flex: 1 },
+  resetLink: { paddingHorizontal: 12, paddingVertical: 6 },
+  resetLinkText: { fontSize: 13, color: colors.error, fontWeight: '600' },
   statsRow: { flexDirection: 'row', gap: 6 },
-  cardStack: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 16 },
+  remainingText: { textAlign: 'center', color: colors.muted, fontSize: 12, marginTop: 8 },
+
+  // Card
+  cardScroll: { flex: 1 },
+  cardScrollContent: { padding: 16, paddingBottom: 8 },
+  card: {
+    backgroundColor: colors.card, borderRadius: 20, borderWidth: 1, borderColor: colors.border,
+    padding: 24, alignItems: 'center',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 12,
+  },
+  avatar: {
+    width: 80, height: 80, borderRadius: 40, backgroundColor: colors.border,
+    justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: colors.gold + '30',
+    marginBottom: 16,
+  },
+  avatarText: { fontSize: 32, fontWeight: '700', color: colors.gold },
+  scoreBadge: {
+    paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12, marginBottom: 12,
+  },
+  scoreText: { fontSize: 16, fontWeight: '800' },
+  cardName: { fontSize: 22, fontWeight: '700', color: colors.text, textAlign: 'center', marginBottom: 4 },
+  cardTitle: { fontSize: 14, color: colors.textSecondary, textAlign: 'center', marginBottom: 4 },
+  cardLocation: { fontSize: 13, color: colors.muted, marginBottom: 8 },
+  typeBadge: {
+    paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12,
+    backgroundColor: colors.gold + '15', borderWidth: 1, borderColor: colors.gold + '30',
+    marginBottom: 12,
+  },
+  typeText: { fontSize: 12, fontWeight: '600', color: colors.gold, textTransform: 'capitalize' },
+  statusBar: {
+    width: '100%', paddingVertical: 6, borderRadius: 8, alignItems: 'center', marginBottom: 12,
+  },
+  statusBarText: { fontSize: 11, fontWeight: '700', letterSpacing: 1 },
+  reasoningBox: {
+    width: '100%', padding: 12, borderRadius: 12,
+    backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, marginBottom: 8,
+  },
+  reasoningLabel: { fontSize: 10, fontWeight: '700', color: colors.gold, letterSpacing: 0.5, marginBottom: 6 },
+  reasoningText: { fontSize: 13, color: colors.textSecondary, lineHeight: 18 },
+  cardMeta: { fontSize: 12, color: colors.muted, marginTop: 4 },
+
+  // Actions
   actions: {
     flexDirection: 'row', justifyContent: 'center', alignItems: 'center',
-    gap: 20, paddingVertical: 16, paddingHorizontal: 24,
+    gap: 20, paddingVertical: 12, paddingHorizontal: 24,
   },
   actionBtn: {
-    alignItems: 'center', justifyContent: 'center', width: 72, height: 72,
-    borderRadius: 36, borderWidth: 2, gap: 4,
+    alignItems: 'center', justifyContent: 'center', width: 76, height: 76,
+    borderRadius: 38, borderWidth: 2, gap: 4,
   },
-  rejectBtn: { borderColor: colors.error + '40', backgroundColor: colors.error + '10' },
-  waitlistBtn: { borderColor: colors.warning + '40', backgroundColor: colors.warning + '10', width: 60, height: 60, borderRadius: 30 },
-  acceptBtn: { borderColor: colors.success + '40', backgroundColor: colors.success + '10' },
-  actionLabel: { fontSize: 9, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
-  remainingText: { textAlign: 'center', color: colors.muted, fontSize: 12, paddingBottom: 12 },
-  doneContainer: { alignItems: 'center', gap: 12 },
+  rejectBtn: { borderColor: colors.error + '50', backgroundColor: colors.error + '10' },
+  rejectIcon: { fontSize: 24, fontWeight: '800', color: colors.error },
+  waitlistBtn: { borderColor: colors.warning + '50', backgroundColor: colors.warning + '10', width: 64, height: 64, borderRadius: 32 },
+  waitlistIcon: { fontSize: 24, fontWeight: '800', color: colors.warning },
+  acceptBtn: { borderColor: colors.success + '50', backgroundColor: colors.success + '10' },
+  acceptIcon: { fontSize: 28, fontWeight: '800', color: colors.success },
+  actionLabel: { fontSize: 8, fontWeight: '800', letterSpacing: 0.5 },
+  savingOverlay: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    justifyContent: 'center', alignItems: 'center',
+  },
+
+  // Skip
+  skipBtn: { alignItems: 'center', paddingBottom: 100 },
+  skipText: { fontSize: 14, color: colors.muted, fontWeight: '500' },
+
+  // Done
+  doneContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12, padding: 32 },
+  doneCheck: { fontSize: 48, fontWeight: '300', color: colors.gold },
   doneText: { fontSize: 24, fontWeight: '700', color: colors.text },
   doneSubtext: { fontSize: 14, color: colors.muted },
-  resetButton: { marginTop: 8, backgroundColor: colors.gold, paddingHorizontal: 24, paddingVertical: 10, borderRadius: 8 },
-  resetText: { color: colors.background, fontWeight: '600', fontSize: 14 },
+
+  // Buttons
+  goldBtn: { backgroundColor: colors.gold, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 10, marginTop: 8 },
+  goldBtnText: { color: colors.background, fontWeight: '700', fontSize: 15 },
+  outlineBtn: { borderWidth: 1, borderColor: colors.border, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 10, marginTop: 4 },
+  outlineBtnText: { color: colors.muted, fontWeight: '600', fontSize: 14 },
+
   errorText: { fontSize: 15, color: colors.error, textAlign: 'center', marginBottom: 16 },
-  retryButton: { backgroundColor: colors.gold, paddingHorizontal: 24, paddingVertical: 10, borderRadius: 8 },
-  retryText: { color: colors.background, fontWeight: '600', fontSize: 14 },
 });

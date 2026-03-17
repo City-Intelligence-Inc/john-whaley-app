@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Photo Reviewer</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0a; color: #e0e0e0; min-height: 100vh; }
+.top { background: #111; border-bottom: 1px solid #222; padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; }
+.top h1 { font-size: 17px; font-weight: 600; }
+.top .stats { font-size: 13px; color: #888; }
+.top .stats b { color: #4fc3f7; }
+
+.main { display: flex; height: calc(100vh - 52px); }
+
+/* Sidebar */
+.sidebar { width: 260px; border-right: 1px solid #222; overflow-y: auto; background: #0d0d0d; }
+.sidebar-item { padding: 10px 14px; border-bottom: 1px solid #1a1a1a; cursor: pointer; display: flex; align-items: center; gap: 10px; }
+.sidebar-item:hover { background: #151515; }
+.sidebar-item.active { background: #1a2332; border-left: 3px solid #4fc3f7; }
+.sidebar-item.done { opacity: 0.4; }
+.sidebar-item .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.sidebar-item .name { font-size: 13px; font-weight: 500; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sidebar-item .status { font-size: 10px; }
+
+/* Card */
+.card-area { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px; overflow-y: auto; }
+.card { max-width: 500px; width: 100%; background: #111; border: 1px solid #222; border-radius: 16px; overflow: hidden; }
+.card-header { padding: 24px; display: flex; gap: 16px; align-items: start; }
+.card-photo { width: 100px; height: 100px; border-radius: 12px; object-fit: cover; background: #1a1a1a; flex-shrink: 0; }
+.card-photo-placeholder { width: 100px; height: 100px; border-radius: 12px; background: #1a237e; display: flex; align-items: center; justify-content: center; font-size: 32px; font-weight: 700; color: #90caf9; flex-shrink: 0; }
+.card-info h2 { font-size: 20px; font-weight: 700; }
+.card-info .headline { font-size: 13px; color: #888; margin-top: 4px; }
+.card-info .meta { font-size: 12px; color: #666; margin-top: 8px; display: flex; flex-wrap: wrap; gap: 12px; }
+.card-info a { color: #4fc3f7; text-decoration: none; }
+.card-info a:hover { text-decoration: underline; }
+.card-body { padding: 0 24px 24px; }
+.card-body .section { margin-bottom: 12px; }
+.card-body .section h4 { font-size: 10px; color: #555; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+.card-body .section p { font-size: 13px; color: #ccc; line-height: 1.6; }
+
+/* Photo upload zone */
+.photo-upload { margin-top: 12px; padding: 12px; border: 2px dashed #333; border-radius: 10px; text-align: center; cursor: pointer; }
+.photo-upload:hover { border-color: #4fc3f7; }
+.photo-upload .hint { font-size: 11px; color: #555; }
+
+/* Actions */
+.actions { border-top: 1px solid #222; padding: 16px 24px; display: flex; gap: 10px; }
+.actions button { flex: 1; padding: 14px; border-radius: 10px; border: none; font-size: 15px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+.btn-reject { background: #1a1a1a; color: #ef5350; border: 1px solid #333; }
+.btn-reject:hover { background: #2a1515; border-color: #ef5350; }
+.btn-skip { background: #1a1a1a; color: #888; border: 1px solid #333; }
+.btn-skip:hover { background: #1a1a1a; border-color: #888; }
+.btn-accept { background: #1b3a1b; color: #66bb6a; border: 1px solid #2e7d32; }
+.btn-accept:hover { background: #254025; }
+
+.progress { width: 100%; max-width: 500px; margin-bottom: 16px; }
+.progress-bar { height: 4px; background: #222; border-radius: 2px; overflow: hidden; }
+.progress-fill { height: 100%; background: #4fc3f7; transition: width 0.3s; }
+.progress-text { font-size: 11px; color: #555; margin-top: 4px; display: flex; justify-content: space-between; }
+
+.keys { font-size: 10px; color: #444; margin-top: 12px; }
+kbd { background: #1a1a1a; padding: 2px 6px; border-radius: 3px; border: 1px solid #333; font-family: monospace; }
+
+.toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #2e7d32; color: #fff; padding: 10px 20px; border-radius: 8px; font-size: 14px; opacity: 0; transition: opacity 0.3s; z-index: 100; }
+.toast.show { opacity: 1; }
+.toast.err { background: #c62828; }
+</style>
+</head>
+<body>
+
+<div class="top">
+  <h1>Photo Reviewer</h1>
+  <div class="stats" id="stats">Loading...</div>
+</div>
+
+<div class="main">
+  <div class="sidebar" id="sidebar"></div>
+  <div class="card-area" id="cardArea">
+    <div style="color:#555">Loading profiles...</div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = 'https://aicm3pweed.us-east-1.awsapprunner.com';
+const S3_BUCKET = 'john-whaley-linkedin-photos';
+
+let profiles = [];
+let currentIdx = 0;
+let customPhoto = null; // base64 if user uploads replacement
+
+function toast(msg, isErr) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (isErr ? ' err' : '');
+  setTimeout(() => t.className = 'toast', 2500);
+}
+
+async function loadProfiles() {
+  const resp = await fetch(`${API}/linkedin/database`);
+  const data = await resp.json();
+  const items = data.items || [];
+
+  // All profiles, sorted: missing photo first, then by name
+  profiles = items
+    .filter(i => i.url && i.url.includes('/in/') && !i.error)
+    .map(i => {
+      // Build display name from multiple sources
+      let displayName = i.name || '';
+      if (!displayName) {
+        const slug = (i.url.match(/\/in\/([^/?&#\s]+)/) || [])[1] || '';
+        displayName = slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      }
+      return {
+        ...i,
+        _displayName: displayName,
+        _needsPhoto: !i.photo_url,
+        _reviewed: false,
+        _decision: null,
+      };
+    })
+    .sort((a, b) => {
+      if (a._needsPhoto !== b._needsPhoto) return a._needsPhoto ? -1 : 1;
+      return (a._displayName || '').localeCompare(b._displayName || '');
+    });
+
+  updateStats();
+  renderSidebar();
+  renderCard();
+}
+
+function updateStats() {
+  const need = profiles.filter(p => p._needsPhoto).length;
+  const reviewed = profiles.filter(p => p._reviewed).length;
+  const accepted = profiles.filter(p => p._decision === 'accept').length;
+  document.getElementById('stats').innerHTML = `<b>${need}</b> need photos &middot; <b>${reviewed}</b> reviewed &middot; <b>${accepted}</b> accepted`;
+}
+
+function renderSidebar() {
+  const el = document.getElementById('sidebar');
+  el.innerHTML = profiles.map((p, i) => {
+    const active = i === currentIdx ? ' active' : '';
+    const done = p._reviewed ? ' done' : '';
+    const dotColor = p._decision === 'accept' ? '#4caf50' : p._decision === 'reject' ? '#ef5350' : p.photo_url ? '#333' : '#4fc3f7';
+    return `<div class="sidebar-item${active}${done}" onclick="goTo(${i})">
+      <div class="dot" style="background:${dotColor}"></div>
+      <div class="name">${p._displayName || p.url.split('/in/')[1] || '?'}</div>
+      ${p._needsPhoto ? '<div class="status" style="color:#4fc3f7">needs photo</div>' : ''}
+    </div>`;
+  }).join('');
+}
+
+function renderCard() {
+  const area = document.getElementById('cardArea');
+  if (!profiles.length) { area.innerHTML = '<div style="color:#555">No profiles</div>'; return; }
+
+  const p = profiles[currentIdx];
+  const name = p._displayName || 'Unknown';
+  const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+  const headline = p.headline || '';
+  const company = p.company || '';
+  const location = p.location || '';
+  const about = p.about || '';
+  const experience = p.experience || '';
+  const education = p.education || '';
+  const connections = p.connections || '';
+  const skills = p.skills || '';
+  const slug = (p.url.match(/\/in\/([^/?&#\s]+)/) || [])[1] || '';
+  const existingPhoto = p.photo_url || '';
+
+  area.innerHTML = `
+    <div class="progress">
+      <div class="progress-bar"><div class="progress-fill" style="width:${((currentIdx+1)/profiles.length)*100}%"></div></div>
+      <div class="progress-text">
+        <span>${currentIdx + 1} / ${profiles.length}</span>
+        <span>${profiles.filter(x=>x._decision==='accept').length} accepted</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div id="photoContainer">
+          ${existingPhoto
+            ? `<img class="card-photo" src="${existingPhoto}" onerror="this.style.display='none';document.getElementById('photoPlaceholder').style.display='flex'">`
+            : ''}
+          <div class="card-photo-placeholder" id="photoPlaceholder" style="${existingPhoto ? 'display:none' : ''}">${initials}</div>
+        </div>
+        <div class="card-info">
+          <h2>${name}</h2>
+          ${headline ? `<div class="headline">${headline}</div>` : ''}
+          <div class="meta">
+            ${company ? `<span>${company}</span>` : ''}
+            ${location ? `<span>${location}</span>` : ''}
+            <a href="https://www.linkedin.com/in/${slug}" target="_blank">LinkedIn &rarr;</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="card-body">
+        <div style="margin-bottom:16px;">
+          <a href="https://www.linkedin.com/in/${slug}" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:8px 16px;background:#0a66c2;color:#fff;border-radius:8px;font-size:13px;font-weight:600;text-decoration:none;">
+            Open LinkedIn Profile &rarr;
+          </a>
+          <span style="font-size:11px;color:#555;margin-left:8px;">Right-click photo &rarr; Copy Image &rarr; Cmd+V here</span>
+        </div>
+
+        ${headline ? `<div class="section"><h4>Headline</h4><p>${headline}</p></div>` : ''}
+        ${company ? `<div class="section"><h4>Company</h4><p>${company}</p></div>` : ''}
+        ${location ? `<div class="section"><h4>Location</h4><p>${location}</p></div>` : ''}
+        ${about ? `<div class="section"><h4>About</h4><p>${about.slice(0, 400)}${about.length > 400 ? '...' : ''}</p></div>` : ''}
+        ${experience ? `<div class="section"><h4>Experience</h4><p>${experience.slice(0, 400)}${experience.length > 400 ? '...' : ''}</p></div>` : ''}
+        ${education ? `<div class="section"><h4>Education</h4><p>${education.slice(0, 200)}</p></div>` : ''}
+        ${skills ? `<div class="section"><h4>Skills</h4><p>${skills.slice(0, 200)}</p></div>` : ''}
+        ${!headline && !about && !experience ? '<div class="section"><p style="color:#555;font-style:italic;">No detailed profile data. Open LinkedIn to verify.</p></div>' : ''}
+
+        <div class="photo-upload" id="photoUpload" onclick="document.getElementById('photoInput').click()">
+          <div id="uploadPreview"></div>
+          <div class="hint" id="uploadHint">Paste photo here (Cmd+V) or click to upload</div>
+        </div>
+        <input type="file" id="photoInput" accept="image/*" style="display:none" onchange="handleFileUpload(this)">
+      </div>
+
+      <div class="actions">
+        <button class="btn-reject" onclick="decide('reject')">Reject</button>
+        <button class="btn-skip" onclick="decide('skip')">Skip</button>
+        <button class="btn-accept" onclick="decide('accept')">Accept & Save</button>
+      </div>
+    </div>
+
+    <div class="keys">
+      <kbd>A</kbd> reject &nbsp; <kbd>S</kbd> skip &nbsp; <kbd>D</kbd> accept &nbsp; <kbd>W</kbd> back &nbsp; <kbd>Cmd+V</kbd> paste photo
+    </div>
+  `;
+
+  customPhoto = null;
+  renderSidebar();
+}
+
+function handleFileUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => setCustomPhoto(e.target.result);
+  reader.readAsDataURL(file);
+}
+
+function setCustomPhoto(dataUrl) {
+  customPhoto = dataUrl;
+  const preview = document.getElementById('uploadPreview');
+  if (preview) {
+    preview.innerHTML = `<img src="${dataUrl}" style="max-width:80px;max-height:80px;border-radius:8px;">`;
+    document.getElementById('uploadHint').textContent = 'Photo ready. Click Accept to save.';
+  }
+}
+
+// Paste handler
+document.addEventListener('paste', (e) => {
+  for (const item of e.clipboardData.items) {
+    if (item.type.startsWith('image/')) {
+      e.preventDefault();
+      const file = item.getAsFile();
+      const reader = new FileReader();
+      reader.onload = (ev) => setCustomPhoto(ev.target.result);
+      reader.readAsDataURL(file);
+      return;
+    }
+  }
+});
+
+async function decide(action) {
+  const p = profiles[currentIdx];
+  p._reviewed = true;
+  p._decision = action;
+
+  if (action === 'accept' && customPhoto) {
+    // Upload the custom photo to backend
+    try {
+      const resp = await fetch(`${API}/linkedin/manual-scrape`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: p.url,
+          content: '', // don't overwrite existing content
+          photo_base64: customPhoto,
+        }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        p.photo_url = data.photo_url;
+        toast(`Photo saved for ${p.name}`);
+      } else {
+        toast('Failed to save photo', true);
+      }
+    } catch (e) {
+      toast('Error: ' + e.message, true);
+    }
+  } else if (action === 'accept' && p.photo_url) {
+    toast(`${p.name} already has photo`);
+  } else if (action === 'accept') {
+    toast('No photo to save - paste or upload one first', true);
+    return; // Don't advance
+  } else if (action === 'reject') {
+    toast(`Skipped ${p.name}`);
+  }
+
+  // Advance
+  if (currentIdx < profiles.length - 1) {
+    currentIdx++;
+    renderCard();
+  }
+  updateStats();
+}
+
+function goTo(idx) {
+  currentIdx = idx;
+  renderCard();
+}
+
+// Keyboard
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  switch (e.key) {
+    case 'd': decide('accept'); break;
+    case 's': decide('skip'); break;
+    case 'a': decide('reject'); break;
+    case 'w': if (currentIdx > 0) { currentIdx--; renderCard(); } break;
+  }
+});
+
+loadProfiles();
+</script>
+</body>
+</html>
