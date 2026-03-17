@@ -12,11 +12,14 @@ import {
   XCircle,
   Users,
   CreditCard,
-  List,
   Search,
   X,
   ExternalLink,
   Mail,
+  MapPin,
+  Building2,
+  GraduationCap,
+  Sparkles,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -303,60 +306,107 @@ export default function EventWorkspacePage() {
               </div>
             )}
 
-            {/* Guest rows */}
+            {/* Guest cards */}
             {total > 0 && (
-              <div className="rounded-xl border border-border/50 overflow-hidden divide-y divide-border/30">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                 {filtered.map((a) => {
                   const photo = (a[`linkedin_image`] as string) || (a[`photo_url`] as string) || "";
                   const headline = (a[`linkedin_headline`] as string) || a.title || "";
+                  const about = (a[`linkedin_about`] as string) || "";
+                  const company = a.company || (a[`linkedin_company`] as string) || "";
+                  const location = a.location || (a[`linkedin_location`] as string) || "";
+                  const education = (a[`linkedin_education`] as string) || "";
+                  const score = a.ai_score ? parseInt(a.ai_score) : 0;
                   const isPending = a.status === "pending";
+                  const name = getName(a);
 
                   return (
                     <div
                       key={a.applicant_id}
-                      className="flex items-center gap-3 px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer"
+                      className="rounded-xl border border-border/50 bg-card/50 hover:border-border transition-all overflow-hidden cursor-pointer group"
                       onClick={() => setSelectedApplicantId(a.applicant_id)}
                     >
-                      {/* Photo */}
-                      {photo ? (
-                        <img src={photo} alt="" className="size-9 rounded-full object-cover shrink-0" />
-                      ) : (
-                        <div className="size-9 rounded-full bg-muted flex items-center justify-center shrink-0 text-sm font-medium text-muted-foreground">
-                          {getName(a).charAt(0).toUpperCase()}
+                      {/* Card header with photo */}
+                      <div className="p-4 pb-3">
+                        <div className="flex items-start gap-3">
+                          {photo ? (
+                            <img src={photo} alt="" className="size-14 rounded-xl object-cover shrink-0 ring-1 ring-border/50" />
+                          ) : (
+                            <div className="size-14 rounded-xl bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center shrink-0 text-xl font-bold text-muted-foreground/50">
+                              {name.charAt(0).toUpperCase()}
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <h3 className="text-sm font-semibold truncate group-hover:text-gold transition-colors">{name}</h3>
+                              {score > 0 && (
+                                <span className={`text-sm font-bold tabular-nums ${score >= 70 ? "text-emerald-500" : score >= 40 ? "text-amber-500" : "text-red-500"}`}>{score}</span>
+                              )}
+                            </div>
+                            {headline && <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5 leading-relaxed">{headline}</p>}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Info chips */}
+                      {(company || location || education) && (
+                        <div className="px-4 pb-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                          {company && <span className="flex items-center gap-1"><Building2 className="size-3" />{company}</span>}
+                          {location && <span className="flex items-center gap-1"><MapPin className="size-3" />{location}</span>}
+                          {education && <span className="flex items-center gap-1"><GraduationCap className="size-3" /><span className="truncate max-w-[150px]">{education.split("\n")[0]}</span></span>}
                         </div>
                       )}
 
-                      {/* Name + headline */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium truncate">{getName(a)}</span>
-                          {a.email && <span className="text-xs text-muted-foreground truncate hidden sm:inline">{a.email}</span>}
+                      {/* About snippet */}
+                      {about && (
+                        <div className="px-4 pb-2">
+                          <p className="text-[11px] text-muted-foreground/70 line-clamp-2 leading-relaxed">{about}</p>
                         </div>
-                        {headline && <p className="text-xs text-muted-foreground truncate">{headline}</p>}
-                      </div>
+                      )}
 
-                      {/* Status / actions */}
-                      <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
-                        {isPending ? (
-                          <>
-                            <button
-                              onClick={() => handleStatusChange(a.applicant_id, "accepted")}
-                              className="text-xs font-medium text-emerald-500 hover:text-emerald-400 flex items-center gap-1"
-                            >
-                              <CheckCircle2 className="size-3.5" /> Approve
-                            </button>
-                            <button
-                              onClick={() => handleStatusChange(a.applicant_id, "rejected")}
-                              className="text-xs font-medium text-red-500 hover:text-red-400 flex items-center gap-1"
-                            >
-                              <XCircle className="size-3.5" /> Decline
-                            </button>
-                          </>
-                        ) : (
-                          <span className={`text-xs font-medium ${statusColor(a.status)}`}>
-                            {statusLabel(a.status)}
-                          </span>
-                        )}
+                      {/* AI reasoning */}
+                      {a.ai_reasoning && (
+                        <div className="px-4 pb-2">
+                          <div className="rounded-lg bg-gold/5 border border-gold/10 px-2.5 py-1.5">
+                            <p className="text-[11px] text-muted-foreground line-clamp-2 flex items-start gap-1.5">
+                              <Sparkles className="size-3 mt-0.5 shrink-0 text-gold" />
+                              {a.ai_reasoning}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Footer: status + actions */}
+                      <div className="px-4 py-2.5 border-t border-border/30 flex items-center justify-between" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-2">
+                          {a.attendee_type && (
+                            <Badge variant="outline" className="text-[10px] h-5">{a.attendee_type_detail || a.attendee_type}</Badge>
+                          )}
+                          {a.linkedin_url && (
+                            <a href={a.linkedin_url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-400">
+                              <Linkedin className="size-3.5" />
+                            </a>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          {isPending ? (
+                            <>
+                              <button onClick={() => handleStatusChange(a.applicant_id, "accepted")}
+                                className="h-7 px-2.5 rounded-md text-[11px] font-medium text-emerald-500 hover:bg-emerald-500/10 flex items-center gap-1 transition-colors">
+                                <CheckCircle2 className="size-3" />Approve
+                              </button>
+                              <button onClick={() => handleStatusChange(a.applicant_id, "rejected")}
+                                className="h-7 px-2.5 rounded-md text-[11px] font-medium text-red-500 hover:bg-red-500/10 flex items-center gap-1 transition-colors">
+                                <XCircle className="size-3" />Decline
+                              </button>
+                            </>
+                          ) : (
+                            <span className={`text-xs font-medium flex items-center gap-1 ${statusColor(a.status)}`}>
+                              <span className={`size-1.5 rounded-full ${a.status === "accepted" ? "bg-emerald-500" : a.status === "rejected" ? "bg-red-500" : a.status === "waitlisted" ? "bg-amber-500" : "bg-blue-500"}`} />
+                              {statusLabel(a.status)}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                   );
