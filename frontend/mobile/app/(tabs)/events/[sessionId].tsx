@@ -163,68 +163,94 @@ export default function SessionDetailScreen() {
       {current ? (
         <ScrollView style={styles.cardScroll} contentContainerStyle={styles.cardScrollContent}>
           <View style={styles.card}>
-            {/* Avatar */}
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>
-                {(current.name || current.email || '?')[0]?.toUpperCase()}
-              </Text>
-            </View>
+            {/* LinkedIn-style header with banner */}
+            <View style={styles.cardBanner} />
 
-            {/* Score badge */}
-            {current.ai_score && parseFloat(String(current.ai_score)) > 0 && (
-              <View style={[styles.scoreBadge, {
-                backgroundColor: (parseFloat(String(current.ai_score)) >= 70 ? colors.success : parseFloat(String(current.ai_score)) >= 40 ? colors.warning : colors.error) + '20',
-              }]}>
-                <Text style={[styles.scoreText, {
-                  color: parseFloat(String(current.ai_score)) >= 70 ? colors.success : parseFloat(String(current.ai_score)) >= 40 ? colors.warning : colors.error,
-                }]}>
-                  {Math.round(parseFloat(String(current.ai_score)))}
+            {/* Avatar overlapping banner */}
+            <View style={styles.avatarWrap}>
+              <View style={styles.avatar}>
+                <Text style={styles.avatarText}>
+                  {(current.name || current.linkedin_name as string || current.email || '?')[0]?.toUpperCase()}
                 </Text>
               </View>
-            )}
+              {/* Score pill next to avatar */}
+              {current.ai_score && parseFloat(String(current.ai_score)) > 0 && (() => {
+                const score = parseFloat(String(current.ai_score));
+                const sc = score >= 70 ? colors.success : score >= 40 ? colors.warning : colors.error;
+                return (
+                  <View style={[styles.scorePill, { backgroundColor: sc + '20', borderColor: sc + '40' }]}>
+                    <Text style={[styles.scoreNum, { color: sc }]}>{Math.round(score)}</Text>
+                  </View>
+                );
+              })()}
+            </View>
 
             {/* Name */}
-            <Text style={styles.cardName}>{current.name || current.email || 'Unknown'}</Text>
+            <Text style={styles.cardName}>
+              {current.linkedin_name as string || current.name || current.email || 'Unknown'}
+            </Text>
 
-            {/* Title + Company */}
-            {(current.title || current.company) && (
-              <Text style={styles.cardTitle}>
-                {current.title}{current.title && current.company ? ' at ' : ''}{current.company}
+            {/* Headline (LinkedIn-style) */}
+            {(current.linkedin_headline || current.title || current.company) && (
+              <Text style={styles.cardHeadline} numberOfLines={3}>
+                {current.linkedin_headline as string ||
+                  (current.title ? `${current.title}${current.company ? ` at ${current.company}` : ''}` : current.company as string)}
               </Text>
             )}
 
-            {/* Location */}
-            {current.location && (
-              <Text style={styles.cardLocation}>{current.location}</Text>
-            )}
-
-            {/* Type badge */}
-            {current.attendee_type && (
-              <View style={styles.typeBadge}>
-                <Text style={styles.typeText}>
-                  {current.attendee_type_detail || current.attendee_type}
+            {/* Location + Connections row */}
+            <View style={styles.metaRow}>
+              {(current.linkedin_location || current.location) && (
+                <Text style={styles.metaText}>
+                  {current.linkedin_location as string || current.location}
                 </Text>
-              </View>
-            )}
-
-            {/* Current status */}
-            <View style={[styles.statusBar, { backgroundColor: getStatusColor(current.status || 'pending') + '15' }]}>
-              <Text style={[styles.statusBarText, { color: getStatusColor(current.status || 'pending') }]}>
-                {(current.status || 'pending').toUpperCase()}
-              </Text>
+              )}
+              {current.linkedin_url && (
+                <View style={styles.linkedinBadge}>
+                  <Text style={styles.linkedinBadgeText}>in</Text>
+                </View>
+              )}
             </View>
 
-            {/* AI Reasoning */}
+            {/* Divider */}
+            <View style={styles.divider} />
+
+            {/* Status + Type row */}
+            <View style={styles.badgeRow}>
+              <View style={[styles.statusChip, { backgroundColor: getStatusColor(current.status || 'pending') + '15' }]}>
+                <Text style={[styles.statusChipText, { color: getStatusColor(current.status || 'pending') }]}>
+                  {(current.status || 'pending').toUpperCase()}
+                </Text>
+              </View>
+              {current.attendee_type && (
+                <View style={styles.typeChip}>
+                  <Text style={styles.typeChipText}>
+                    {current.attendee_type_detail as string || current.attendee_type}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* AI Assessment */}
             {current.ai_reasoning && (
-              <View style={styles.reasoningBox}>
-                <Text style={styles.reasoningLabel}>AI ASSESSMENT</Text>
-                <Text style={styles.reasoningText}>{current.ai_reasoning}</Text>
+              <View style={styles.assessmentCard}>
+                <Text style={styles.assessmentLabel}>AI ASSESSMENT</Text>
+                <Text style={styles.assessmentText}>{current.ai_reasoning as string}</Text>
               </View>
             )}
 
-            {/* Email */}
+            {/* Contact info */}
             {current.email && (
-              <Text style={styles.cardMeta}>{current.email}</Text>
+              <View style={styles.contactRow}>
+                <Text style={styles.contactLabel}>Email</Text>
+                <Text style={styles.contactValue}>{current.email}</Text>
+              </View>
+            )}
+            {current.linkedin_url && (
+              <View style={styles.contactRow}>
+                <Text style={styles.contactLabel}>LinkedIn</Text>
+                <Text style={styles.contactValue} numberOfLines={1}>{current.linkedin_url}</Text>
+              </View>
             )}
           </View>
         </ScrollView>
@@ -309,44 +335,59 @@ const styles = StyleSheet.create({
   statsRow: { flexDirection: 'row', gap: 6 },
   remainingText: { textAlign: 'center', color: colors.muted, fontSize: 12, marginTop: 8 },
 
-  // Card
+  // Card — LinkedIn style
   cardScroll: { flex: 1 },
   cardScrollContent: { padding: 16, paddingBottom: 8 },
   card: {
-    backgroundColor: colors.card, borderRadius: 20, borderWidth: 1, borderColor: colors.border,
-    padding: 24, alignItems: 'center',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 12,
+    backgroundColor: colors.card, borderRadius: 16, borderWidth: 1, borderColor: colors.border,
+    overflow: 'hidden',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 16,
+  },
+  cardBanner: {
+    height: 72, backgroundColor: colors.gold + '12',
+    borderBottomWidth: 1, borderBottomColor: colors.border,
+  },
+  avatarWrap: {
+    flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 20, marginTop: -36, marginBottom: 12, gap: 12,
   },
   avatar: {
-    width: 80, height: 80, borderRadius: 40, backgroundColor: colors.border,
-    justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: colors.gold + '30',
-    marginBottom: 16,
+    width: 72, height: 72, borderRadius: 36, backgroundColor: colors.background,
+    justifyContent: 'center', alignItems: 'center',
+    borderWidth: 3, borderColor: colors.card,
   },
-  avatarText: { fontSize: 32, fontWeight: '700', color: colors.gold },
-  scoreBadge: {
-    paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12, marginBottom: 12,
+  avatarText: { fontSize: 28, fontWeight: '700', color: colors.gold },
+  scorePill: {
+    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10, borderWidth: 1, marginBottom: 8,
   },
-  scoreText: { fontSize: 16, fontWeight: '800' },
-  cardName: { fontSize: 22, fontWeight: '700', color: colors.text, textAlign: 'center', marginBottom: 4 },
-  cardTitle: { fontSize: 14, color: colors.textSecondary, textAlign: 'center', marginBottom: 4 },
-  cardLocation: { fontSize: 13, color: colors.muted, marginBottom: 8 },
-  typeBadge: {
-    paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12,
-    backgroundColor: colors.gold + '15', borderWidth: 1, borderColor: colors.gold + '30',
-    marginBottom: 12,
+  scoreNum: { fontSize: 15, fontWeight: '800' },
+  cardName: { fontSize: 20, fontWeight: '700', color: colors.text, paddingHorizontal: 20, marginBottom: 2 },
+  cardHeadline: { fontSize: 14, color: colors.textSecondary, paddingHorizontal: 20, lineHeight: 20, marginBottom: 8 },
+  metaRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, gap: 8, marginBottom: 12 },
+  metaText: { fontSize: 13, color: colors.muted },
+  linkedinBadge: {
+    width: 18, height: 18, borderRadius: 3, backgroundColor: '#0A66C2', justifyContent: 'center', alignItems: 'center',
   },
-  typeText: { fontSize: 12, fontWeight: '600', color: colors.gold, textTransform: 'capitalize' },
-  statusBar: {
-    width: '100%', paddingVertical: 6, borderRadius: 8, alignItems: 'center', marginBottom: 12,
+  linkedinBadgeText: { fontSize: 10, fontWeight: '800', color: '#fff' },
+  divider: { height: 1, backgroundColor: colors.border, marginHorizontal: 20 },
+  badgeRow: { flexDirection: 'row', paddingHorizontal: 20, paddingVertical: 12, gap: 8, flexWrap: 'wrap' },
+  statusChip: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 },
+  statusChipText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
+  typeChip: {
+    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6,
+    backgroundColor: colors.gold + '15', borderWidth: 1, borderColor: colors.gold + '25',
   },
-  statusBarText: { fontSize: 11, fontWeight: '700', letterSpacing: 1 },
-  reasoningBox: {
-    width: '100%', padding: 12, borderRadius: 12,
-    backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, marginBottom: 8,
+  typeChipText: { fontSize: 11, fontWeight: '600', color: colors.gold, textTransform: 'capitalize' },
+  assessmentCard: {
+    marginHorizontal: 20, marginBottom: 12, padding: 14, borderRadius: 12,
+    backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border,
   },
-  reasoningLabel: { fontSize: 10, fontWeight: '700', color: colors.gold, letterSpacing: 0.5, marginBottom: 6 },
-  reasoningText: { fontSize: 13, color: colors.textSecondary, lineHeight: 18 },
-  cardMeta: { fontSize: 12, color: colors.muted, marginTop: 4 },
+  assessmentLabel: { fontSize: 10, fontWeight: '700', color: colors.gold, letterSpacing: 0.5, marginBottom: 6 },
+  assessmentText: { fontSize: 13, color: colors.textSecondary, lineHeight: 19 },
+  contactRow: {
+    flexDirection: 'row', paddingHorizontal: 20, paddingVertical: 6, gap: 8,
+  },
+  contactLabel: { fontSize: 12, color: colors.muted, width: 60, fontWeight: '600' },
+  contactValue: { fontSize: 12, color: colors.textSecondary, flex: 1 },
 
   // Actions
   actions: {
