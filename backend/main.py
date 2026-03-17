@@ -64,11 +64,52 @@ def create_session_noauth(body: dict):
     return _db.create_session(body)
 
 
+@app.get("/sessions/{session_id}", tags=["sessions"])
+def get_session_noauth(session_id: str):
+    """Get a single session — no auth for local dev."""
+    import db as _db
+    return _db.get_session_or_404(session_id)
+
+
 @app.get("/applicants", tags=["applicants"])
 def list_applicants_noauth(session_id: Optional[str] = None):
     """List applicants — no auth for local dev."""
     import db as _db
     return _db.scan_all_applicants(session_id=session_id)
+
+
+@app.get("/applicants/stats", tags=["applicants"])
+def applicant_stats_noauth(session_id: Optional[str] = None):
+    """Applicant stats — no auth for local dev."""
+    import db as _db
+    applicants = _db.scan_all_applicants(session_id=session_id)
+    stats = {"total": 0, "pending": 0, "accepted": 0, "rejected": 0, "waitlisted": 0}
+    for a in applicants:
+        stats["total"] += 1
+        s = a.get("status", "pending").lower()
+        if s in stats:
+            stats[s] += 1
+    return stats
+
+
+@app.put("/applicants/{applicant_id}", tags=["applicants"])
+def update_applicant_noauth(applicant_id: str, body: dict):
+    """Update applicant — no auth for local dev."""
+    import db as _db
+    return _db.update_applicant_fields(applicant_id, body)
+
+
+@app.put("/applicants/batch-status", tags=["applicants"])
+def batch_status_noauth(body: dict):
+    """Batch status update — no auth for local dev."""
+    import db as _db
+    ids = body.get("applicant_ids", [])
+    status = body.get("status", "pending")
+    updated = []
+    for aid in ids:
+        _db.update_applicant_fields(aid, {"status": status})
+        updated.append(aid)
+    return {"updated": updated}
 
 
 @app.get("/linkedin/database", tags=["linkedin"])
