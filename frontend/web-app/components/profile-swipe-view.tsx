@@ -137,19 +137,15 @@ export function ProfileSwipeView({
   const handleReject = (a: Applicant) => { onStatusChange(a.applicant_id, "rejected"); advance("left"); };
   const handlePass = () => advance("right");
 
-  // Keyboard
+  // Keyboard — just navigation
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if (!current) return;
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
       switch (e.key) {
-        case "ArrowRight": case "d": handleAccept(current); break;
-        case "ArrowLeft": case "a": handleReject(current); break;
-        case " ": case "s": case "ArrowDown": e.preventDefault(); handlePass(); break;
-        case "ArrowUp": case "w": if (index > 0) setIndex(index - 1); break;
-        case "e": addToList(current, "whitelist"); break;
-        case "q": addToList(current, "blacklist"); break;
+        case "ArrowRight": case "d": case " ": e.preventDefault(); if (index < sorted.length - 1) setIndex(index + 1); break;
+        case "ArrowLeft": case "a": if (index > 0) setIndex(index - 1); break;
       }
     };
     window.addEventListener("keydown", h);
@@ -183,28 +179,7 @@ export function ProfileSwipeView({
           <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
             <div className="h-full bg-gold rounded-full transition-all" style={{ width: `${((index + 1) / sorted.length) * 100}%` }} />
           </div>
-          <div className="flex items-center gap-3">
-            <span className="flex items-center gap-1 text-emerald-500"><CheckCircle2 className="size-3" />{acceptedCount}</span>
-            <span className="flex items-center gap-1 text-red-500"><XCircle className="size-3" />{rejectedCount}</span>
-            {wlCount > 0 && <span className="flex items-center gap-1 text-emerald-400"><ShieldCheck className="size-3" />{wlCount}</span>}
-            {blCount > 0 && <span className="flex items-center gap-1 text-red-400"><ShieldAlert className="size-3" />{blCount}</span>}
-          </div>
-          <button onClick={() => setShowKeys(!showKeys)} className="p-1 rounded hover:bg-muted" title="Keyboard shortcuts">
-            <Keyboard className="size-3.5" />
-          </button>
         </div>
-
-        {/* Keyboard hint */}
-        {showKeys && (
-          <div className="w-full text-xs text-muted-foreground bg-muted/50 rounded-lg px-4 py-2 flex flex-wrap gap-x-4 gap-y-1">
-            <span><kbd className="px-1 py-0.5 rounded bg-muted font-mono text-[10px]">D</kbd> / <kbd className="px-1 py-0.5 rounded bg-muted font-mono text-[10px]">&rarr;</kbd> Accept</span>
-            <span><kbd className="px-1 py-0.5 rounded bg-muted font-mono text-[10px]">A</kbd> / <kbd className="px-1 py-0.5 rounded bg-muted font-mono text-[10px]">&larr;</kbd> Reject</span>
-            <span><kbd className="px-1 py-0.5 rounded bg-muted font-mono text-[10px]">Space</kbd> / <kbd className="px-1 py-0.5 rounded bg-muted font-mono text-[10px]">S</kbd> Pass</span>
-            <span><kbd className="px-1 py-0.5 rounded bg-muted font-mono text-[10px]">E</kbd> Whitelist</span>
-            <span><kbd className="px-1 py-0.5 rounded bg-muted font-mono text-[10px]">Q</kbd> Blacklist</span>
-            <span><kbd className="px-1 py-0.5 rounded bg-muted font-mono text-[10px]">W</kbd> / <kbd className="px-1 py-0.5 rounded bg-muted font-mono text-[10px]">&uarr;</kbd> Back</span>
-          </div>
-        )}
 
         {/* Card */}
         <div
@@ -299,46 +274,10 @@ export function ProfileSwipeView({
             </div>
           )}
 
-          {/* ── Primary actions: Accept / Pass / Reject ── */}
-          <div className="border-t border-border/50 p-3 flex items-center gap-2">
-            <button
-              onClick={() => handleReject(current)}
-              className="flex-1 h-11 rounded-xl flex items-center justify-center gap-2 text-sm font-medium border border-red-500/20 text-red-500 hover:bg-red-500/10 transition-colors"
-            >
-              <XCircle className="size-4" /> Reject
-            </button>
-            <button
-              onClick={handlePass}
-              className="flex-1 h-11 rounded-xl flex items-center justify-center gap-2 text-sm font-medium border border-border/50 text-muted-foreground hover:bg-muted/50 transition-colors"
-            >
-              <SkipForward className="size-4" /> Pass
-            </button>
-            <button
-              onClick={() => handleAccept(current)}
-              className="flex-1 h-11 rounded-xl flex items-center justify-center gap-2 text-sm font-medium border border-emerald-500/20 text-emerald-500 hover:bg-emerald-500/10 transition-colors"
-            >
-              <CheckCircle2 className="size-4" /> Accept
-            </button>
-          </div>
-
-          {/* ── Secondary: Whitelist / Blacklist ── */}
-          <div className="px-3 pb-3 flex items-center gap-2">
-            <button
-              onClick={() => addToList(current, "blacklist")}
-              className={`flex-1 h-8 rounded-lg flex items-center justify-center gap-1.5 text-xs font-medium transition-colors ${
-                bl ? "bg-red-600 text-white" : "text-muted-foreground hover:text-red-500 hover:bg-red-500/5"
-              }`}
-            >
-              <ShieldAlert className="size-3" />{bl ? "Blacklisted" : "Blacklist"}
-            </button>
-            <button
-              onClick={() => addToList(current, "whitelist")}
-              className={`flex-1 h-8 rounded-lg flex items-center justify-center gap-1.5 text-xs font-medium transition-colors ${
-                wl ? "bg-emerald-600 text-white" : "text-muted-foreground hover:text-emerald-500 hover:bg-emerald-500/5"
-              }`}
-            >
-              <ShieldCheck className="size-3" />{wl ? "Whitelisted" : "Whitelist"}
-            </button>
+          {/* ── Rank ── */}
+          <div className="border-t border-border/50 px-5 py-3 flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">Rank</span>
+            <span className="text-2xl font-bold tabular-nums text-foreground">#{index + 1}<span className="text-sm font-normal text-muted-foreground ml-1">of {sorted.length}</span></span>
           </div>
         </div>
 

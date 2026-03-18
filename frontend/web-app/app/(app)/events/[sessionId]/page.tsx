@@ -469,6 +469,14 @@ export default function EventWorkspacePage() {
   const [search, setSearch] = useState("");
   const [selectedApplicantId, setSelectedApplicantId] = useState<string | null>(null);
   const [showImportDialog, setShowImportDialog] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState("all");
+
+  // Filter applicants by category for the review tab
+  const categoryFilteredApplicants = useMemo(() => {
+    if (categoryFilter === "all") return applicants;
+    if (categoryFilter === "unclassified") return applicants.filter((a) => !a.attendee_type);
+    return applicants.filter((a) => (a.attendee_type || "other") === categoryFilter);
+  }, [applicants, categoryFilter]);
 
   // LinkedIn enrichment
   const [liAtCookie, setLiAtCookie] = useState(() =>
@@ -802,13 +810,65 @@ export default function EventWorkspacePage() {
       {/*  REVIEW TAB                                  */}
       {/* ════════════════════════════════════════════ */}
       {tab === "review" && (
-        <ProfileSwipeView
-          applicants={applicants}
-          statusFilter="all"
-          sessionId={sessionId}
-          onStatusChange={handleStatusChange}
-          onSelectApplicant={setSelectedApplicantId}
-        />
+        <div className="space-y-4">
+          {/* Category selector */}
+          <div className="space-y-2">
+            <p className="text-sm text-muted-foreground">Select a category to review:</p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => setCategoryFilter("all")}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                  categoryFilter === "all"
+                    ? "bg-gold/15 text-gold border border-gold/30"
+                    : "bg-card border border-border text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                All ({applicants.length})
+              </button>
+              {ATTENDEE_TYPES.map((t) => {
+                const count = applicants.filter((a) => (a.attendee_type || "other") === t.key).length;
+                if (count === 0) return null;
+                return (
+                  <button
+                    key={t.key}
+                    onClick={() => setCategoryFilter(t.key)}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                      categoryFilter === t.key
+                        ? "bg-gold/15 text-gold border border-gold/30"
+                        : "bg-card border border-border text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <span className="inline-block size-2 rounded-full mr-1.5" style={{ backgroundColor: t.color }} />
+                    {t.label} ({count})
+                  </button>
+                );
+              })}
+              {(() => {
+                const unclassified = applicants.filter((a) => !a.attendee_type).length;
+                return unclassified > 0 ? (
+                  <button
+                    onClick={() => setCategoryFilter("unclassified")}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                      categoryFilter === "unclassified"
+                        ? "bg-gold/15 text-gold border border-gold/30"
+                        : "bg-card border border-border text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    Unclassified ({unclassified})
+                  </button>
+                ) : null;
+              })()}
+            </div>
+          </div>
+
+          <ProfileSwipeView
+            applicants={categoryFilteredApplicants}
+            statusFilter="all"
+            sessionId={sessionId}
+            onStatusChange={handleStatusChange}
+            onSelectApplicant={setSelectedApplicantId}
+          />
+        </div>
       )}
 
       {/* ════════════════════════════════════════════ */}
