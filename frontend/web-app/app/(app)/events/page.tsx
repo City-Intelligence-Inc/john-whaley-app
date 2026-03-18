@@ -4,7 +4,7 @@ import { useState } from "react";
 import {
   Upload, Loader2, Brain, Download, Users, Search, X, Plus, ChevronDown,
   Key, Eye, EyeOff, CheckCircle2, XCircle, Building2, MapPin, Sparkles,
-  Linkedin, ScanSearch, CircleCheck, AlertTriangle, Trash2,
+  Linkedin, ScanSearch, CircleCheck, AlertTriangle, Trash2, Hash,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -62,22 +62,21 @@ export default function EventsPage() {
 
   const handleExport = () => {
     if (!e.applicants.length) return;
-    // Export in Luma-compatible format: name, email, approval_status
-    const headers = ["name", "email", "approval_status", "attendee_type", "ai_score", "ai_reasoning", "company", "title", "location", "linkedin_url"];
+    const headers = ["rank", "name", "email", "approval_status", "category", "ai_reasoning", "company", "title", "location", "linkedin_url"];
     const statusMap: Record<string, string> = { accepted: "approved", rejected: "declined", waitlisted: "pending_approval", pending: "pending_approval" };
     const esc = (v: unknown) => { const s = String(v ?? ""); return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s; };
     const rows = [
       headers.join(","),
-      ...e.applicants.map(a => [
-        esc(a.name), esc(a.email), statusMap[a.status] || "pending_approval",
-        esc(a.attendee_type), esc(a.ai_score), esc(a.ai_reasoning),
+      ...e.filtered.map((a, i) => [
+        i + 1, esc(a.name), esc(a.email), statusMap[a.status] || "pending_approval",
+        esc(a.attendee_type), esc(a.ai_reasoning),
         esc(a.company), esc(a.title), esc(a.location), esc(a.linkedin_url),
       ].join(","))
     ];
     const blob = new Blob([rows.join("\n")], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a"); link.href = url;
-    link.download = `${(e.session?.name || "event").replace(/\s+/g, "-").toLowerCase()}-export.csv`;
+    link.download = `${(e.session?.name || "event").replace(/\s+/g, "-").toLowerCase()}-rankings.csv`;
     link.click(); URL.revokeObjectURL(url);
   };
 
@@ -156,7 +155,7 @@ export default function EventsPage() {
         <div className="flex items-center justify-center py-12"><Loader2 className="size-5 animate-spin text-gold" /></div>
       )}
 
-      {/* ── Guest List ── */}
+      {/* ── Ranked Guest List ── */}
       {e.selectedSessionId && !e.eventLoading && (
         <div className="space-y-3">
           {e.total > 0 && (
@@ -177,8 +176,8 @@ export default function EventsPage() {
             </CardContent></Card>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-            {e.filtered.map(a => {
+          <div className="space-y-2">
+            {e.filtered.map((a, rank) => {
               const photo = (a[`linkedin_image`] as string) || (a[`photo_url`] as string) || "";
               const headline = (a[`linkedin_headline`] as string) || a.title || "";
               const company = a.company || (a[`linkedin_company`] as string) || "";
@@ -188,8 +187,8 @@ export default function EventsPage() {
               const isClean = issues === "clean";
               const hasIssues = issues && !isClean;
               const investigating = e.investigatingIds.has(a.applicant_id);
+              const category = a.attendee_type || "";
 
-              // Investigation results
               const investigations = Object.entries(a)
                 .filter(([k]) => k.startsWith("investigation_"))
                 .map(([k, v]) => ({
@@ -201,89 +200,99 @@ export default function EventsPage() {
 
               return (
                 <Card key={a.applicant_id} className="hover:border-border/80 transition-all">
-                  <CardContent className="p-3 space-y-2">
-                    {/* Header */}
-                    <div className="flex items-center gap-2.5 cursor-pointer" onClick={() => setSelectedApplicantId(a.applicant_id)}>
-                      {photo ? <img src={photo} alt="" className="size-9 rounded-full object-cover shrink-0" />
-                        : <div className="size-9 rounded-full bg-muted flex items-center justify-center shrink-0 text-xs font-semibold text-muted-foreground/40">{name.charAt(0).toUpperCase()}</div>}
-                      <div className="flex-1 min-w-0">
-                        <span className="text-sm font-medium truncate block">{name}</span>
-                        {headline && <p className="text-[11px] text-muted-foreground truncate">{headline}</p>}
+                  <CardContent className="p-3">
+                    <div className="flex items-start gap-3">
+                      {/* Rank number */}
+                      <div className="flex flex-col items-center shrink-0 w-8 pt-1">
+                        <span className="text-lg font-bold tabular-nums text-muted-foreground/40">
+                          {rank + 1}
+                        </span>
                       </div>
-                    </div>
 
-                    {/* Meta */}
-                    {(company || location) && (
-                      <div className="flex gap-2.5 text-[10px] text-muted-foreground">
-                        {company && <span className="flex items-center gap-0.5 truncate"><Building2 className="size-2.5" />{company}</span>}
-                        {location && <span className="flex items-center gap-0.5 truncate"><MapPin className="size-2.5" />{location}</span>}
+                      {/* Photo */}
+                      <div className="shrink-0 cursor-pointer" onClick={() => setSelectedApplicantId(a.applicant_id)}>
+                        {photo ? <img src={photo} alt="" className="size-10 rounded-full object-cover" />
+                          : <div className="size-10 rounded-full bg-muted flex items-center justify-center text-xs font-semibold text-muted-foreground/40">{name.charAt(0).toUpperCase()}</div>}
                       </div>
-                    )}
 
-                    {/* AI reasoning */}
-                    {a.ai_reasoning && (
-                      <p className="text-[10px] text-muted-foreground/60 line-clamp-2 flex items-start gap-1">
-                        <Sparkles className="size-2.5 mt-0.5 shrink-0 text-gold" />
-                        {String(a.ai_reasoning).includes(" | ") ? String(a.ai_reasoning).split(" | ")[0].replace(/^.*?\]:\s*/, "") : a.ai_reasoning}
-                      </p>
-                    )}
-
-                    {/* Investigations inline */}
-                    {investigations.length > 0 && (
-                      <div className="space-y-1">
-                        {investigations.map(inv => (
-                          <Collapsible key={inv.id}>
-                            <CollapsibleTrigger className="flex items-center gap-1 w-full text-left">
-                              <Badge variant="outline" className="text-[9px] h-4 gap-0.5 shrink-0">{inv.name}</Badge>
-                              <span className="text-[10px] text-muted-foreground truncate">{inv.summary}</span>
-                            </CollapsibleTrigger>
-                            <CollapsibleContent>
-                              <div className="mt-1 rounded bg-muted/50 p-2 text-[10px] text-muted-foreground leading-relaxed whitespace-pre-wrap max-h-[150px] overflow-y-auto">
-                                {inv.full}
-                              </div>
-                            </CollapsibleContent>
-                          </Collapsible>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Issues */}
-                    {isClean && <Badge variant="secondary" className="text-emerald-500 bg-emerald-500/10 text-[9px] h-4"><CircleCheck className="size-2.5 mr-0.5" />Verified</Badge>}
-                    {hasIssues && <span className="flex items-center gap-0.5 text-[9px] text-amber-500"><AlertTriangle className="size-2.5" />{issues.split("; ").map(i => i.replace("missing_", "No ").replace(/_/g, " ")).join(" / ")}</span>}
-
-                    {/* Actions */}
-                    <div className="flex items-center justify-between pt-0.5" onClick={ev => ev.stopPropagation()}>
-                      <div className="flex items-center gap-0.5">
-                        {a.linkedin_url && <a href={a.linkedin_url} target="_blank" rel="noopener noreferrer" className="p-1 text-blue-500 hover:text-blue-400"><Linkedin className="size-3" /></a>}
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <button className="p-1 text-muted-foreground hover:text-gold" disabled={investigating}>
-                              {investigating ? <Loader2 className="size-3 animate-spin" /> : <ScanSearch className="size-3" />}
-                            </button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="start" className="w-[200px]">
-                            {e.agents.map(ag => (
-                              <DropdownMenuItem key={ag.id} onClick={() => e.runInvestigation(a.applicant_id, ag.id)}>
-                                <div><div className="text-xs font-medium">{ag.name}</div><div className="text-[10px] text-muted-foreground">{ag.description}</div></div>
-                              </DropdownMenuItem>
-                            ))}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                      {a.status === "pending" ? (
-                        <div className="flex gap-0.5">
-                          <Button size="sm" variant="ghost" onClick={() => e.changeStatus(a.applicant_id, "accepted")} className="h-6 px-1.5 text-[10px] text-emerald-500 hover:bg-emerald-500/10">
-                            <CheckCircle2 className="size-2.5 mr-0.5" />Approve
-                          </Button>
-                          <Button size="sm" variant="ghost" onClick={() => e.changeStatus(a.applicant_id, "rejected")} className="h-6 px-1.5 text-[10px] text-red-500 hover:bg-red-500/10">
-                            <XCircle className="size-2.5 mr-0.5" />Decline
-                          </Button>
+                      {/* Info */}
+                      <div className="flex-1 min-w-0 space-y-1.5">
+                        <div className="flex items-center gap-2 cursor-pointer" onClick={() => setSelectedApplicantId(a.applicant_id)}>
+                          <span className="text-sm font-medium truncate">{name}</span>
+                          {category && <Badge variant="outline" className="text-[9px] h-4 shrink-0">{a.attendee_type_detail || category}</Badge>}
                         </div>
-                      ) : (
-                        <Badge variant="secondary" className={`text-[9px] ${a.status === "accepted" ? "text-emerald-500" : a.status === "rejected" ? "text-red-500" : "text-amber-500"}`}>
-                          {a.status === "accepted" ? "Going" : a.status === "rejected" ? "Not Going" : "Waitlisted"}
-                        </Badge>
-                      )}
+                        {headline && <p className="text-[11px] text-muted-foreground truncate">{headline}</p>}
+
+                        {(company || location) && (
+                          <div className="flex gap-2.5 text-[10px] text-muted-foreground">
+                            {company && <span className="flex items-center gap-0.5 truncate"><Building2 className="size-2.5" />{company}</span>}
+                            {location && <span className="flex items-center gap-0.5 truncate"><MapPin className="size-2.5" />{location}</span>}
+                          </div>
+                        )}
+
+                        {a.ai_reasoning && (
+                          <p className="text-[10px] text-muted-foreground/60 line-clamp-2 flex items-start gap-1">
+                            <Sparkles className="size-2.5 mt-0.5 shrink-0 text-gold" />
+                            {String(a.ai_reasoning).includes(" | ") ? String(a.ai_reasoning).split(" | ")[0].replace(/^.*?\]:\s*/, "") : a.ai_reasoning}
+                          </p>
+                        )}
+
+                        {investigations.length > 0 && (
+                          <div className="space-y-1">
+                            {investigations.map(inv => (
+                              <Collapsible key={inv.id}>
+                                <CollapsibleTrigger className="flex items-center gap-1 w-full text-left">
+                                  <Badge variant="outline" className="text-[9px] h-4 gap-0.5 shrink-0">{inv.name}</Badge>
+                                  <span className="text-[10px] text-muted-foreground truncate">{inv.summary}</span>
+                                </CollapsibleTrigger>
+                                <CollapsibleContent>
+                                  <div className="mt-1 rounded bg-muted/50 p-2 text-[10px] text-muted-foreground leading-relaxed whitespace-pre-wrap max-h-[150px] overflow-y-auto">{inv.full}</div>
+                                </CollapsibleContent>
+                              </Collapsible>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="flex items-center gap-2">
+                          {isClean && <Badge variant="secondary" className="text-emerald-500 bg-emerald-500/10 text-[9px] h-4"><CircleCheck className="size-2.5 mr-0.5" />Verified</Badge>}
+                          {hasIssues && <span className="flex items-center gap-0.5 text-[9px] text-amber-500"><AlertTriangle className="size-2.5" />{issues.split("; ").map(i => i.replace("missing_", "No ").replace(/_/g, " ")).join(" / ")}</span>}
+                        </div>
+                      </div>
+
+                      {/* Actions */}
+                      <div className="flex flex-col items-end gap-1 shrink-0" onClick={ev => ev.stopPropagation()}>
+                        <div className="flex items-center gap-0.5">
+                          {a.linkedin_url && <a href={a.linkedin_url} target="_blank" rel="noopener noreferrer" className="p-1 text-blue-500 hover:text-blue-400"><Linkedin className="size-3" /></a>}
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button className="p-1 text-muted-foreground hover:text-gold" disabled={investigating}>
+                                {investigating ? <Loader2 className="size-3 animate-spin" /> : <ScanSearch className="size-3" />}
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-[200px]">
+                              {e.agents.map(ag => (
+                                <DropdownMenuItem key={ag.id} onClick={() => e.runInvestigation(a.applicant_id, ag.id)}>
+                                  <div><div className="text-xs font-medium">{ag.name}</div><div className="text-[10px] text-muted-foreground">{ag.description}</div></div>
+                                </DropdownMenuItem>
+                              ))}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                        {a.status === "pending" ? (
+                          <div className="flex gap-0.5">
+                            <Button size="sm" variant="ghost" onClick={() => e.changeStatus(a.applicant_id, "accepted")} className="h-6 px-1.5 text-[10px] text-emerald-500 hover:bg-emerald-500/10">
+                              <CheckCircle2 className="size-2.5 mr-0.5" />Approve
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => e.changeStatus(a.applicant_id, "rejected")} className="h-6 px-1.5 text-[10px] text-red-500 hover:bg-red-500/10">
+                              <XCircle className="size-2.5 mr-0.5" />Decline
+                            </Button>
+                          </div>
+                        ) : (
+                          <Badge variant="secondary" className={`text-[9px] ${a.status === "accepted" ? "text-emerald-500" : a.status === "rejected" ? "text-red-500" : "text-amber-500"}`}>
+                            {a.status === "accepted" ? "Going" : a.status === "rejected" ? "Not Going" : "Waitlisted"}
+                          </Badge>
+                        )}
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -293,10 +302,8 @@ export default function EventsPage() {
         </div>
       )}
 
-      {/* Detail Sheet */}
       {selectedApplicant && <ApplicantDetailSheet applicant={selectedApplicant} onStatusChange={(id, status) => e.changeStatus(id, status!)} onClose={() => setSelectedApplicantId(null)} />}
 
-      {/* Import */}
       <Dialog open={showImport} onOpenChange={setShowImport}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader><DialogTitle>Import Guests</DialogTitle><DialogDescription>Upload a CSV.</DialogDescription></DialogHeader>
@@ -304,11 +311,10 @@ export default function EventsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirm */}
       <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader><DialogTitle>Delete Event</DialogTitle>
-            <DialogDescription>This will delete the event and all {e.total} guests. This cannot be undone.</DialogDescription></DialogHeader>
+            <DialogDescription>This will delete the event and all {e.total} guests permanently.</DialogDescription></DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowDeleteConfirm(false)}>Cancel</Button>
             <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
@@ -318,7 +324,6 @@ export default function EventsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Create */}
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader><DialogTitle>New Event</DialogTitle></DialogHeader>
