@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Mail,
   Linkedin,
@@ -12,8 +12,18 @@ import {
   ChevronRight,
   ExternalLink,
   Briefcase,
+  CheckCircle2,
+  XCircle,
+  Clock,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { Applicant } from "@/lib/api";
 import { ATTENDEE_TYPES } from "@/lib/constants";
 
@@ -27,6 +37,7 @@ interface ProfileSwipeViewProps {
   sessionId: string;
   onStatusChange: (id: string, status: string) => void;
   onSelectApplicant: (id: string) => void;
+  onCategorize?: (id: string, type: string) => void;
 }
 
 function getName(a: Applicant): string {
@@ -54,6 +65,8 @@ function statusDot(s: string) {
 export function ProfileSwipeView({
   applicants,
   statusFilter,
+  onStatusChange,
+  onCategorize,
 }: ProfileSwipeViewProps) {
   const [index, setIndex] = useState(0);
 
@@ -61,15 +74,34 @@ export function ProfileSwipeView({
   const sorted = [...filtered].sort((a, b) => getName(a).localeCompare(getName(b)));
   const current = sorted[index];
 
-  // Keyboard navigation
+  // Counts for all applicants (not just filtered)
+  const acceptedCount = applicants.filter((a) => a.status === "accepted").length;
+  const rejectedCount = applicants.filter((a) => a.status === "rejected").length;
+  const waitlistedCount = applicants.filter((a) => a.status === "waitlisted").length;
+  const pendingCount = applicants.filter((a) => a.status === "pending").length;
+
+  const advance = useCallback(() => {
+    if (index < sorted.length - 1) setIndex(index + 1);
+  }, [index, sorted.length]);
+
+  const handleAction = useCallback((status: string) => {
+    if (!current) return;
+    onStatusChange(current.applicant_id, status);
+    advance();
+  }, [current, onStatusChange, advance]);
+
+  // Keyboard
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if (!current) return;
       const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "BUTTON") return;
       switch (e.key) {
-        case "ArrowRight": case "d": case " ": e.preventDefault(); if (index < sorted.length - 1) setIndex(index + 1); break;
-        case "ArrowLeft": case "a": if (index > 0) setIndex(index - 1); break;
+        case "ArrowRight": case "d": e.preventDefault(); handleAction("accepted"); break;
+        case "ArrowLeft": case "a": e.preventDefault(); handleAction("rejected"); break;
+        case "ArrowDown": case "s": e.preventDefault(); handleAction("waitlisted"); break;
+        case " ": e.preventDefault(); advance(); break;
+        case "ArrowUp": case "w": if (index > 0) setIndex(index - 1); break;
       }
     };
     window.addEventListener("keydown", h);
@@ -88,6 +120,7 @@ export function ProfileSwipeView({
   const education = (current[`linkedin_education`] as string) || "";
   const company = current.company || (current[`linkedin_company`] as string) || "";
   const location = current.location || (current[`linkedin_location`] as string) || "";
+  const isUnclassified = !current.attendee_type;
 
   return (
     <div className="flex gap-6 items-start">
@@ -120,7 +153,7 @@ export function ProfileSwipeView({
                 </div>
                 {headline && <p className="text-sm text-muted-foreground mt-0.5 line-clamp-2">{headline}</p>}
 
-                {/* Category + status badges */}
+                {/* Category + status */}
                 <div className="flex items-center gap-2 mt-2 flex-wrap">
                   {current.attendee_type && (() => {
                     const c = TYPE_COLORS[current.attendee_type] || "#6b7280";
@@ -138,6 +171,30 @@ export function ProfileSwipeView({
               </div>
             </div>
           </div>
+
+          {/* Classify if unclassified */}
+          {isUnclassified && onCategorize && (
+            <div className="px-5 pb-3">
+              <div className="rounded-lg bg-amber-500/5 border border-amber-500/20 p-3 flex items-center gap-3">
+                <span className="text-xs text-amber-500 font-medium shrink-0">Unclassified</span>
+                <Select onValueChange={(val) => onCategorize(current.applicant_id, val)}>
+                  <SelectTrigger className="h-7 flex-1 text-xs">
+                    <SelectValue placeholder="Assign category..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ATTENDEE_TYPES.map((t) => (
+                      <SelectItem key={t.key} value={t.key} className="text-xs">
+                        <div className="flex items-center gap-2">
+                          <div className="size-2 rounded-full" style={{ backgroundColor: t.color }} />
+                          {t.label}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
 
           {/* Info chips */}
           <div className="px-5 pb-3 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
@@ -184,6 +241,40 @@ export function ProfileSwipeView({
               </div>
             </div>
           )}
+
+          {/* Action buttons */}
+          <div className="border-t border-border/50 p-3 flex items-center gap-2">
+            <button
+              onClick={() => handleAction("rejected")}
+              className={`flex-1 h-10 rounded-xl flex items-center justify-center gap-1.5 text-sm font-medium transition-colors ${
+                current.status === "rejected"
+                  ? "bg-red-500/20 text-red-400 border border-red-500/30"
+                  : "border border-red-500/20 text-red-500 hover:bg-red-500/10"
+              }`}
+            >
+              <XCircle className="size-4" /> Reject
+            </button>
+            <button
+              onClick={() => handleAction("waitlisted")}
+              className={`flex-1 h-10 rounded-xl flex items-center justify-center gap-1.5 text-sm font-medium transition-colors ${
+                current.status === "waitlisted"
+                  ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                  : "border border-border/50 text-muted-foreground hover:bg-muted/50"
+              }`}
+            >
+              <Clock className="size-4" /> Waitlist
+            </button>
+            <button
+              onClick={() => handleAction("accepted")}
+              className={`flex-1 h-10 rounded-xl flex items-center justify-center gap-1.5 text-sm font-medium transition-colors ${
+                current.status === "accepted"
+                  ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                  : "border border-emerald-500/20 text-emerald-500 hover:bg-emerald-500/10"
+              }`}
+            >
+              <CheckCircle2 className="size-4" /> Accept
+            </button>
+          </div>
         </div>
 
         {/* Nav */}
@@ -225,10 +316,30 @@ export function ProfileSwipeView({
                   {getName(a)}
                 </p>
               </div>
-              <span className="text-[10px] text-muted-foreground/50 tabular-nums shrink-0">#{i + 1}</span>
+              <span className={`size-2 rounded-full shrink-0 ${statusDot(a.status)}`} />
             </button>
           );
         })}
+      </div>
+
+      {/* ── Floating progress bar ── */}
+      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-card/95 backdrop-blur border border-border/50 rounded-2xl shadow-xl px-6 py-3 flex items-center gap-5">
+        <span className="flex items-center gap-1.5 text-sm font-semibold text-emerald-500">
+          <CheckCircle2 className="size-4" />{acceptedCount}
+        </span>
+        <span className="flex items-center gap-1.5 text-sm font-semibold text-amber-500">
+          <Clock className="size-4" />{waitlistedCount}
+        </span>
+        <span className="flex items-center gap-1.5 text-sm font-semibold text-red-500">
+          <XCircle className="size-4" />{rejectedCount}
+        </span>
+        {pendingCount > 0 && (
+          <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+            {pendingCount} pending
+          </span>
+        )}
+        <div className="h-4 w-px bg-border/50" />
+        <span className="text-sm font-medium text-foreground">{applicants.length} total</span>
       </div>
     </div>
   );

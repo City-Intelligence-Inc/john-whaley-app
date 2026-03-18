@@ -508,6 +508,16 @@ export default function EventWorkspacePage() {
     }
   }, [refreshApplicants, refreshStats]);
 
+  const handleCategorize = useCallback(async (id: string, type: string) => {
+    try {
+      await api.updateApplicant(id, { extra: { attendee_type: type, user_override_attendee_type: true } });
+      await refreshApplicants();
+      toast.success("Category updated");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update category");
+    }
+  }, [refreshApplicants]);
+
   const handleUploadSuccess = useCallback((_count: number) => {
     refreshAll();
     setShowImportDialog(false);
@@ -865,6 +875,7 @@ export default function EventWorkspacePage() {
             sessionId={sessionId}
             onStatusChange={handleStatusChange}
             onSelectApplicant={setSelectedApplicantId}
+            onCategorize={handleCategorize}
           />
         </div>
       )}
