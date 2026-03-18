@@ -21,6 +21,7 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ApplicantDetailSheet } from "@/components/applicant-detail-sheet";
 import { CSVUploader } from "@/components/csv-uploader";
+import { api } from "@/lib/api";
 import { useEventsPage } from "./_hooks/use-events-page";
 
 export default function EventsPage() {
