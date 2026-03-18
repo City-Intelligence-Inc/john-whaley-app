@@ -354,6 +354,10 @@ export const api = {
     return fetchAPI<{ dry_run: boolean; updates: { guest_id: string; name: string; status: string; success?: boolean }[]; count: number }>(`/luma/sync?${params}`, { method: "POST" });
   },
 
+  // Rank
+  rankSession: (sessionId: string) =>
+    fetchAPI<{ total: number; classified: number; by_type: Record<string, number> }>(`/rank/${sessionId}`, { method: "POST" }),
+
   // Admin
   getAdminSessions: () => fetchAPI<AdminSession[]>("/admin/sessions"),
 };

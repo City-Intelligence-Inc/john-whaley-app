@@ -14,8 +14,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <Separator orientation="vertical" className="mr-2 h-4" />
             <h1 className="text-sm font-medium text-muted-foreground">Selecta</h1>
           </header>
-          <main className="flex-1 overflow-auto p-6">
-            {children}
+          <main className="flex-1 overflow-hidden p-6">
+            <div className="h-full overflow-auto">
+              {children}
+            </div>
           </main>
         </SidebarInset>
       </SidebarProvider>

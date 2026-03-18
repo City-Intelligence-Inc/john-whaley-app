@@ -73,6 +73,14 @@ function getPhoto(a: Applicant): string {
   return (a.linkedin_image as string) || (a.photo_url as string) || "";
 }
 
+function getRank(a: Applicant): { rank: number; total: number; score: number } | null {
+  const rank = Number(a.rank || 0);
+  const total = Number(a.rank_total || 0);
+  const score = Number(a.rank_score || 0);
+  if (!rank && !score) return null;
+  return { rank, total, score };
+}
+
 function getSummary(a: Applicant): string {
   return (a.ai_summary as string) || (a.linkedin_summary as string) || "";
 }
@@ -102,6 +110,7 @@ export default function EventWorkspacePage() {
   const [clearing, setClearing] = useState(false);
   const [viewMode, setViewMode] = useState<"table" | "cards">("table");
   const [cardIndex, setCardIndex] = useState(0);
+  const [ranking, setRanking] = useState(false);
 
   /* ── Counts ── */
   const accepted = applicants.filter((a) => a.status === "accepted").length;
@@ -185,6 +194,19 @@ export default function EventWorkspacePage() {
       toast.error(err instanceof Error ? err.message : "Failed to blacklist");
     }
   }, [refreshAll]);
+
+  const handleRankAll = useCallback(async () => {
+    setRanking(true);
+    try {
+      const result = await api.rankSession(sessionId);
+      toast.success(`Ranked ${result.classified} guests: ${Object.entries(result.by_type).map(([k, v]) => `${v} ${k}`).join(", ")}`);
+      await refreshAll();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Ranking failed");
+    } finally {
+      setRanking(false);
+    }
+  }, [sessionId, refreshAll]);
 
   const VENUE_CAPACITY = 200;
   const overCapacity = accepted > VENUE_CAPACITY ? accepted - VENUE_CAPACITY : 0;

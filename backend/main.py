@@ -16,6 +16,7 @@ from routes.analysis import router as analysis_router
 from routes.settings import router as settings_router
 from routes.sessions import router as sessions_router
 from routes.linkedin import router as linkedin_router
+from routes.rank import router as rank_router
 
 app = FastAPI(title="Selecta API")
 
@@ -129,6 +130,7 @@ app.include_router(applicants_router)
 app.include_router(import_router)
 app.include_router(analysis_router)
 app.include_router(linkedin_router)
+app.include_router(rank_router)
 
 
 @app.get("/")
