@@ -241,10 +241,10 @@ export default function EventWorkspacePage() {
   const [ranking, setRanking] = useState(false);
 
   /* ── Counts ── */
-  const accepted = applicants.filter((a) => a.status === "accepted").length;
-  const pending = applicants.filter((a) => a.status === "pending").length;
-  const rejected = applicants.filter((a) => a.status === "rejected").length;
-  const waitlisted = applicants.filter((a) => a.status === "waitlisted").length;
+  const accepted = applicants.filter((a) => (a.status || "pending") === "accepted").length;
+  const pending = applicants.filter((a) => (a.status || "pending") === "pending").length;
+  const rejected = applicants.filter((a) => (a.status || "pending") === "rejected").length;
+  const waitlisted = applicants.filter((a) => (a.status || "pending") === "waitlisted").length;
   const total = applicants.length;
   const analyzed = applicants.filter((a) => a.ai_reasoning).length;
 
@@ -271,7 +271,7 @@ export default function EventWorkspacePage() {
     return [...list].sort((a, b) => {
       let cmp = 0;
       if (sortField === "name") cmp = getName(a).localeCompare(getName(b));
-      else if (sortField === "status") cmp = a.status.localeCompare(b.status);
+      else if (sortField === "status") cmp = (a.status || "pending").localeCompare(b.status || "pending");
       else if (sortField === "type") cmp = (a.attendee_type || "zzz").localeCompare(b.attendee_type || "zzz");
       else if (sortField === "score") {
         const ra = Number(a.global_rank || a.rank || 999);
