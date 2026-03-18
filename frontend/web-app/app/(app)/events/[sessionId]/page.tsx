@@ -339,7 +339,7 @@ export default function EventWorkspacePage() {
     setRanking(true);
     try {
       const result = await api.rankSession(sessionId);
-      toast.success(`Ranked ${result.classified} guests: ${Object.entries(result.by_type).map(([k, v]) => `${v} ${k}`).join(", ")}`);
+      toast.success(`Ranked ${result.classified || 0} guests${result.by_type ? ": " + Object.entries(result.by_type).map(([k, v]) => `${v} ${k}`).join(", ") : ""}`);
       await refreshAll();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Ranking failed");
@@ -651,7 +651,7 @@ export default function EventWorkspacePage() {
                             }
                             className="text-[11px]"
                           >
-                            {a.status.charAt(0).toUpperCase() + a.status.slice(1)}
+                            {(a.status || "pending").charAt(0).toUpperCase() + (a.status || "pending").slice(1)}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
@@ -950,7 +950,7 @@ function CardReview({
                   </Badge>
                 )}
                 <Badge variant={current.status === "accepted" ? "default" : current.status === "rejected" ? "destructive" : "secondary"} className="text-[11px]">
-                  {current.status.charAt(0).toUpperCase() + current.status.slice(1)}
+                  {(current.status || "pending").charAt(0).toUpperCase() + (current.status || "pending").slice(1)}
                 </Badge>
               </div>
             </div>
@@ -1094,7 +1094,7 @@ function DetailSheet({
                   variant={applicant.status === "accepted" ? "default" : applicant.status === "rejected" ? "destructive" : "secondary"}
                   className="text-xs"
                 >
-                  {applicant.status.charAt(0).toUpperCase() + applicant.status.slice(1)}
+                  {(applicant.status || "pending").charAt(0).toUpperCase() + (applicant.status || "pending").slice(1)}
                 </Badge>
               </div>
             </div>
