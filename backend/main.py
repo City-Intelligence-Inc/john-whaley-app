@@ -18,6 +18,7 @@ from routes.admin import router as admin_router
 from routes.scraper import router as scraper_router
 from routes.linkedin import router as linkedin_router
 from routes.luma import router as luma_router
+from routes.judges import router as judges_router
 
 app = FastAPI(title="John Whaley Applicant Reviewer")
 
@@ -153,6 +154,7 @@ app.include_router(admin_router)
 app.include_router(scraper_router)
 app.include_router(linkedin_router)
 app.include_router(luma_router)
+app.include_router(judges_router)
 
 
 @app.get("/")
