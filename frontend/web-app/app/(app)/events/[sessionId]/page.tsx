@@ -93,6 +93,131 @@ function getTypeLabel(key: string): string {
   return ATTENDEE_TYPES.find((t) => t.key === key)?.label || key;
 }
 
+/* ── Mix Panel ── */
+function MixPanel({ applicants, onApply }: {
+  applicants: Applicant[];
+  onApply: (acceptIds: string[], waitlistIds: string[]) => Promise<void>;
+}) {
+  const [quotas, setQuotas] = useState<Record<string, number>>({});
+  const [applying, setApplying] = useState(false);
+
+  const byType = useMemo(() => {
+    const groups: Record<string, Applicant[]> = {};
+    for (const t of ATTENDEE_TYPES) groups[t.key] = [];
+    for (const a of applicants) {
+      const t = a.attendee_type || "other";
+      if (!groups[t]) groups[t] = [];
+      groups[t].push(a);
+    }
+    // Sort each group by rank if available, else by name
+    for (const key of Object.keys(groups)) {
+      groups[key].sort((a, b) => {
+        const ra = Number(a.rank || 999);
+        const rb = Number(b.rank || 999);
+        if (ra !== rb) return ra - rb;
+        return getName(a).localeCompare(getName(b));
+      });
+    }
+    return groups;
+  }, [applicants]);
+
+  const getQuota = (key: string) => quotas[key] ?? (byType[key] || []).filter((a) => a.status === "accepted").length;
+  const totalSelected = ATTENDEE_TYPES.reduce((sum, t) => sum + Math.min(getQuota(t.key), (byType[t.key] || []).length), 0);
+
+  const handleApply = async () => {
+    setApplying(true);
+    const acceptIds: string[] = [];
+    const waitlistIds: string[] = [];
+    for (const t of ATTENDEE_TYPES) {
+      const items = byType[t.key] || [];
+      const target = getQuota(t.key);
+      items.forEach((a, i) => {
+        if (i < target && a.status !== "accepted") acceptIds.push(a.applicant_id);
+        if (i >= target && a.status === "accepted") waitlistIds.push(a.applicant_id);
+      });
+    }
+    await onApply(acceptIds, waitlistIds);
+    setApplying(false);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold">Category Mix</h2>
+          <p className="text-sm text-muted-foreground">Set how many from each category. Top-ranked people get accepted first.</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-semibold tabular-nums">{totalSelected} total</span>
+          <Button size="sm" onClick={handleApply} disabled={applying}>
+            {applying ? <Loader2 className="size-4 mr-2 animate-spin" /> : <Check className="size-4 mr-2" />}
+            Apply Mix
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid gap-4">
+        {ATTENDEE_TYPES.map((t) => {
+          const items = byType[t.key] || [];
+          if (items.length === 0) return null;
+          const quota = getQuota(t.key);
+          const currentAccepted = items.filter((a) => a.status === "accepted").length;
+
+          return (
+            <Card key={t.key}>
+              <CardContent className="py-4">
+                <div className="flex items-center gap-4">
+                  {/* Category info */}
+                  <div className="flex items-center gap-2 w-32 shrink-0">
+                    <span className="size-3 rounded-full" style={{ backgroundColor: t.color }} />
+                    <span className="text-sm font-medium">{t.label}</span>
+                    <span className="text-xs text-muted-foreground">({items.length})</span>
+                  </div>
+
+                  {/* Slider */}
+                  <div className="flex-1">
+                    <Slider
+                      value={[quota]}
+                      min={0}
+                      max={items.length}
+                      step={1}
+                      onValueChange={([val]) => setQuotas((prev) => ({ ...prev, [t.key]: val }))}
+                    />
+                  </div>
+
+                  {/* Count */}
+                  <div className="flex items-center gap-1 w-20 justify-end shrink-0">
+                    <button onClick={() => setQuotas((p) => ({ ...p, [t.key]: Math.max(0, quota - 1) }))}
+                      className="size-6 rounded flex items-center justify-center text-muted-foreground hover:bg-muted">-</button>
+                    <span className="text-sm font-bold tabular-nums w-8 text-center">{quota}</span>
+                    <button onClick={() => setQuotas((p) => ({ ...p, [t.key]: Math.min(items.length, quota + 1) }))}
+                      className="size-6 rounded flex items-center justify-center text-muted-foreground hover:bg-muted">+</button>
+                  </div>
+                </div>
+
+                {/* Preview of top picks */}
+                {quota > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {items.slice(0, Math.min(quota, 8)).map((a) => (
+                      <span key={a.applicant_id} className="inline-flex items-center gap-1 text-xs bg-muted px-2 py-0.5 rounded-full">
+                        {getPhoto(a) ? (
+                          <img src={getPhoto(a)} alt="" className="size-4 rounded-full object-cover" />
+                        ) : null}
+                        {getName(a)}
+                      </span>
+                    ))}
+                    {quota > 8 && <span className="text-xs text-muted-foreground px-2 py-0.5">+{quota - 8} more</span>}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function EventWorkspacePage() {
   const router = useRouter();
   const {
@@ -123,7 +248,15 @@ export default function EventWorkspacePage() {
   /* ── Sort & filter ── */
   const filtered = useMemo(() => {
     let list = applicants;
-    if (statusFilter !== "all") list = list.filter((a) => a.status === statusFilter);
+    // Filter by status or category
+    if (statusFilter !== "all") {
+      const isCategory = ATTENDEE_TYPES.some((t) => t.key === statusFilter);
+      if (isCategory) {
+        list = list.filter((a) => (a.attendee_type || "other") === statusFilter);
+      } else {
+        list = list.filter((a) => a.status === statusFilter);
+      }
+    }
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter((a) => {
@@ -350,10 +483,46 @@ export default function EventWorkspacePage() {
         </div>
       )}
 
+      {/* ── Category mix overview ── */}
+      {total > 0 && (() => {
+        const typeCounts: Record<string, number> = {};
+        const typeAccepted: Record<string, number> = {};
+        for (const a of applicants) {
+          const t = a.attendee_type || "other";
+          typeCounts[t] = (typeCounts[t] || 0) + 1;
+          if (a.status === "accepted") typeAccepted[t] = (typeAccepted[t] || 0) + 1;
+        }
+        return (
+          <div className="flex items-center gap-3 flex-wrap">
+            {ATTENDEE_TYPES.map((t) => {
+              const count = typeCounts[t.key] || 0;
+              const acc = typeAccepted[t.key] || 0;
+              if (count === 0) return null;
+              return (
+                <button
+                  key={t.key}
+                  onClick={() => setStatusFilter(statusFilter === t.key ? "all" : t.key)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border ${
+                    statusFilter === t.key
+                      ? "border-foreground/20 bg-accent"
+                      : "border-transparent hover:bg-muted"
+                  }`}
+                >
+                  <span className="size-2 rounded-full" style={{ backgroundColor: t.color }} />
+                  <span>{t.label}</span>
+                  <span className="tabular-nums text-muted-foreground">{acc}/{count}</span>
+                </button>
+              );
+            })}
+          </div>
+        );
+      })()}
+
       <Tabs defaultValue="guests">
         <div className="flex items-center justify-between">
           <TabsList>
             <TabsTrigger value="guests">Guests</TabsTrigger>
+            <TabsTrigger value="mix">Mix</TabsTrigger>
             <TabsTrigger value="export">Export</TabsTrigger>
           </TabsList>
           <div className="flex items-center gap-2">
@@ -405,37 +574,31 @@ export default function EventWorkspacePage() {
               onBlacklist={handleBlacklist}
             />
           ) : (
-            <div className="rounded-lg border">
-              <Table className="table-fixed w-full">
+            <div className="rounded-lg border overflow-hidden">
+              <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-10">
-                      <button onClick={() => toggleSort("score")} className="flex items-center gap-1 hover:text-foreground">
-                        #
-                      </button>
-                    </TableHead>
-                    <TableHead className="w-[30%]">
+                    <TableHead className="w-10">#</TableHead>
+                    <TableHead className="min-w-[200px]">
                       <button onClick={() => toggleSort("name")} className="flex items-center gap-1 hover:text-foreground">
                         Guest <ArrowUpDown className="size-3" />
                       </button>
                     </TableHead>
-                    <TableHead className="w-[15%] hidden md:table-cell">
+                    <TableHead className="w-[120px] hidden md:table-cell">
                       <button onClick={() => toggleSort("type")} className="flex items-center gap-1 hover:text-foreground">
-                        Category
+                        Category <ArrowUpDown className="size-3" />
                       </button>
                     </TableHead>
-                    <TableHead className="w-10 hidden lg:table-cell">Score</TableHead>
-                    <TableHead className="hidden xl:table-cell">Summary</TableHead>
                     <TableHead className="w-[90px]">
                       <button onClick={() => toggleSort("status")} className="flex items-center gap-1 hover:text-foreground">
                         Status <ArrowUpDown className="size-3" />
                       </button>
                     </TableHead>
-                    <TableHead className="w-[120px] min-w-[100px] text-right">Actions</TableHead>
+                    <TableHead className="w-[100px] text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filtered.map((a) => {
+                  {filtered.map((a, idx) => {
                     const photo = getPhoto(a);
                     const headline = getHeadline(a);
                     const summary = getSummary(a);
@@ -446,17 +609,11 @@ export default function EventWorkspacePage() {
                         className="cursor-pointer hover:bg-muted/50"
                         onClick={() => setSelectedId(a.applicant_id)}
                       >
-                        <TableCell className="text-center">
-                          {rank ? (
-                            <span className="text-xs font-mono font-bold text-muted-foreground">
-                              {rank.rank}
-                            </span>
-                          ) : (
-                            <span className="text-xs text-muted-foreground/30">—</span>
-                          )}
+                        <TableCell className="text-center text-xs font-mono text-muted-foreground">
+                          {rank?.rank || idx + 1}
                         </TableCell>
                         <TableCell>
-                          <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-3 min-w-0">
                             {photo ? (
                               <img src={photo} alt="" className="size-9 rounded-full object-cover shrink-0" />
                             ) : (
@@ -464,40 +621,19 @@ export default function EventWorkspacePage() {
                                 {getName(a).charAt(0).toUpperCase()}
                               </div>
                             )}
-                            <div className="min-w-0">
+                            <div className="min-w-0 flex-1">
                               <p className="font-medium text-sm truncate">{getName(a)}</p>
-                              {headline && <p className="text-xs text-muted-foreground truncate max-w-[220px]">{headline}</p>}
+                              {headline && <p className="text-xs text-muted-foreground truncate">{headline}</p>}
+                              {summary && <p className="text-[10px] text-muted-foreground/60 truncate mt-0.5">{summary.split("\n")[0]}</p>}
                             </div>
                           </div>
                         </TableCell>
                         <TableCell className="hidden md:table-cell">
                           {a.attendee_type && (
-                            <Badge
-                              variant="outline"
-                              className="text-[11px] font-medium"
-                              style={{
-                                borderColor: getTypeColor(a.attendee_type) + "40",
-                                color: getTypeColor(a.attendee_type),
-                                backgroundColor: getTypeColor(a.attendee_type) + "10",
-                              }}
-                            >
-                              {a.attendee_type_detail || getTypeLabel(a.attendee_type)}
-                            </Badge>
+                            <span className="text-xs font-medium truncate block max-w-[110px]" style={{ color: getTypeColor(a.attendee_type) }}>
+                              {getTypeLabel(a.attendee_type)}
+                            </span>
                           )}
-                        </TableCell>
-                        <TableCell className="hidden lg:table-cell">
-                          {rank ? (
-                            <span className="text-xs font-semibold tabular-nums">{rank.score}</span>
-                          ) : (
-                            <span className="text-xs text-muted-foreground/30">—</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="hidden xl:table-cell">
-                          {(a.rank_reason as string) ? (
-                            <p className="text-xs text-muted-foreground line-clamp-1 truncate">{a.rank_reason as string}</p>
-                          ) : summary ? (
-                            <p className="text-xs text-muted-foreground line-clamp-1 truncate">{summary}</p>
-                          ) : null}
                         </TableCell>
                         <TableCell>
                           <Badge
@@ -512,7 +648,7 @@ export default function EventWorkspacePage() {
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                          <div className="flex items-center justify-end gap-1">
+                          <div className="flex items-center justify-end gap-0.5">
                             <button
                               onClick={() => handleStatusChange(a.applicant_id, a.status === "accepted" ? "pending" : "accepted")}
                               className={`size-7 rounded-md flex items-center justify-center transition-colors ${
@@ -520,9 +656,9 @@ export default function EventWorkspacePage() {
                                   ? "bg-emerald-100 text-emerald-700"
                                   : "text-muted-foreground hover:text-emerald-600 hover:bg-emerald-50"
                               }`}
-                              title={a.status === "accepted" ? "Undo accept" : "Accept"}
+                              title={a.status === "accepted" ? "Undo" : "Accept"}
                             >
-                              <CheckCircle2 className="size-4" />
+                              <CheckCircle2 className="size-3.5" />
                             </button>
                             <button
                               onClick={() => handleStatusChange(a.applicant_id, a.status === "waitlisted" ? "pending" : "waitlisted")}
@@ -531,9 +667,9 @@ export default function EventWorkspacePage() {
                                   ? "bg-amber-100 text-amber-700"
                                   : "text-muted-foreground hover:text-amber-600 hover:bg-amber-50"
                               }`}
-                              title={a.status === "waitlisted" ? "Undo waitlist" : "Waitlist"}
+                              title={a.status === "waitlisted" ? "Undo" : "Waitlist"}
                             >
-                              <Clock className="size-4" />
+                              <Clock className="size-3.5" />
                             </button>
                             <button
                               onClick={() => handleStatusChange(a.applicant_id, a.status === "rejected" ? "pending" : "rejected")}
@@ -542,16 +678,9 @@ export default function EventWorkspacePage() {
                                   ? "bg-red-100 text-red-700"
                                   : "text-muted-foreground hover:text-red-600 hover:bg-red-50"
                               }`}
-                              title={a.status === "rejected" ? "Undo reject" : "Reject"}
+                              title={a.status === "rejected" ? "Undo" : "Reject"}
                             >
-                              <XCircle className="size-4" />
-                            </button>
-                            <button
-                              onClick={() => handleBlacklist(a)}
-                              className="size-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-red-50 transition-colors"
-                              title="Blacklist & remove"
-                            >
-                              <ShieldBan className="size-4" />
+                              <XCircle className="size-3.5" />
                             </button>
                           </div>
                         </TableCell>
@@ -562,6 +691,20 @@ export default function EventWorkspacePage() {
               </Table>
             </div>
           )}
+        </TabsContent>
+
+        {/* ── Mix Tab ── */}
+        <TabsContent value="mix" className="mt-4 space-y-6">
+          <MixPanel applicants={applicants} onApply={async (acceptIds, waitlistIds) => {
+            try {
+              if (acceptIds.length) await api.batchUpdateStatus(acceptIds, "accepted");
+              if (waitlistIds.length) await api.batchUpdateStatus(waitlistIds, "waitlisted");
+              toast.success(`${acceptIds.length} accepted, ${waitlistIds.length} waitlisted`);
+              await refreshAll();
+            } catch (err) {
+              toast.error(err instanceof Error ? err.message : "Failed to apply mix");
+            }
+          }} />
         </TabsContent>
 
         {/* ── Export Tab ── */}

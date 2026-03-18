@@ -46,9 +46,9 @@ def _selection_context(prefs: SelectionPreferences | None) -> str:
         parts.append(f"VENUE CAPACITY: {prefs.venue_capacity} attendees.")
     if prefs.attendee_mix:
         type_labels = {
-            "vc": "VCs / Investors", "entrepreneur": "Founders / Entrepreneurs",
-            "faculty": "Faculty / Researchers", "alumni": "Alumni",
-            "press": "Press / Media", "student": "Students", "other": "Other",
+            "vc": "VCs / Investors", "founder": "Founders",
+            "engineer": "Engineers", "pm": "PMs",
+            "student": "Students", "press": "Press / Media", "other": "Other",
         }
         mix_lines = [f"  - {type_labels.get(k, k)}: {v}%" for k, v in prefs.attendee_mix.items() if v > 0]
         if mix_lines:
@@ -68,9 +68,9 @@ def _selection_context(prefs: SelectionPreferences | None) -> str:
 
 def _build_pool_summary(type_counts: dict[str, int], total: int) -> str:
     type_labels = {
-        "vc": "VCs / Investors", "entrepreneur": "Founders / Entrepreneurs",
-        "faculty": "Faculty / Researchers", "alumni": "Alumni",
-        "press": "Press / Media", "student": "Students", "other": "Other",
+        "vc": "VCs / Investors", "founder": "Founders",
+        "engineer": "Engineers", "pm": "PMs",
+        "student": "Students", "press": "Press / Media", "other": "Other",
     }
     lines = []
     for key, label in type_labels.items():
@@ -95,10 +95,19 @@ Classify this applicant AND cross-check their claimed role against any LinkedIn 
 
 Return ONLY a JSON object:
 {{
-  "attendee_type": "<vc|entrepreneur|faculty|alumni|press|student|other>",
-  "attendee_type_detail": "<specific label, e.g. 'Partner at Sequoia', 'AI Startup Founder', 'CS Professor'>",
+  "attendee_type": "<MUST be one of: vc, founder, engineer, pm, student, press, other>",
+  "attendee_type_detail": "<specific label, e.g. 'Partner at Sequoia', 'AI Startup Founder', 'Staff Engineer at Google'>",
   "summary": "<2-4 bullet points: current role & company, key background/experience, what makes them relevant. Use format like '- Role at Company\\n- 10 yrs AI/ML experience\\n- Stanford PhD'. Be specific, use real data from their profile.>"
 }}
+
+STRICT CATEGORY RULES:
+- "vc": Venture capitalists, angel investors, LPs, investment professionals at funds
+- "founder": Startup founders, co-founders, CEOs of startups they founded
+- "engineer": Software engineers, ML engineers, research scientists, CTOs (if primarily technical)
+- "pm": Product managers, product leads, program managers, operations leads
+- "student": Current students (undergrad, grad, MBA, PhD candidates)
+- "press": Journalists, reporters, media professionals, content creators with press credentials
+- "other": Everyone else (consultants, academics/professors, biz dev, sales, marketing, designers, etc.)
 
 Return ONLY the JSON, no other text.
 """.strip()

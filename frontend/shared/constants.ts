@@ -7,8 +7,8 @@ export const ATTENDEE_TYPES = [
   { key: "founder", label: "Founders", color: "#f59e0b" },
   { key: "engineer", label: "Engineers", color: "#3b82f6" },
   { key: "pm", label: "PMs", color: "#ec4899" },
-  { key: "researcher", label: "Researchers", color: "#10b981" },
   { key: "student", label: "Students", color: "#8b5cf6" },
+  { key: "press", label: "Press/Media", color: "#10b981" },
   { key: "other", label: "Other", color: "#6b7280" },
 ] as const;
 
