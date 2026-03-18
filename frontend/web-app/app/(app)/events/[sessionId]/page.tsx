@@ -405,7 +405,7 @@ export default function EventWorkspacePage() {
   if (error) return <div className="flex flex-col items-center justify-center py-20"><p className="text-sm text-destructive mb-4">{error}</p><Button variant="outline" onClick={() => refreshAll()}>Retry</Button></div>;
 
   return (
-    <div className="space-y-4 md:space-y-6">
+    <div className="space-y-4 md:space-y-6 overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
@@ -582,26 +582,26 @@ export default function EventWorkspacePage() {
             />
           ) : (
             <div className="rounded-lg border overflow-hidden">
-              <Table>
+              <Table className="table-fixed w-full">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-10">#</TableHead>
-                    <TableHead className="min-w-[200px]">
+                    <TableHead className="w-8">#</TableHead>
+                    <TableHead>
                       <button onClick={() => toggleSort("name")} className="flex items-center gap-1 hover:text-foreground">
                         Guest <ArrowUpDown className="size-3" />
                       </button>
                     </TableHead>
-                    <TableHead className="w-[120px] hidden md:table-cell">
+                    <TableHead className="w-24 hidden md:table-cell">
                       <button onClick={() => toggleSort("type")} className="flex items-center gap-1 hover:text-foreground">
-                        Category <ArrowUpDown className="size-3" />
+                        Type
                       </button>
                     </TableHead>
-                    <TableHead className="w-[90px]">
+                    <TableHead className="w-20">
                       <button onClick={() => toggleSort("status")} className="flex items-center gap-1 hover:text-foreground">
-                        Status <ArrowUpDown className="size-3" />
+                        Status
                       </button>
                     </TableHead>
-                    <TableHead className="w-[100px] text-right">Actions</TableHead>
+                    <TableHead className="w-24 text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
