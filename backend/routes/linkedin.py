@@ -1012,3 +1012,77 @@ async def stream_job(job_id: str):
             await asyncio.sleep(0.5)
 
     return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+# ── AI Summary for LinkedIn profiles ──
+
+@router.post("/summarize-all")
+async def summarize_all_profiles(body: dict):
+    """Generate AI summaries for all profiles missing one. Saves to linkedin-scrapes."""
+    from ai import call_ai
+    from config import linkedin_scrapes_table
+    import json
+
+    api_key = body.get("api_key", "")
+    model = body.get("model", "gpt-4o-mini")
+    provider = body.get("provider", "openai")
+    if not api_key:
+        raise HTTPException(400, "api_key required")
+
+    # Get all profiles
+    response = linkedin_scrapes_table.scan()
+    items = response.get("Items", [])
+    while "LastEvaluatedKey" in response:
+        response = linkedin_scrapes_table.scan(ExclusiveStartKey=response["LastEvaluatedKey"])
+        items.extend(response.get("Items", []))
+
+    # Filter to those missing summary
+    to_summarize = [i for i in items if not i.get("ai_summary") and i.get("name")]
+
+    async def event_stream():
+        total = len(to_summarize)
+        yield f"event: start\ndata: {json.dumps({'total': total, 'already': len(items) - total})}\n\n"
+
+        completed = 0
+        errors = 0
+        for item in to_summarize:
+            name = item.get("name", "Unknown")
+            headline = item.get("headline", "")
+            about = item.get("about", "")
+            experience = item.get("experience", "")
+            education = item.get("education", "")
+            company = item.get("company", "")
+            location = item.get("location", "")
+
+            prompt = f"""Write a 2-3 sentence professional summary for this person based on their LinkedIn data. Be specific and factual. Do NOT add opinions or speculation. Just summarize who they are and what they do.
+
+Name: {name}
+Headline: {headline}
+Company: {company}
+Location: {location}
+About: {about[:500]}
+Experience: {experience[:500]}
+Education: {education[:300]}
+
+Return ONLY the summary text, nothing else."""
+
+            try:
+                summary = call_ai(provider, api_key, model, prompt, max_tokens=200)
+                summary = summary.strip().strip('"')
+
+                linkedin_scrapes_table.update_item(
+                    Key={"url": item["url"]},
+                    UpdateExpression="SET ai_summary = :s",
+                    ExpressionAttributeValues={":s": summary},
+                )
+                completed += 1
+                yield f"event: progress\ndata: {json.dumps({'name': name, 'summary': summary[:100], 'completed': completed, 'total': total})}\n\n"
+            except Exception as e:
+                errors += 1
+                completed += 1
+                yield f"event: error\ndata: {json.dumps({'name': name, 'error': str(e)[:100], 'completed': completed, 'total': total})}\n\n"
+
+        yield f"event: complete\ndata: {json.dumps({'completed': completed, 'total': total, 'errors': errors})}\n\n"
+
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(event_stream(), media_type="text/event-stream")

@@ -132,6 +132,26 @@ export const api = {
       "/applicants/rank", { method: "POST", body: JSON.stringify({ ...data, prompt: judgeId, criteria: [sessionId] }) }),
   listRankingJudges: () =>
     fetchAPI<{ id: string; name: string; description: string }[]>("/applicants/ranking-judges"),
+
+  // LinkedIn DB
+  summarizeAllProfiles: async (data: { api_key: string; model: string; provider: string }, callbacks: {
+    onStart?: (d: { total: number; already: number }) => void;
+    onProgress?: (d: { name: string; summary: string; completed: number; total: number }) => void;
+    onError?: (d: { name: string; error: string; completed: number; total: number }) => void;
+    onComplete?: (d: { completed: number; total: number; errors: number }) => void;
+  }) => {
+    const res = await fetch(`${API_URL}/linkedin/summarize-all`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
+    });
+    if (!res.ok) { const e = await res.json().catch(() => ({ detail: res.statusText })); throw new Error(e.detail || "Failed"); }
+    await readSSEStream(res, (eventType, d) => {
+      const data = d as Record<string, unknown>;
+      if (eventType === "start") callbacks.onStart?.(data as { total: number; already: number });
+      else if (eventType === "progress") callbacks.onProgress?.(data as { name: string; summary: string; completed: number; total: number });
+      else if (eventType === "error") callbacks.onError?.(data as { name: string; error: string; completed: number; total: number });
+      else if (eventType === "complete") callbacks.onComplete?.(data as { completed: number; total: number; errors: number });
+    });
+  },
   analyzeAll: (data: BulkAnalyzeRequest) =>
     fetchAPI<AnalysisResult>("/applicants/analyze-all", { method: "POST", body: JSON.stringify(data) }),
 

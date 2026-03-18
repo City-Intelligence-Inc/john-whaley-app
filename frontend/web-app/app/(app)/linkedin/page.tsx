@@ -5,14 +5,18 @@ import { toast } from "sonner";
 import {
   Search, X, Loader2, ExternalLink, BarChart3, ChevronDown,
   Building2, MapPin, GraduationCap, Briefcase, User, Image, FileText,
+  Sparkles, Key, Eye, EyeOff,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
+import { api } from "@/lib/api";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -34,6 +38,10 @@ export default function LinkedInPage() {
   const [profiles, setProfiles] = useState<LinkedInProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [apiKey, setApiKey] = useState(() => typeof window !== "undefined" ? localStorage.getItem("ai_api_key") || "" : "");
+  const [showKey, setShowKey] = useState(false);
+  const [summarizing, setSummarizing] = useState(false);
+  const [sumProgress, setSumProgress] = useState<{ completed: number; total: number } | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -82,10 +90,56 @@ export default function LinkedInPage() {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Applicant Pool</h1>
-        <p className="text-sm text-muted-foreground mt-1">{profiles.length} profiles</p>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Applicant Pool</h1>
+          <p className="text-sm text-muted-foreground mt-1">{profiles.length} profiles</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <Key className="absolute left-2 top-1/2 -translate-y-1/2 size-3 text-muted-foreground" />
+            <Input type={showKey ? "text" : "password"} value={apiKey}
+              onChange={e => { setApiKey(e.target.value); localStorage.setItem("ai_api_key", e.target.value); }}
+              placeholder="AI API key" className="h-8 w-[160px] pl-6 pr-7 text-[11px] font-mono" />
+            <button onClick={() => setShowKey(!showKey)} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground">
+              {showKey ? <EyeOff className="size-3" /> : <Eye className="size-3" />}
+            </button>
+          </div>
+          <Button size="sm" disabled={summarizing || !apiKey}
+            onClick={async () => {
+              setSummarizing(true); setSumProgress(null);
+              try {
+                await api.summarizeAllProfiles(
+                  { api_key: apiKey, model: "gpt-4o-mini", provider: "openai" },
+                  {
+                    onStart: (d) => setSumProgress({ completed: 0, total: d.total }),
+                    onProgress: (d) => setSumProgress({ completed: d.completed, total: d.total }),
+                    onError: (d) => setSumProgress({ completed: d.completed, total: d.total }),
+                    onComplete: async () => {
+                      const res = await fetch(`${API_URL}/linkedin/database`);
+                      const data = await res.json();
+                      setProfiles(data.items || []);
+                      toast.success("Summaries generated");
+                    },
+                  }
+                );
+              } catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); }
+              finally { setSummarizing(false); setSumProgress(null); }
+            }}
+            className="bg-gold text-gold-foreground hover:bg-gold/90">
+            {summarizing ? <Loader2 className="size-3 mr-1.5 animate-spin" /> : <Sparkles className="size-3 mr-1.5" />}
+            {summarizing ? "Summarizing..." : "Generate Summaries"}
+          </Button>
+        </div>
       </div>
+
+      {/* Summary progress */}
+      {sumProgress && (
+        <div className="space-y-1">
+          <Progress value={sumProgress.total > 0 ? (sumProgress.completed / sumProgress.total) * 100 : 0} className="h-1.5" />
+          <p className="text-xs text-muted-foreground">{sumProgress.completed} / {sumProgress.total}</p>
+        </div>
+      )}
 
       {/* Stats (collapsible) */}
       {stats && (
@@ -152,6 +206,7 @@ export default function LinkedInPage() {
               <TableHead className="min-w-[200px]">Experience</TableHead>
               <TableHead className="min-w-[160px]">Education</TableHead>
               <TableHead className="min-w-[200px]">About</TableHead>
+              <TableHead className="min-w-[200px]">AI Summary</TableHead>
               <TableHead className="w-[50px]"></TableHead>
             </TableRow>
           </TableHeader>
@@ -187,6 +242,16 @@ export default function LinkedInPage() {
                 </TableCell>
                 <TableCell>
                   <p className="text-xs text-muted-foreground line-clamp-2">{p.about ? p.about.slice(0, 120) : "—"}</p>
+                </TableCell>
+                <TableCell>
+                  {(p as Record<string, unknown>).ai_summary ? (
+                    <p className="text-xs text-muted-foreground line-clamp-3 flex items-start gap-1">
+                      <Sparkles className="size-3 mt-0.5 shrink-0 text-gold" />
+                      {String((p as Record<string, unknown>).ai_summary)}
+                    </p>
+                  ) : (
+                    <span className="text-xs text-muted-foreground/30">—</span>
+                  )}
                 </TableCell>
                 <TableCell>
                   {p.url && (
