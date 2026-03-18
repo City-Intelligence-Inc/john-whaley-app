@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Upload, Linkedin, Loader2, Brain, Download, CheckCircle2, XCircle,
   Users, Search, X, MapPin, Building2, Sparkles, Plus, ChevronDown,
-  Trash2, CircleCheck, AlertTriangle, ExternalLink,
+  Trash2, CircleCheck, AlertTriangle, ExternalLink, ScanSearch,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -46,6 +46,18 @@ export default function MainPage() {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [newEventName, setNewEventName] = useState("");
   const [creating, setCreating] = useState(false);
+
+  // Investigation
+  const [investigateTarget, setInvestigateTarget] = useState<string | null>(null);
+  const [investigateResult, setInvestigateResult] = useState<{ agent: string; result: string } | null>(null);
+  const [investigating, setInvestigating] = useState(false);
+  const [agents] = useState([
+    { id: "founder_check", name: "Founder Check", description: "Validates founder quality and traction" },
+    { id: "venture_validator", name: "Venture Validator", description: "Cross-validates VC/investor claims" },
+    { id: "background_verify", name: "Background Verify", description: "Checks education, employment, credentials" },
+    { id: "relevance_score", name: "Event Fit", description: "Scores relevance for AI-focused events" },
+    { id: "network_value", name: "Network Value", description: "Assesses networking and connection value" },
+  ]);
 
   /* ── Data loading ── */
   const loadSessions = useCallback(async () => {
@@ -122,6 +134,21 @@ export default function MainPage() {
     link.download = `${(session?.name || "event").replace(/\s+/g, "-").toLowerCase()}.csv`;
     link.click(); URL.revokeObjectURL(url);
   }, [applicants, session]);
+
+  const runInvestigation = useCallback(async (applicantId: string, agentId: string) => {
+    setInvestigating(true);
+    setInvestigateResult(null);
+    try {
+      const apiKey = typeof window !== "undefined" ? localStorage.getItem("ai_api_key") || "" : "";
+      const provider = typeof window !== "undefined" ? localStorage.getItem("ai_provider") || "openai" : "openai";
+      const model = typeof window !== "undefined" ? localStorage.getItem("ai_model") || "gpt-4o-mini" : "gpt-4o-mini";
+      if (!apiKey) { toast.error("Set your AI API key first (run Analysis once to save it)"); setInvestigating(false); return; }
+      const res = await api.investigateApplicant(applicantId, agentId, { api_key: apiKey, model, provider });
+      setInvestigateResult({ agent: res.agent_name, result: res.result });
+      await refreshAll();
+    } catch (err) { toast.error(err instanceof Error ? err.message : "Investigation failed"); }
+    finally { setInvestigating(false); }
+  }, [refreshAll]);
 
   /* ── Filtered list ── */
   const filtered = useMemo(() => {
@@ -315,6 +342,24 @@ export default function MainPage() {
                                 </a>
                               )}
                             </div>
+                            {/* Investigate */}
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button size="sm" variant="ghost" className="h-6 px-1.5 text-muted-foreground hover:text-gold">
+                                  <ScanSearch className="size-3.5" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-[200px]">
+                                {agents.map((ag) => (
+                                  <DropdownMenuItem key={ag.id} onClick={() => { setInvestigateTarget(a.applicant_id); runInvestigation(a.applicant_id, ag.id); }}>
+                                    <div>
+                                      <div className="text-xs font-medium">{ag.name}</div>
+                                      <div className="text-[10px] text-muted-foreground">{ag.description}</div>
+                                    </div>
+                                  </DropdownMenuItem>
+                                ))}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                             {isPending ? (
                               <div className="flex gap-1">
                                 <Button size="sm" variant="ghost" onClick={() => handleStatusChange(a.applicant_id, "accepted")}
@@ -364,6 +409,32 @@ export default function MainPage() {
             <DialogDescription>Upload a CSV from Luma or any spreadsheet.</DialogDescription>
           </DialogHeader>
           <CSVUploader onUploadSuccess={handleUploadSuccess} sessionId={selectedSessionId || undefined} />
+        </DialogContent>
+      </Dialog>
+
+      {/* Investigation Results Dialog */}
+      <Dialog open={investigating || !!investigateResult} onOpenChange={(open) => { if (!open) { setInvestigateResult(null); setInvestigateTarget(null); } }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ScanSearch className="size-4 text-gold" />
+              {investigating ? "Investigating..." : investigateResult?.agent || "Investigation"}
+            </DialogTitle>
+            {investigateTarget && (
+              <DialogDescription>
+                {applicants.find(a => a.applicant_id === investigateTarget)?.name || ""}
+              </DialogDescription>
+            )}
+          </DialogHeader>
+          {investigating ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="size-5 animate-spin text-gold" />
+            </div>
+          ) : investigateResult ? (
+            <div className="rounded-lg bg-muted/50 p-4 text-sm leading-relaxed max-h-[400px] overflow-y-auto whitespace-pre-wrap">
+              {investigateResult.result}
+            </div>
+          ) : null}
         </DialogContent>
       </Dialog>
 

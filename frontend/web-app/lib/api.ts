@@ -122,6 +122,11 @@ export const api = {
   // AI Review
   reviewApplicant: (id: string, data: ReviewRequest) =>
     fetchAPI<Applicant>(`/applicants/${id}/review`, { method: "POST", body: JSON.stringify(data) }),
+  investigateApplicant: (id: string, agentId: string, data: { api_key: string; model: string; provider: string }) =>
+    fetchAPI<{ agent: string; agent_name: string; result: string; applicant_id: string }>(
+      `/applicants/${id}/investigate`, { method: "POST", body: JSON.stringify({ ...data, prompt: agentId }) }),
+  listInvestigationAgents: () =>
+    fetchAPI<{ id: string; name: string; description: string }[]>("/applicants/investigation-agents"),
   analyzeAll: (data: BulkAnalyzeRequest) =>
     fetchAPI<AnalysisResult>("/applicants/analyze-all", { method: "POST", body: JSON.stringify(data) }),
 

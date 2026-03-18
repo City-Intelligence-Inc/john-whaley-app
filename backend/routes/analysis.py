@@ -38,6 +38,124 @@ def _criteria_text(criteria: list[str], weights: list[str] | None = None) -> str
     return f"\n\nEvaluation criteria (in order of importance): {', '.join(criteria)}"
 
 
+# ── Investigation agents ──
+
+INVESTIGATION_AGENTS = {
+    "venture_validator": {
+        "name": "Venture Validator",
+        "description": "Cross-validates VC and investor claims against LinkedIn data",
+        "prompt": """You are an expert VC due-diligence analyst. Investigate this person's venture/investment claims.
+
+Check for:
+- Do they actually work at the fund they claim? Look at their experience timeline.
+- Is their title real or inflated? (e.g. "Partner" at a tiny unknown fund vs established firm)
+- Do they have a track record of actual investments or just "interested in startups"?
+- Are they a real decision-maker or junior associate positioning as senior?
+- Any red flags: self-employed "investor", angel investor with no portfolio, "venture fellow" with no fund
+
+Rate their credibility: VERIFIED / LIKELY LEGIT / QUESTIONABLE / RED FLAG
+Give specific evidence from their profile data.""",
+    },
+    "founder_check": {
+        "name": "Founder Check",
+        "description": "Validates founder quality - filters pre-revenue/pre-funding founders",
+        "prompt": """You are evaluating whether this founder is a STRONG founder worth inviting to an exclusive event.
+
+We want founders who have TRACTION. Investigate:
+- Do they have a real company or just an idea? Look for: employees, funding raised, revenue signals, product launched
+- How long have they been "building"? A stealth startup for 2+ years with nothing to show = red flag
+- Previous exits or successful companies? That's a strong signal.
+- Are they a technical founder who can actually build, or a "business founder" looking for a technical cofounder?
+- Is their startup in a real market or is it a solution looking for a problem?
+- Pre-revenue AND pre-funding AND solo founder = likely not a good fit
+
+Rate: STRONG FOUNDER / PROMISING / EARLY STAGE (risky) / NOT A FIT
+Give specific evidence.""",
+    },
+    "background_verify": {
+        "name": "Background Verify",
+        "description": "Verifies education, employment, and credential claims",
+        "prompt": """You are a background verification specialist. Cross-check this person's claims.
+
+Look for inconsistencies:
+- Do their employment dates make sense? Any suspicious gaps or overlaps?
+- Is their education real? (check if the degree matches the university's offerings)
+- Do their titles match the company size? (e.g. "VP of Engineering" at a 3-person startup)
+- Any signs of credential inflation? (listing courses as degrees, affiliations as employment)
+- Does their career progression make logical sense?
+- Are they who they say they are based on the data available?
+
+Rate: VERIFIED / MINOR DISCREPANCIES / SUSPICIOUS / CANNOT VERIFY
+List specific findings.""",
+    },
+    "relevance_score": {
+        "name": "Event Fit",
+        "description": "Scores how relevant this person is for an AI-focused event",
+        "prompt": """You are evaluating if this person belongs at a high-quality AI-focused event (like a Stanford AI demo day).
+
+Consider:
+- Do they actually work in AI/ML, or are they tangentially related?
+- What would they contribute to the event? (knowledge, connections, investment, energy)
+- Are they a builder, investor, researcher, or just curious?
+- Would other attendees benefit from meeting them?
+- Is there anything in their profile that makes them a MUST-HAVE at this event?
+- Or are they someone who would just take a seat without adding value?
+
+Rate: MUST INVITE / GOOD FIT / ACCEPTABLE / SKIP
+Give specific reasons.""",
+    },
+    "network_value": {
+        "name": "Network Value",
+        "description": "Assesses the networking and connection value this person brings",
+        "prompt": """You are evaluating the networking value this person would bring to an exclusive event.
+
+Assess:
+- How well-connected are they? (company names, seniority, industry reach)
+- Would they introduce other attendees to valuable connections?
+- Do they have decision-making power? (can they fund, hire, partner, or open doors?)
+- Are they a known figure in their industry?
+- What's their social capital? (followers, speaking engagements, media presence)
+- Would inviting them make the event more attractive to OTHER high-value attendees?
+
+Rate: HIGH VALUE / MODERATE / LOW VALUE
+Be specific about what connections/value they'd bring.""",
+    },
+}
+
+
+@router.post("/{applicant_id}/investigate")
+def investigate_applicant(applicant_id: str, body: ReviewRequest):
+    """Run a focused investigation agent on a single applicant."""
+    applicant = db.get_applicant_or_404(applicant_id)
+
+    agent_id = body.prompt or ""
+    agent = INVESTIGATION_AGENTS.get(agent_id)
+    if not agent:
+        raise HTTPException(400, f"Unknown agent: {agent_id}. Available: {list(INVESTIGATION_AGENTS.keys())}")
+
+    info = _applicant_info_text(applicant)
+    full_prompt = f"{agent['prompt']}\n\nPerson's Profile Data:\n{info}\n\nYour investigation:"
+
+    try:
+        result = call_ai(body.provider, body.api_key, body.model, full_prompt)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(502, f"AI error: {e}")
+
+    # Save under agent-specific field
+    field_name = f"investigation_{agent_id}"
+    db.update_applicant_fields(applicant_id, {field_name: result})
+
+    return {"agent": agent_id, "agent_name": agent["name"], "result": result, "applicant_id": applicant_id}
+
+
+@router.get("/investigation-agents")
+def list_investigation_agents():
+    """List available investigation agents."""
+    return [{"id": k, "name": v["name"], "description": v["description"]} for k, v in INVESTIGATION_AGENTS.items()]
+
+
 # ── Single review ──
 
 @router.post("/{applicant_id}/review")
