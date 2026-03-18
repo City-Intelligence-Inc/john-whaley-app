@@ -3,7 +3,6 @@
 import { useState, useMemo, useCallback } from "react";
 import {
   Loader2,
-  ArrowUpDown,
   Check,
   X,
   GripVertical,
@@ -40,7 +39,6 @@ import { useEvent } from "@/components/event-provider";
 import { api } from "@/lib/api";
 import type { Applicant } from "@/lib/api";
 import { ATTENDEE_TYPES } from "@/lib/constants";
-import { JUDGE_PERSONAS } from "@/lib/judge-personas";
 
 /* ── Helpers ── */
 
@@ -56,18 +54,6 @@ function getScore(a: Applicant): number {
   if (!a.ai_score) return 0;
   const n = Number(a.ai_score);
   return isNaN(n) ? 0 : n;
-}
-
-function scoreColor(score: number): string {
-  if (score >= 70) return "text-emerald-400";
-  if (score >= 40) return "text-amber-400";
-  return "text-red-400";
-}
-
-function scoreBg(score: number): string {
-  if (score >= 70) return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
-  if (score >= 40) return "bg-amber-500/15 text-amber-400 border-amber-500/30";
-  return "bg-red-500/15 text-red-400 border-red-500/30";
 }
 
 function statusBadge(status: string): string {
@@ -96,24 +82,28 @@ function getTypeColor(key: string): string {
   return ATTENDEE_TYPES.find((t) => t.key === key)?.color || "#6b7280";
 }
 
-/** Parse panel_votes JSON string: { judge_id: { score, decision, reasoning } } */
-function parsePanelVotes(a: Applicant): Record<string, { score: number; decision: string; reasoning: string }> {
-  if (!a.panel_votes) return {};
-  try {
-    const raw = typeof a.panel_votes === "string" ? JSON.parse(a.panel_votes) : a.panel_votes;
-    const result: Record<string, { score: number; decision: string; reasoning: string }> = {};
-    for (const [judgeId, val] of Object.entries(raw)) {
-      const v = val as Record<string, unknown>;
-      result[judgeId] = {
-        score: Number(v.score || 0),
-        decision: String(v.decision || "pass"),
-        reasoning: String(v.reasoning || ""),
-      };
+/** Parse panel_votes — stored as "2/3" string (accept_count/total) */
+function parsePanelVotes(a: Applicant): { acceptCount: number; totalJudges: number } {
+  if (!a.panel_votes) return { acceptCount: 0, totalJudges: 0 };
+  const str = typeof a.panel_votes === "string" ? a.panel_votes : String(a.panel_votes);
+  const parts = str.split("/");
+  return {
+    acceptCount: parseInt(parts[0]) || 0,
+    totalJudges: parseInt(parts[1]) || 0,
+  };
+}
+
+/** Parse ai_reasoning for judge decisions — format: "emoji Name [ACCEPT]: reasoning | emoji Name [PASS]: reasoning" */
+function parseJudgeDecisions(a: Applicant): { judgeName: string; decision: string; reasoning: string }[] {
+  if (!a.ai_reasoning || typeof a.ai_reasoning !== "string") return [];
+  const parts = a.ai_reasoning.split(" | ");
+  return parts.map((part) => {
+    const match = part.match(/^(.+?)\s*\[(ACCEPT|PASS)\]:\s*(.*)$/);
+    if (match) {
+      return { judgeName: match[1].trim(), decision: match[2].toLowerCase(), reasoning: match[3].trim() };
     }
-    return result;
-  } catch {
-    return {};
-  }
+    return { judgeName: "", decision: "pass", reasoning: part };
+  }).filter((d) => d.judgeName);
 }
 
 /* ────────────────────────────────────────────────────────────────────── */
@@ -312,62 +302,52 @@ function CategoryVerification({
 /* ────────────────────────────────────────────────────────────────────── */
 
 function JudgeRankings({ applicants }: { applicants: Applicant[] }) {
-  const [sortJudge, setSortJudge] = useState<string | null>(null);
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [filterType, setFilterType] = useState<string>("all");
 
-  // Determine which judges have scores for these applicants
-  const activeJudges = useMemo(() => {
-    const judgeIds = new Set<string>();
-    for (const a of applicants) {
-      const votes = parsePanelVotes(a);
-      for (const jid of Object.keys(votes)) {
-        judgeIds.add(jid);
-      }
-    }
-    // Return JUDGE_PERSONAS that have votes, maintaining order
-    return JUDGE_PERSONAS.filter((j) => judgeIds.has(j.id));
+  // Check if any applicants have panel votes
+  const hasPanel = useMemo(() => {
+    return applicants.some((a) => a.panel_votes);
   }, [applicants]);
 
-  // Filter and sort applicants
-  const displayApplicants = useMemo(() => {
-    let list = applicants;
+  // Parse all judge decisions from ai_reasoning
+  const applicantsWithDecisions = useMemo(() => {
+    return applicants.map((a) => ({
+      ...a,
+      _judgeDecisions: parseJudgeDecisions(a),
+      _panelVotes: parsePanelVotes(a),
+    }));
+  }, [applicants]);
 
-    // Filter by type
+  // Collect unique judge names
+  const judgeNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const a of applicantsWithDecisions) {
+      for (const d of a._judgeDecisions) {
+        names.add(d.judgeName);
+      }
+    }
+    return [...names];
+  }, [applicantsWithDecisions]);
+
+  // Filter and sort: accepted first, then by name
+  const displayApplicants = useMemo(() => {
+    let list = applicantsWithDecisions;
     if (filterType !== "all") {
       list = list.filter((a) => a.attendee_type === filterType);
     }
+    return [...list].sort((a, b) => {
+      const aAcc = a.status === "accepted" ? 0 : 1;
+      const bAcc = b.status === "accepted" ? 0 : 1;
+      if (aAcc !== bAcc) return aAcc - bAcc;
+      return getName(a).localeCompare(getName(b));
+    });
+  }, [applicantsWithDecisions, filterType]);
 
-    // Sort
-    if (sortJudge) {
-      list = [...list].sort((a, b) => {
-        const va = parsePanelVotes(a)[sortJudge]?.score || 0;
-        const vb = parsePanelVotes(b)[sortJudge]?.score || 0;
-        return sortDir === "desc" ? vb - va : va - vb;
-      });
-    } else {
-      // Default: sort by overall ai_score desc
-      list = [...list].sort((a, b) => getScore(b) - getScore(a));
-    }
-
-    return list;
-  }, [applicants, filterType, sortJudge, sortDir]);
-
-  const handleSortToggle = (judgeId: string) => {
-    if (sortJudge === judgeId) {
-      setSortDir((d) => (d === "desc" ? "asc" : "desc"));
-    } else {
-      setSortJudge(judgeId);
-      setSortDir("desc");
-    }
-  };
-
-  // If no judges have scored yet, show empty state
-  if (activeJudges.length === 0) {
+  if (!hasPanel) {
     return (
       <div className="space-y-6">
         <p className="text-sm text-muted-foreground">
-          Judge rankings appear here after you run the AI Judge Panel analysis. Each judge scores candidates in their area of expertise.
+          Judge rankings appear here after you run the AI Judge Panel analysis.
         </p>
         <Card className="border-border/50">
           <CardContent className="py-16 text-center">
@@ -387,31 +367,21 @@ function JudgeRankings({ applicants }: { applicants: Applicant[] }) {
       {/* Controls */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <p className="text-sm text-muted-foreground">
-          Each column shows a judge&apos;s score for each applicant. Click a column header to sort by that judge.
+          Each column shows a judge&apos;s decision for each applicant.
         </p>
-        <div className="flex items-center gap-3">
-          <Select value={filterType} onValueChange={setFilterType}>
-            <SelectTrigger className="h-8 w-[180px] text-xs">
-              <SelectValue placeholder="Filter by type" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all" className="text-xs">All Categories</SelectItem>
-              {ATTENDEE_TYPES.map((t) => (
-                <SelectItem key={t.key} value={t.key} className="text-xs">
-                  {t.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 text-xs"
-            onClick={() => { setSortJudge(null); setSortDir("desc"); }}
-          >
-            Reset Sort
-          </Button>
-        </div>
+        <Select value={filterType} onValueChange={setFilterType}>
+          <SelectTrigger className="h-8 w-[180px] text-xs">
+            <SelectValue placeholder="Filter by type" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all" className="text-xs">All Categories</SelectItem>
+            {ATTENDEE_TYPES.map((t) => (
+              <SelectItem key={t.key} value={t.key} className="text-xs">
+                {t.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Rankings Table */}
@@ -422,30 +392,10 @@ function JudgeRankings({ applicants }: { applicants: Applicant[] }) {
               <TableHead className="text-xs font-semibold w-[40px]">#</TableHead>
               <TableHead className="text-xs font-semibold min-w-[180px]">Applicant</TableHead>
               <TableHead className="text-xs font-semibold w-[80px]">Type</TableHead>
-              <TableHead
-                className="text-xs font-semibold w-[70px] cursor-pointer hover:text-foreground transition-colors"
-                onClick={() => { setSortJudge(null); setSortDir((d) => d === "desc" ? "asc" : "desc"); }}
-              >
-                <div className="flex items-center gap-1">
-                  Score
-                  <ArrowUpDown className="size-3" />
-                </div>
-              </TableHead>
-              {activeJudges.map((judge) => (
-                <TableHead
-                  key={judge.id}
-                  className="text-xs font-semibold w-[80px] cursor-pointer hover:text-foreground transition-colors"
-                  onClick={() => handleSortToggle(judge.id)}
-                >
-                  <div className="flex items-center gap-1" title={`${judge.name} - ${judge.specialty}`}>
-                    <span>{judge.emoji}</span>
-                    <span className="truncate max-w-[60px]">
-                      {judge.name.replace("The ", "")}
-                    </span>
-                    {sortJudge === judge.id && (
-                      <ArrowUpDown className="size-3 text-gold shrink-0" />
-                    )}
-                  </div>
+              <TableHead className="text-xs font-semibold w-[70px]">Votes</TableHead>
+              {judgeNames.map((name) => (
+                <TableHead key={name} className="text-xs font-semibold w-[80px]">
+                  <span className="truncate block max-w-[70px]" title={name}>{name}</span>
                 </TableHead>
               ))}
               <TableHead className="text-xs font-semibold w-[90px]">Status</TableHead>
@@ -453,8 +403,8 @@ function JudgeRankings({ applicants }: { applicants: Applicant[] }) {
           </TableHeader>
           <TableBody>
             {displayApplicants.map((a, i) => {
-              const votes = parsePanelVotes(a);
-              const overallScore = getScore(a);
+              const decisions = a._judgeDecisions;
+              const votes = a._panelVotes;
 
               return (
                 <TableRow key={a.applicant_id} className="group">
@@ -485,22 +435,22 @@ function JudgeRankings({ applicants }: { applicants: Applicant[] }) {
                     )}
                   </TableCell>
                   <TableCell>
-                    <span className={`text-sm font-semibold tabular-nums ${scoreColor(overallScore)}`}>
-                      {overallScore > 0 ? overallScore : "-"}
-                    </span>
+                    {votes.totalJudges > 0 && (
+                      <span className={`text-xs font-semibold ${votes.acceptCount > 0 ? "text-emerald-400" : "text-muted-foreground"}`}>
+                        {votes.acceptCount}/{votes.totalJudges}
+                      </span>
+                    )}
                   </TableCell>
-                  {activeJudges.map((judge) => {
-                    const vote = votes[judge.id];
-                    const score = vote?.score || 0;
+                  {judgeNames.map((judgeName) => {
+                    const d = decisions.find((dec) => dec.judgeName === judgeName);
                     return (
-                      <TableCell key={judge.id}>
-                        {vote ? (
-                          <div className="flex items-center gap-1" title={vote.reasoning}>
-                            <span className={`text-xs font-semibold tabular-nums ${scoreColor(score)}`}>
-                              {score}
-                            </span>
-                            {vote.decision === "accept" && (
-                              <Check className="size-3 text-emerald-400" />
+                      <TableCell key={judgeName}>
+                        {d ? (
+                          <div title={d.reasoning}>
+                            {d.decision === "accept" ? (
+                              <Check className="size-4 text-emerald-400" />
+                            ) : (
+                              <X className="size-4 text-muted-foreground/30" />
                             )}
                           </div>
                         ) : (
@@ -524,37 +474,13 @@ function JudgeRankings({ applicants }: { applicants: Applicant[] }) {
         </Table>
       </div>
 
-      {/* Judge Legend */}
-      <Card className="border-border/50">
-        <CardContent className="py-4 px-4">
-          <p className="text-xs font-semibold text-muted-foreground mb-3 uppercase tracking-wider">
-            Judge Panel
-          </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {activeJudges.map((judge) => (
-              <div key={judge.id} className="flex items-start gap-2">
-                <span className="text-lg shrink-0">{judge.emoji}</span>
-                <div className="min-w-0">
-                  <p className="text-xs font-semibold">{judge.name}</p>
-                  <p className="text-[10px] text-muted-foreground">{judge.specialty}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Score Legend */}
+      {/* Legend */}
       <div className="flex items-center gap-4 text-xs text-muted-foreground">
-        <span className="font-medium">Score colors:</span>
         <span className="flex items-center gap-1">
-          <span className="size-2.5 rounded-full bg-emerald-500" /> 70+ High
+          <Check className="size-3 text-emerald-400" /> Accept
         </span>
         <span className="flex items-center gap-1">
-          <span className="size-2.5 rounded-full bg-amber-500" /> 40-69 Medium
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="size-2.5 rounded-full bg-red-500" /> &lt;40 Low
+          <X className="size-3 text-muted-foreground/30" /> Pass
         </span>
       </div>
     </div>
@@ -601,13 +527,18 @@ function CommitteeDecision({
   // Sum of mix percentages
   const mixTotal = useMemo(() => Object.values(mix).reduce((s, v) => s + v, 0), [mix]);
 
-  // Top candidates per type, sorted by score
+  // Top candidates per type, accepted first then by name
   const rankedByType = useMemo(() => {
     const result: Record<string, Applicant[]> = {};
     for (const t of ATTENDEE_TYPES) {
       result[t.key] = applicants
         .filter((a) => a.attendee_type === t.key)
-        .sort((a, b) => getScore(b) - getScore(a));
+        .sort((a, b) => {
+          const aAcc = a.status === "accepted" ? 0 : 1;
+          const bAcc = b.status === "accepted" ? 0 : 1;
+          if (aAcc !== bAcc) return aAcc - bAcc;
+          return (a.name || "").localeCompare(b.name || "");
+        });
     }
     return result;
   }, [applicants]);
@@ -851,7 +782,6 @@ function CommitteeDecision({
               <CardContent className="px-4 pb-3 pt-0">
                 <div className="rounded-lg border border-border/30 divide-y divide-border/20">
                   {ranked.map((a, idx) => {
-                    const score = getScore(a);
                     const localDecision = decisions[a.applicant_id];
                     const effectiveStatus = localDecision || a.status;
                     const isAccepted = effectiveStatus === "accepted";
@@ -871,14 +801,6 @@ function CommitteeDecision({
                         <span className="text-xs font-mono text-muted-foreground w-6 text-right shrink-0">
                           {idx + 1}
                         </span>
-
-                        {/* Score badge */}
-                        <Badge
-                          variant="outline"
-                          className={`text-[10px] tabular-nums font-semibold shrink-0 ${scoreBg(score)}`}
-                        >
-                          {score > 0 ? score : "-"}
-                        </Badge>
 
                         {/* Name + headline */}
                         <div className="flex-1 min-w-0">

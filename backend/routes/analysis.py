@@ -399,7 +399,7 @@ For attendee_type_detail:
 Return ONLY the JSON, no other text.
 """.strip()
 
-# Pass 2: Scoring and decisions — with pool context
+# Pass 2: Decision and reasoning — with pool context
 _SCORE_PROMPT = """
 {base_prompt}{criteria}
 
@@ -408,26 +408,24 @@ _SCORE_PROMPT = """
 APPLICANT POOL CONTEXT — here is the current distribution of all {total} applicants:
 {pool_summary}
 
-You are now scoring this specific applicant:
+You are now evaluating this specific applicant:
 
 {info}
 
 This person was classified as: {attendee_type} ({attendee_type_detail})
 {investor_context}
-Score this applicant relative to the FULL POOL. Consider:
+Evaluate this applicant relative to the FULL POOL. Consider:
 1. How relevant is this person to the event?
 2. How much value would they add as an attendee (networking, feedback, investment, press coverage)?
 3. Given the pool distribution, do we need more people like them?
 
 Return ONLY a JSON object:
-{{"score": <1-100>, "status": "accepted" or "waitlisted" or "rejected", "reasoning": "<2-3 sentences: who they are, why this score, and how they compare to others in the pool>"}}
+{{"status": "accepted" or "waitlisted" or "rejected", "reasoning": "<2-3 sentences: who they are, why this decision, and how they compare to others in the pool>"}}
 
-Scoring guidelines — be generous, this is a networking event and most interested professionals add value:
-- 80-100: Strong fit — directly relevant expertise (AI/ML/NLP) or high-value role (VC, founder, press, faculty). ACCEPT.
-- 60-79: Good fit — technical professional who would benefit from and contribute to the event. ACCEPT unless pool is full.
-- 40-59: Moderate fit — tangential relevance but genuine interest. WAITLIST — may accept if space allows.
-- 20-39: Weak fit — minimal connection to event theme. REJECT.
-- 1-19: No fit — clearly irrelevant. REJECT.
+Decision guidelines — be generous, this is a networking event and most interested professionals add value:
+- ACCEPT: Strong or good fit — directly relevant expertise, high-value role, or technical professional who would contribute.
+- WAITLIST: Moderate fit — tangential relevance but genuine interest. May accept if space allows.
+- REJECT: Weak or no fit — minimal connection to event theme or clearly irrelevant.
 
 IMPORTANT: Default toward acceptance. Most tech professionals who apply to an AI event are interested and will contribute.
 Only reject applicants who truly have no connection to the event. When in doubt, waitlist rather than reject.
@@ -468,7 +466,7 @@ Your specialty: {judge_specialty}
 YOUR PERSPECTIVE AND BIAS:
 {judge_bias}
 
-SCORING ADJUSTMENTS:
+EVALUATION FOCUS:
 {judge_scoring_modifiers}
 
 You have been allocated {seats_allocated} seats to fill from this pool. Choose wisely — pick the applicants who best match YOUR perspective.
@@ -486,15 +484,8 @@ You are now evaluating this specific applicant:
 
 This person was classified as: {attendee_type} ({attendee_type_detail})
 
-Score this applicant through YOUR unique lens. Return ONLY a JSON object:
-{{"score": <1-100>, "decision": "accept" or "pass", "reasoning": "<1-2 sentences from YOUR perspective explaining your decision>"}}
-
-Scoring guidelines — apply YOUR bias aggressively:
-- 80-100: Perfect fit for YOUR priorities. You WANT this person in YOUR seats.
-- 60-79: Good fit for YOUR priorities. You'd accept them if you have room.
-- 40-59: Neutral — doesn't excite you but doesn't offend you either.
-- 20-39: Poor fit for YOUR lens. You'd rather save seats for better matches.
-- 1-19: Completely outside YOUR interests.
+Evaluate this applicant through YOUR unique lens. Return ONLY a JSON object:
+{{"decision": "accept" or "pass", "reasoning": "<1-2 sentences from YOUR perspective explaining your decision>"}}
 
 Your "decision" should be "accept" if you want to use one of your {seats_allocated} seats on this person, or "pass" if not. Be selective — you have limited seats!
 
@@ -543,7 +534,6 @@ async def _judge_score_one(
             return {
                 "applicant_id": applicant_id,
                 "name": name,
-                "score": int(result.get("score", 0)),
                 "decision": result.get("decision", "pass"),
                 "reasoning": result.get("reasoning", ""),
                 "attendee_type": attendee_type,
@@ -553,7 +543,6 @@ async def _judge_score_one(
             return {
                 "applicant_id": applicant_id,
                 "name": name,
-                "score": 0,
                 "decision": "pass",
                 "reasoning": "",
                 "error": str(e),
@@ -760,7 +749,6 @@ async def _score_one(applicant: dict, body: BulkAnalyzeRequest, pool_summary: st
 
             fields = {
                 "status": result.get("status", "pending"),
-                "ai_score": str(result.get("score", 0)),
                 "ai_reasoning": result.get("reasoning", ""),
             }
             db.update_applicant_fields(applicant_id, fields)
@@ -768,7 +756,6 @@ async def _score_one(applicant: dict, body: BulkAnalyzeRequest, pool_summary: st
             return {
                 "applicant_id": applicant_id,
                 "name": name,
-                "score": int(result.get("score", 0)),
                 "status": fields["status"],
                 "reasoning": fields["ai_reasoning"],
                 "attendee_type": attendee_type,
@@ -776,10 +763,10 @@ async def _score_one(applicant: dict, body: BulkAnalyzeRequest, pool_summary: st
             }
 
         except json.JSONDecodeError:
-            db.update_applicant_fields(applicant_id, {"ai_reasoning": "AI returned invalid response", "ai_score": "0"})
+            db.update_applicant_fields(applicant_id, {"ai_reasoning": "AI returned invalid response"})
             return {"applicant_id": applicant_id, "name": name, "error": f"Invalid JSON: {raw[:200]}"}
         except Exception as e:
-            db.update_applicant_fields(applicant_id, {"ai_reasoning": "Analysis failed", "ai_score": "0"})
+            db.update_applicant_fields(applicant_id, {"ai_reasoning": "Analysis failed"})
             return {"applicant_id": applicant_id, "name": name, "error": str(e)}
 
 
@@ -889,11 +876,11 @@ async def analyze_all_stream(body: BulkAnalyzeRequest):
             email = a.get("email", "").strip().lower()
             if email and email in whitelist_emails:
                 listed_ids.add(a["applicant_id"])
-                db.update_applicant_fields(a["applicant_id"], {"status": "accepted", "ai_score": "100", "ai_reasoning": "Whitelisted"})
+                db.update_applicant_fields(a["applicant_id"], {"status": "accepted", "ai_reasoning": "Whitelisted"})
                 yield f"event: whitelist\ndata: {json.dumps({'applicant_id': a['applicant_id'], 'name': get_applicant_name(a)})}\n\n"
             elif email and email in blacklist_emails:
                 listed_ids.add(a["applicant_id"])
-                db.update_applicant_fields(a["applicant_id"], {"status": "rejected", "ai_score": "0", "ai_reasoning": "Blacklisted"})
+                db.update_applicant_fields(a["applicant_id"], {"status": "rejected", "ai_reasoning": "Blacklisted"})
                 yield f"event: blacklist\ndata: {json.dumps({'applicant_id': a['applicant_id'], 'name': get_applicant_name(a)})}\n\n"
 
         # ── AUTO-ACCEPT PHASE ──
@@ -910,7 +897,6 @@ async def analyze_all_stream(body: BulkAnalyzeRequest):
                     auto_accepted_ids.add(aid)
                     db.update_applicant_fields(aid, {
                         "status": "accepted",
-                        "ai_score": "100",
                         "ai_reasoning": f"Auto-accepted ({info.get('attendee_type')})",
                     })
                     yield f"event: auto_accept\ndata: {json.dumps({'applicant_id': aid, 'name': info.get('name', 'Unknown'), 'attendee_type': info.get('attendee_type', ''), 'attendee_type_detail': info.get('attendee_type_detail', '')})}\n\n"
@@ -970,17 +956,17 @@ async def analyze_all_stream(body: BulkAnalyzeRequest):
                     judge_completed += 1
                     judge_results.append(result)
 
-                    yield f"event: judge_progress\ndata: {json.dumps({'judge_id': judge['id'], 'judge_name': judge['name'], 'judge_emoji': judge['emoji'], 'applicant_id': result['applicant_id'], 'name': result['name'], 'score': result.get('score', 0), 'decision': result.get('decision', 'pass'), 'reasoning': result.get('reasoning', ''), 'seats_filled': 0, 'seats_allocated': seats, 'completed': judge_completed, 'total': scoring_total})}\n\n"
+                    yield f"event: judge_progress\ndata: {json.dumps({'judge_id': judge['id'], 'judge_name': judge['name'], 'judge_emoji': judge['emoji'], 'applicant_id': result['applicant_id'], 'name': result['name'], 'decision': result.get('decision', 'pass'), 'reasoning': result.get('reasoning', ''), 'seats_filled': 0, 'seats_allocated': seats, 'completed': judge_completed, 'total': scoring_total})}\n\n"
 
-                # Greedy seat filling: sort by score descending, accept top N
-                judge_results.sort(key=lambda r: r.get("score", 0), reverse=True)
+                # Seat filling: accept those the judge chose, up to seat limit
+                # Put accepts first, then passes
+                judge_results.sort(key=lambda r: 0 if r.get("decision") == "accept" else 1)
                 seats_filled = 0
                 accepted_names = []
                 for r in judge_results:
                     if "error" in r:
                         continue
-                    if seats_filled < seats and r.get("score", 0) > 0:
-                        r["decision"] = "accept"
+                    if seats_filled < seats and r.get("decision") == "accept":
                         seats_filled += 1
                         accepted_names.append(r["name"])
                     else:
@@ -990,7 +976,6 @@ async def analyze_all_stream(body: BulkAnalyzeRequest):
                         "judge_id": judge["id"],
                         "judge_name": judge["name"],
                         "judge_emoji": judge["emoji"],
-                        "score": r.get("score", 0),
                         "decision": r["decision"],
                         "reasoning": r.get("reasoning", ""),
                     })
@@ -1016,15 +1001,11 @@ async def analyze_all_stream(body: BulkAnalyzeRequest):
 
                 result_counts[final_status] += 1
 
-                # Compute average score across judges
-                scores = [d["score"] for d in decisions if d["score"] > 0]
-                avg_score = round(sum(scores) / len(scores)) if scores else 0
-
                 # Build combined reasoning with judge attribution
                 reasoning_parts = []
                 for d in decisions:
                     tag = "ACCEPT" if d["decision"] == "accept" else "PASS"
-                    reasoning_parts.append(f"{d['judge_emoji']} {d['judge_name']} [{tag}, {d['score']}]: {d['reasoning']}")
+                    reasoning_parts.append(f"{d['judge_emoji']} {d['judge_name']} [{tag}]: {d['reasoning']}")
                 combined_reasoning = " | ".join(reasoning_parts)
 
                 accepting_judges_list = [
@@ -1034,13 +1015,12 @@ async def analyze_all_stream(body: BulkAnalyzeRequest):
 
                 db.update_applicant_fields(aid, {
                     "status": final_status,
-                    "ai_score": str(avg_score),
                     "ai_reasoning": combined_reasoning,
                     "panel_votes": f"{accept_count}/{votes_total}",
                     "accepting_judges": ", ".join(accepting_judges_list) if accepting_judges_list else "",
                 })
 
-                yield f"event: adjudication\ndata: {json.dumps({'applicant_id': aid, 'name': a.get('name', 'Unknown'), 'final_status': final_status, 'votes_accept': accept_count, 'votes_total': votes_total, 'accepting_judges': accepting_judges_list, 'avg_score': avg_score})}\n\n"
+                yield f"event: adjudication\ndata: {json.dumps({'applicant_id': aid, 'name': a.get('name', 'Unknown'), 'final_status': final_status, 'votes_accept': accept_count, 'votes_total': votes_total, 'accepting_judges': accepting_judges_list})}\n\n"
 
             yield f"event: complete\ndata: {json.dumps({'completed': scoring_total, 'total': scoring_total, 'errors': 0})}\n\n"
 

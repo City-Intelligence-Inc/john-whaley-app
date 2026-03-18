@@ -510,7 +510,7 @@ export default function AnalyzePage() {
             const statusLabel = data.status.toUpperCase();
 
             log(
-              `[${data.completed}/${data.total}] ${data.name}  \u00b7  ${detail}  \u00b7  Score: ${data.score}  \u00b7  ${statusLabel}`,
+              `[${data.completed}/${data.total}] ${data.name}  \u00b7  ${detail}  \u00b7  ${statusLabel}`,
               statusColor
             );
             if (data.reasoning) {
@@ -622,7 +622,7 @@ export default function AnalyzePage() {
             const decisionLabel =
               data.decision === "accept" ? "ACCEPT" : "pass";
             log(
-              `  [${data.completed}/${data.total}] ${data.name}  \u00b7  Score: ${data.score}  \u00b7  ${decisionLabel}`,
+              `  [${data.completed}/${data.total}] ${data.name}  \u00b7  ${decisionLabel}`,
               decisionColor
             );
           },
@@ -651,7 +651,7 @@ export default function AnalyzePage() {
             const judges =
               data.accepting_judges.join(", ") || "none";
             log(
-              `  ${data.name}  \u00b7  ${data.votes_accept}/${data.votes_total} votes  \u00b7  ${data.final_status.toUpperCase()}  \u00b7  Score: ${data.avg_score}`,
+              `  ${data.name}  \u00b7  ${data.votes_accept}/${data.votes_total} votes  \u00b7  ${data.final_status.toUpperCase()}`,
               statusColor
             );
             if (data.votes_accept > 0) {
