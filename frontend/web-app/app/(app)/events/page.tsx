@@ -494,14 +494,16 @@ export default function MainPage() {
                               const issues = (a[`linkedin_issues`] as string) || "";
                               if (issues === "clean") {
                                 return (
-                                  <span className="flex items-center gap-1 text-[10px] text-emerald-500" title="Profile verified - no issues">
-                                    <CircleCheck className="size-3.5" />
+                                  <span className="flex items-center gap-1 text-[10px] text-emerald-500">
+                                    <CircleCheck className="size-3" />Verified
                                   </span>
                                 );
                               } else if (issues) {
+                                const labels = issues.split("; ").map(i => i.replace("missing_", "No ").replace("scrape_error", "Scrape failed").replace("_", " "));
                                 return (
-                                  <span className="flex items-center gap-1 text-[10px] text-amber-500" title={issues}>
-                                    <AlertTriangle className="size-3.5" />
+                                  <span className="flex items-center gap-1 text-[10px] text-amber-500 flex-wrap">
+                                    <AlertTriangle className="size-3 shrink-0" />
+                                    {labels.join(" / ")}
                                   </span>
                                 );
                               }
