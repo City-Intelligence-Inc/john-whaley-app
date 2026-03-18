@@ -733,10 +733,7 @@ export default function EventWorkspacePage() {
                             onValueChange={(val) => handleCategoryChange(a.applicant_id, val)}
                           >
                             <SelectTrigger className="h-7 text-[11px] w-full border-0 shadow-none px-1 hover:bg-muted">
-                              <span className="flex items-center gap-1.5">
-                                <span className="size-2 rounded-full shrink-0" style={{ backgroundColor: getTypeColor(a.attendee_type || "other") }} />
-                                <SelectValue />
-                              </span>
+                              <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
                               {ATTENDEE_TYPES.map((t) => (
