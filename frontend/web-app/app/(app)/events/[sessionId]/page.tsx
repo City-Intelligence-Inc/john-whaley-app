@@ -743,13 +743,15 @@ export default function EventWorkspacePage() {
                         </div>
                       )}
 
-                      {/* AI reasoning */}
+                      {/* AI reasoning — show first judge's reasoning only */}
                       {a.ai_reasoning && (
                         <div className="px-4 pb-2">
                           <div className="rounded-lg bg-gold/5 border border-gold/10 px-2.5 py-1.5">
                             <p className="text-[11px] text-muted-foreground line-clamp-2 flex items-start gap-1.5">
                               <Sparkles className="size-3 mt-0.5 shrink-0 text-gold" />
-                              {a.ai_reasoning}
+                              {a.ai_reasoning.includes(" | ")
+                                ? a.ai_reasoning.split(" | ")[0].replace(/^.*?\]:\s*/, "")
+                                : a.ai_reasoning}
                             </p>
                           </div>
                         </div>

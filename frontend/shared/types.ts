@@ -139,7 +139,7 @@ export interface AnalysisResult {
 export interface SSEStartEvent { total: number }
 export interface SSEPhaseEvent { phase: string; message: string; type_counts?: Record<string, number>; total?: number }
 export interface SSEClassifyEvent { completed: number; total: number; errors: number; applicant_id: string; name: string; attendee_type: string; attendee_type_detail: string; summary: string }
-export interface SSEProgressEvent { completed: number; total: number; errors: number; applicant_id: string; name: string; score: number; status: string; reasoning: string; attendee_type: string; attendee_type_detail: string }
+export interface SSEProgressEvent { completed: number; total: number; errors: number; applicant_id: string; name: string; status: string; reasoning: string; attendee_type: string; attendee_type_detail: string }
 export interface SSEErrorEvent { completed: number; total: number; errors: number; applicant_id: string; name: string; error: string }
 export interface SSECompleteEvent { completed: number; total: number; errors: number }
 export interface SSEAutoAcceptEvent { applicant_id: string; name: string; attendee_type: string; attendee_type_detail: string }
@@ -148,9 +148,9 @@ export interface SSESummaryEvent { summary: string }
 // SSE Event Types — Judge Panel
 export interface SSEJudgeSeatEvent { judge_id: string; judge_name: string; judge_emoji: string; seats_allocated: number; specialty: string }
 export interface SSEJudgeStartEvent { judge_id: string; judge_name: string; judge_emoji: string; judge_index: number; total_judges: number; seats_remaining: number }
-export interface SSEJudgeProgressEvent { judge_id: string; judge_name: string; judge_emoji: string; applicant_id: string; name: string; score: number; decision: "accept" | "pass"; reasoning: string; seats_filled: number; seats_allocated: number; completed: number; total: number }
+export interface SSEJudgeProgressEvent { judge_id: string; judge_name: string; judge_emoji: string; applicant_id: string; name: string; decision: "accept" | "pass"; reasoning: string; seats_filled: number; seats_allocated: number; completed: number; total: number }
 export interface SSEJudgeCompleteEvent { judge_id: string; judge_name: string; judge_emoji: string; seats_filled: number; seats_allocated: number; accepted_names: string[] }
-export interface SSEAdjudicationEvent { applicant_id: string; name: string; final_status: string; votes_accept: number; votes_total: number; accepting_judges: string[]; avg_score: number }
+export interface SSEAdjudicationEvent { applicant_id: string; name: string; final_status: string; votes_accept: number; votes_total: number; accepting_judges: string[] }
 
 // SSE Event Types — LinkedIn Enrichment
 export interface LinkedInEnrichStartEvent { total: number; job_id?: string }

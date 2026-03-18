@@ -24,6 +24,11 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { Applicant } from "@/lib/api";
+import { ATTENDEE_TYPES } from "@/lib/constants";
+
+const TYPE_COLORS: Record<string, string> = Object.fromEntries(
+  ATTENDEE_TYPES.map((t) => [t.key, t.color])
+);
 
 interface ProfileSwipeViewProps {
   applicants: Applicant[];
@@ -227,26 +232,16 @@ export function ProfileSwipeView({
                 <h2 className="text-lg font-bold text-foreground truncate">{getName(current)}</h2>
                 {headline && <p className="text-sm text-muted-foreground mt-0.5 line-clamp-2">{headline}</p>}
 
-                {/* Category badge + status + list badges */}
+                {/* Category + status badges */}
                 <div className="flex items-center gap-2 mt-2 flex-wrap">
-                  {current.attendee_type && (
-                    <Badge className="text-[10px] border" style={{
-                      backgroundColor: `${(() => {
-                        const types: Record<string, string> = { vc: "#6366f1", entrepreneur: "#f59e0b", faculty: "#10b981", alumni: "#3b82f6", press: "#ec4899", student: "#8b5cf6", other: "#6b7280" };
-                        return types[current.attendee_type] || "#6b7280";
-                      })()}20`,
-                      color: (() => {
-                        const types: Record<string, string> = { vc: "#6366f1", entrepreneur: "#f59e0b", faculty: "#10b981", alumni: "#3b82f6", press: "#ec4899", student: "#8b5cf6", other: "#6b7280" };
-                        return types[current.attendee_type] || "#6b7280";
-                      })(),
-                      borderColor: `${(() => {
-                        const types: Record<string, string> = { vc: "#6366f1", entrepreneur: "#f59e0b", faculty: "#10b981", alumni: "#3b82f6", press: "#ec4899", student: "#8b5cf6", other: "#6b7280" };
-                        return types[current.attendee_type] || "#6b7280";
-                      })()}40`,
-                    }}>
-                      {current.attendee_type_detail || current.attendee_type}
-                    </Badge>
-                  )}
+                  {current.attendee_type && (() => {
+                    const c = TYPE_COLORS[current.attendee_type] || "#6b7280";
+                    return (
+                      <Badge className="text-[10px] border" style={{ backgroundColor: `${c}20`, color: c, borderColor: `${c}40` }}>
+                        {current.attendee_type_detail || current.attendee_type}
+                      </Badge>
+                    );
+                  })()}
                   <span className="flex items-center gap-1.5 text-xs">
                     <span className={`size-2 rounded-full ${statusDot(current.status)}`} />
                     {statusLabel(current.status)}
@@ -266,47 +261,43 @@ export function ProfileSwipeView({
             {current.linkedin_url && <a href={current.linkedin_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-blue-500 hover:text-blue-400"><Linkedin className="size-3" />Profile<ExternalLink className="size-2.5" /></a>}
           </div>
 
-          {/* Content sections — always show headers */}
-          <div className="px-5 pb-4 space-y-3 border-t border-border/30 pt-3">
-            <div>
-              <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1">About</h4>
-              {about ? (
-                <p className="text-sm text-foreground/80 leading-relaxed">{about}</p>
-              ) : (
-                <p className="text-xs text-muted-foreground/40 italic">No about info</p>
+          {/* Content sections — only show if data exists */}
+          {(about || experience || education) && (
+            <div className="px-5 pb-4 space-y-3 border-t border-border/30 pt-3">
+              {about && (
+                <div>
+                  <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1">About</h4>
+                  <p className="text-sm text-foreground/80 leading-relaxed line-clamp-3">{about}</p>
+                </div>
+              )}
+              {experience && (
+                <div>
+                  <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1 flex items-center gap-1"><Briefcase className="size-3" />Experience</h4>
+                  <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-line line-clamp-4">{experience}</p>
+                </div>
+              )}
+              {education && (
+                <div>
+                  <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1 flex items-center gap-1"><GraduationCap className="size-3" />Education</h4>
+                  <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-line line-clamp-2">{education}</p>
+                </div>
               )}
             </div>
-            <div>
-              <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1 flex items-center gap-1"><Briefcase className="size-3" />Experience</h4>
-              {experience ? (
-                <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-line line-clamp-6">{experience}</p>
-              ) : (
-                <p className="text-xs text-muted-foreground/40 italic">No experience info</p>
-              )}
-            </div>
-            <div>
-              <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1 flex items-center gap-1"><GraduationCap className="size-3" />Education</h4>
-              {education ? (
-                <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-line line-clamp-3">{education}</p>
-              ) : (
-                <p className="text-xs text-muted-foreground/40 italic">No education info</p>
-              )}
-            </div>
-          </div>
+          )}
 
-          {/* AI reasoning — always show */}
-          <div className="px-5 pb-4">
-            <div className="rounded-lg bg-gold/5 border border-gold/10 p-3">
-              <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1 flex items-center gap-1">
-                <Sparkles className="size-3 text-gold" />AI Reasoning
-              </h4>
-              {current.ai_reasoning ? (
-                <p className="text-sm text-foreground/80 leading-relaxed">{current.ai_reasoning}</p>
-              ) : (
-                <p className="text-xs text-muted-foreground/40 italic">No AI analysis yet. Run analysis to populate.</p>
-              )}
+          {/* AI reasoning — truncated, only show if exists */}
+          {current.ai_reasoning && (
+            <div className="px-5 pb-4">
+              <div className="rounded-lg bg-gold/5 border border-gold/10 p-3">
+                <p className="text-xs text-foreground/80 leading-relaxed line-clamp-3 flex items-start gap-1.5">
+                  <Sparkles className="size-3 mt-0.5 shrink-0 text-gold" />
+                  {current.ai_reasoning.includes(" | ")
+                    ? current.ai_reasoning.split(" | ")[0].replace(/^.*?\]:\s*/, "")
+                    : current.ai_reasoning}
+                </p>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* ── Primary actions: Accept / Pass / Reject ── */}
           <div className="border-t border-border/50 p-3 flex items-center gap-2">
