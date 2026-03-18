@@ -73,12 +73,14 @@ function getPhoto(a: Applicant): string {
   return (a.linkedin_image as string) || (a.photo_url as string) || "";
 }
 
-function getRank(a: Applicant): { rank: number; total: number; score: number } | null {
-  const rank = Number(a.rank || 0);
-  const total = Number(a.rank_total || 0);
+function getRank(a: Applicant): { rank: number; total: number; score: number; catRank: number; catTotal: number } | null {
+  const rank = Number(a.global_rank || a.rank || 0);
+  const total = Number(a.global_rank_total || a.rank_total || 0);
+  const catRank = Number(a.rank || 0);
+  const catTotal = Number(a.rank_total || 0);
   const score = Number(a.rank_score || 0);
   if (!rank && !score) return null;
-  return { rank, total, score };
+  return { rank, total, score, catRank, catTotal };
 }
 
 function getSummary(a: Applicant): string {
@@ -229,7 +231,7 @@ export default function EventWorkspacePage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [showImport, setShowImport] = useState(false);
-  const [sortField, setSortField] = useState<"name" | "status" | "type" | "score">("name");
+  const [sortField, setSortField] = useState<"name" | "status" | "type" | "score">("score");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [copiedEmails, setCopiedEmails] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -271,7 +273,11 @@ export default function EventWorkspacePage() {
       if (sortField === "name") cmp = getName(a).localeCompare(getName(b));
       else if (sortField === "status") cmp = a.status.localeCompare(b.status);
       else if (sortField === "type") cmp = (a.attendee_type || "zzz").localeCompare(b.attendee_type || "zzz");
-      else if (sortField === "score") cmp = Number(b.ai_score || 0) - Number(a.ai_score || 0);
+      else if (sortField === "score") {
+        const ra = Number(a.global_rank || a.rank || 999);
+        const rb = Number(b.global_rank || b.rank || 999);
+        cmp = ra - rb;
+      }
       return sortDir === "desc" ? -cmp : cmp;
     });
   }, [applicants, statusFilter, search, sortField, sortDir]);
@@ -610,7 +616,7 @@ export default function EventWorkspacePage() {
                         className="cursor-pointer hover:bg-muted/50"
                         onClick={() => setSelectedId(a.applicant_id)}
                       >
-                        <TableCell className="text-center text-xs font-mono text-muted-foreground">
+                        <TableCell className="text-center text-xs font-mono text-muted-foreground" title={rank ? `Global #${rank.rank}/${rank.total} | ${a.attendee_type || "?"} #${rank.catRank}/${rank.catTotal} | Score: ${rank.score}` : ""}>
                           {rank?.rank || idx + 1}
                         </TableCell>
                         <TableCell>
@@ -922,6 +928,11 @@ function CardReview({
                   <span className="text-sm font-bold text-muted-foreground tabular-nums">
                     #{rank.rank}
                     <span className="text-xs font-normal text-muted-foreground/60">/{rank.total}</span>
+                  </span>
+                )}
+                {rank && rank.catRank > 0 && (
+                  <span className="text-[10px] text-muted-foreground/60 tabular-nums">
+                    {current.attendee_type ? getTypeLabel(current.attendee_type) : ""} #{rank.catRank}/{rank.catTotal}
                   </span>
                 )}
                 {rank && (
