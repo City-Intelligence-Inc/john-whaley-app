@@ -4,7 +4,7 @@ import { useState } from "react";
 import {
   Upload, Loader2, Brain, Download, Users, Search, X, Plus, ChevronDown,
   Key, Eye, EyeOff, CheckCircle2, XCircle, Building2, MapPin, Sparkles,
-  Linkedin, ScanSearch, CircleCheck, AlertTriangle,
+  Linkedin, ScanSearch, CircleCheck, AlertTriangle, Trash2,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -33,6 +33,8 @@ export default function EventsPage() {
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
   const [showKey, setShowKey] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const selectedApplicant = selectedApplicantId ? e.applicants.find(a => a.applicant_id === selectedApplicantId) || null : null;
 
@@ -42,6 +44,40 @@ export default function EventsPage() {
     try { await e.createEvent(newName.trim()); setShowCreate(false); setNewName(""); }
     catch { toast.error("Failed to create"); }
     finally { setCreating(false); }
+  };
+
+  const handleDelete = async () => {
+    if (!e.selectedSessionId) return;
+    setDeleting(true);
+    try {
+      await api.deleteSession(e.selectedSessionId);
+      e.setSelectedSessionId(null);
+      await e.loadSessions();
+      setShowDeleteConfirm(false);
+      toast.success("Event deleted");
+    } catch { toast.error("Failed to delete"); }
+    finally { setDeleting(false); }
+  };
+
+  const handleExport = () => {
+    if (!e.applicants.length) return;
+    // Export in Luma-compatible format: name, email, approval_status
+    const headers = ["name", "email", "approval_status", "attendee_type", "ai_score", "ai_reasoning", "company", "title", "location", "linkedin_url"];
+    const statusMap: Record<string, string> = { accepted: "approved", rejected: "declined", waitlisted: "pending_approval", pending: "pending_approval" };
+    const esc = (v: unknown) => { const s = String(v ?? ""); return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s; };
+    const rows = [
+      headers.join(","),
+      ...e.applicants.map(a => [
+        esc(a.name), esc(a.email), statusMap[a.status] || "pending_approval",
+        esc(a.attendee_type), esc(a.ai_score), esc(a.ai_reasoning),
+        esc(a.company), esc(a.title), esc(a.location), esc(a.linkedin_url),
+      ].join(","))
+    ];
+    const blob = new Blob([rows.join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a"); link.href = url;
+    link.download = `${(e.session?.name || "event").replace(/\s+/g, "-").toLowerCase()}-export.csv`;
+    link.click(); URL.revokeObjectURL(url);
   };
 
   if (e.sessionsLoading) return <div className="flex items-center justify-center py-20"><Loader2 className="size-6 animate-spin text-gold" /></div>;
@@ -76,6 +112,12 @@ export default function EventsPage() {
             </Button>
             <Button size="sm" variant="outline" onClick={() => router.push(`/events/${e.selectedSessionId}/analyze`)} disabled={e.total === 0}>
               <Brain className="size-3 mr-1.5" />Analyze
+            </Button>
+            <Button size="sm" variant="outline" onClick={handleExport} disabled={e.total === 0}>
+              <Download className="size-3 mr-1.5" />Export
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setShowDeleteConfirm(true)} className="text-destructive hover:bg-destructive/10">
+              <Trash2 className="size-3" />
             </Button>
           </>
         )}
@@ -258,6 +300,20 @@ export default function EventsPage() {
         <DialogContent className="sm:max-w-lg">
           <DialogHeader><DialogTitle>Import Guests</DialogTitle><DialogDescription>Upload a CSV.</DialogDescription></DialogHeader>
           <CSVUploader onUploadSuccess={(count) => { e.refreshAll(); e.loadSessions(); setShowImport(false); toast.success(`Imported ${count} guests`); }} sessionId={e.selectedSessionId || undefined} />
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirm */}
+      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader><DialogTitle>Delete Event</DialogTitle>
+            <DialogDescription>This will delete the event and all {e.total} guests. This cannot be undone.</DialogDescription></DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDeleteConfirm(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
+              {deleting && <Loader2 className="size-3 mr-1.5 animate-spin" />}Delete
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
