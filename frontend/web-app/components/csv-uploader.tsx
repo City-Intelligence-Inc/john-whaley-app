@@ -6,8 +6,8 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 
-// Only show these columns in preview (in order)
-const PREVIEW_COLS = ["name", "email", "linkedin_url", "status", "company", "title"];
+// Only show these columns in preview (in order) — max 3 to avoid overflow
+const PREVIEW_COLS = ["name", "email", "linkedin_url"];
 const COL_LABELS: Record<string, string> = {
   name: "Name", email: "Email", linkedin_url: "LinkedIn",
   status: "Status", company: "Company", title: "Title",
