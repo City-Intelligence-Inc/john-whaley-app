@@ -776,14 +776,14 @@ export default function EventWorkspacePage() {
                 <Table className="table-fixed w-full">
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-10" />
-                      <TableHead className="w-8">#</TableHead>
+                      <TableHead className="w-7" />
+                      <TableHead className="w-7">#</TableHead>
                       <TableHead>
                         <button onClick={() => toggleSort("name")} className="flex items-center gap-1 hover:text-foreground">
                           Guest <ArrowUpDown className="size-3" />
                         </button>
                       </TableHead>
-                      <TableHead className="w-24 hidden md:table-cell">Category</TableHead>
+                      <TableHead className="w-28 hidden md:table-cell">Category</TableHead>
                       <TableHead className="w-20">Status</TableHead>
                       <TableHead className="w-24 text-right">Actions</TableHead>
                     </TableRow>
