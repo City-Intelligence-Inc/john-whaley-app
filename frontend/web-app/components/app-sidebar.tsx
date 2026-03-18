@@ -31,7 +31,7 @@ export function AppSidebar() {
   const pathname = usePathname();
 
   return (
-    <Sidebar collapsible="none">
+    <Sidebar collapsible="icon" className="!w-[--sidebar-width-icon]">
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
