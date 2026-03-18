@@ -141,20 +141,24 @@ export default function LinkedInPage() {
       </div>
 
       {/* Table */}
-      <div className="rounded-lg border">
+      <div className="rounded-lg border overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[250px]">Profile</TableHead>
-              <TableHead>Headline</TableHead>
-              <TableHead>Location</TableHead>
-              <TableHead className="w-[60px]">Link</TableHead>
+              <TableHead className="w-[200px] sticky left-0 bg-background z-10">Profile</TableHead>
+              <TableHead className="min-w-[200px]">Headline</TableHead>
+              <TableHead className="min-w-[120px]">Company</TableHead>
+              <TableHead className="min-w-[140px]">Location</TableHead>
+              <TableHead className="min-w-[200px]">Experience</TableHead>
+              <TableHead className="min-w-[160px]">Education</TableHead>
+              <TableHead className="min-w-[200px]">About</TableHead>
+              <TableHead className="w-[50px]"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {filtered.map((p) => (
               <TableRow key={p.url}>
-                <TableCell>
+                <TableCell className="sticky left-0 bg-background z-10">
                   <div className="flex items-center gap-3">
                     {p.photo_url ? (
                       <img src={p.photo_url} alt="" className="size-8 rounded-full object-cover shrink-0" />
@@ -163,17 +167,26 @@ export default function LinkedInPage() {
                         {(p.name || "?").charAt(0).toUpperCase()}
                       </div>
                     )}
-                    <div className="min-w-0">
-                      <p className="font-medium text-sm truncate">{p.name || "Unknown"}</p>
-                      {p.company && <p className="text-xs text-muted-foreground truncate">{p.company}</p>}
-                    </div>
+                    <p className="font-medium text-sm truncate max-w-[140px]">{p.name || "Unknown"}</p>
                   </div>
                 </TableCell>
                 <TableCell>
-                  <p className="text-sm text-muted-foreground truncate max-w-xs">{p.headline || "—"}</p>
+                  <p className="text-sm text-muted-foreground line-clamp-2">{p.headline || "—"}</p>
                 </TableCell>
                 <TableCell>
-                  <p className="text-sm text-muted-foreground">{p.location || "—"}</p>
+                  <p className="text-sm text-muted-foreground truncate">{p.company || "—"}</p>
+                </TableCell>
+                <TableCell>
+                  <p className="text-sm text-muted-foreground truncate">{p.location || "—"}</p>
+                </TableCell>
+                <TableCell>
+                  <p className="text-xs text-muted-foreground line-clamp-2">{p.experience ? p.experience.split("\n")[0] : "—"}</p>
+                </TableCell>
+                <TableCell>
+                  <p className="text-xs text-muted-foreground line-clamp-2">{p.education ? p.education.split("\n")[0] : "—"}</p>
+                </TableCell>
+                <TableCell>
+                  <p className="text-xs text-muted-foreground line-clamp-2">{p.about ? p.about.slice(0, 120) : "—"}</p>
                 </TableCell>
                 <TableCell>
                   {p.url && (
