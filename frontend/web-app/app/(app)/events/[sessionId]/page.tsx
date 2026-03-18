@@ -803,13 +803,11 @@ function CardReview({
           </div>
         </div>
 
-        {/* Info chips */}
-        {(company || location || current.email || current.linkedin_url) && (
+        {/* Info chips — no PII (email/linkedin hidden) */}
+        {(company || location) && (
           <div className="px-6 pb-3 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
             {company && <span className="flex items-center gap-1"><Building2 className="size-3" />{company}</span>}
             {location && <span className="flex items-center gap-1"><MapPin className="size-3" />{location}</span>}
-            {current.email && <a href={`mailto:${current.email}`} className="flex items-center gap-1 hover:text-foreground"><Mail className="size-3" />{current.email}</a>}
-            {current.linkedin_url && <a href={current.linkedin_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-blue-600 hover:text-blue-500"><Linkedin className="size-3" />Profile<ExternalLink className="size-2.5" /></a>}
           </div>
         )}
 
