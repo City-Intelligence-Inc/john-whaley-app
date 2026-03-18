@@ -55,6 +55,19 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { Slider } from "@/components/ui/slider";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useEvent } from "@/components/event-provider";
 import { CSVUploader } from "@/components/csv-uploader";
 import { api } from "@/lib/api";
@@ -387,6 +400,15 @@ export default function EventWorkspacePage() {
     }
   }, [refreshAll]);
 
+  const handleCategoryChange = useCallback(async (id: string, newType: string) => {
+    try {
+      await api.updateApplicant(id, { extra: { attendee_type: newType, user_override_attendee_type: true } });
+      await refreshApplicants();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update category");
+    }
+  }, [refreshApplicants]);
+
   const handleRankAll = useCallback(async () => {
     setRanking(true);
     try {
@@ -637,23 +659,15 @@ export default function EventWorkspacePage() {
               <Table className="table-fixed w-full">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-8">#</TableHead>
+                    <TableHead className="w-10">#</TableHead>
                     <TableHead>
                       <button onClick={() => toggleSort("name")} className="flex items-center gap-1 hover:text-foreground">
                         Guest <ArrowUpDown className="size-3" />
                       </button>
                     </TableHead>
-                    <TableHead className="w-24 hidden md:table-cell">
-                      <button onClick={() => toggleSort("type")} className="flex items-center gap-1 hover:text-foreground">
-                        Type
-                      </button>
-                    </TableHead>
-                    <TableHead className="w-20">
-                      <button onClick={() => toggleSort("status")} className="flex items-center gap-1 hover:text-foreground">
-                        Status
-                      </button>
-                    </TableHead>
-                    <TableHead className="w-24 text-right">Actions</TableHead>
+                    <TableHead className="w-28 hidden md:table-cell">Category</TableHead>
+                    <TableHead className="w-20">Status</TableHead>
+                    <TableHead className="w-28 text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -668,8 +682,26 @@ export default function EventWorkspacePage() {
                         className="cursor-pointer hover:bg-muted/50"
                         onClick={() => setSelectedId(a.applicant_id)}
                       >
-                        <TableCell className="text-center text-xs font-mono text-muted-foreground" title={rank ? `Global #${rank.rank}/${rank.total} | ${a.attendee_type || "?"} #${rank.catRank}/${rank.catTotal} | Score: ${rank.score}` : ""}>
-                          {rank?.rank || idx + 1}
+                        <TableCell className="text-center">
+                          <TooltipProvider delayDuration={200}>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="text-xs font-mono font-bold text-muted-foreground cursor-help">
+                                  {rank?.rank || idx + 1}
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent side="right" className="text-xs max-w-[220px]">
+                                {rank ? (
+                                  <div className="space-y-1">
+                                    <p className="font-semibold">Global rank #{rank.rank} of {rank.total}</p>
+                                    {rank.catRank > 0 && <p>{getTypeLabel(a.attendee_type || "other")} #{rank.catRank} of {rank.catTotal}</p>}
+                                    <p>Score: {rank.score}/100 (seniority within role)</p>
+                                    {a.rank_reason ? <p className="text-muted-foreground">{String(a.rank_reason)}</p> : null}
+                                  </div>
+                                ) : <p>Not ranked yet</p>}
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-3 min-w-0">
@@ -681,18 +713,42 @@ export default function EventWorkspacePage() {
                               </div>
                             )}
                             <div className="min-w-0 flex-1">
-                              <p className="font-medium text-sm truncate">{getName(a)}</p>
+                              <div className="flex items-center gap-1.5">
+                                <p className="font-medium text-sm truncate">{getName(a)}</p>
+                                {a.linkedin_url && (
+                                  <a href={a.linkedin_url} target="_blank" rel="noopener noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="text-blue-500 hover:text-blue-600 shrink-0">
+                                    <Linkedin className="size-3.5" />
+                                  </a>
+                                )}
+                              </div>
                               {headline && <p className="text-xs text-muted-foreground truncate">{headline}</p>}
-                              {summary && <p className="text-[10px] text-muted-foreground/60 truncate mt-0.5">{String(summary).split("\n")[0]}</p>}
                             </div>
                           </div>
                         </TableCell>
-                        <TableCell className="hidden md:table-cell">
-                          {a.attendee_type && (
-                            <span className="text-xs font-medium truncate block max-w-[110px]" style={{ color: getTypeColor(a.attendee_type) }}>
-                              {getTypeLabel(a.attendee_type)}
-                            </span>
-                          )}
+                        <TableCell className="hidden md:table-cell" onClick={(e) => e.stopPropagation()}>
+                          <Select
+                            value={a.attendee_type || "other"}
+                            onValueChange={(val) => handleCategoryChange(a.applicant_id, val)}
+                          >
+                            <SelectTrigger className="h-7 text-[11px] w-full border-0 shadow-none px-1 hover:bg-muted">
+                              <span className="flex items-center gap-1.5">
+                                <span className="size-2 rounded-full shrink-0" style={{ backgroundColor: getTypeColor(a.attendee_type || "other") }} />
+                                <SelectValue />
+                              </span>
+                            </SelectTrigger>
+                            <SelectContent>
+                              {ATTENDEE_TYPES.map((t) => (
+                                <SelectItem key={t.key} value={t.key} className="text-xs">
+                                  <span className="flex items-center gap-1.5">
+                                    <span className="size-2 rounded-full" style={{ backgroundColor: t.color }} />
+                                    {t.label}
+                                  </span>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </TableCell>
                         <TableCell>
                           <Badge
