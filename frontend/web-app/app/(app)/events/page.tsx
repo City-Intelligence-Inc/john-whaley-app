@@ -278,20 +278,26 @@ export default function EventsPage() {
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </div>
-                        {a.status === "pending" ? (
-                          <div className="flex gap-0.5">
-                            <Button size="sm" variant="ghost" onClick={() => e.changeStatus(a.applicant_id, "accepted")} className="h-6 px-1.5 text-[10px] text-emerald-500 hover:bg-emerald-500/10">
-                              <CheckCircle2 className="size-2.5 mr-0.5" />Approve
-                            </Button>
-                            <Button size="sm" variant="ghost" onClick={() => e.changeStatus(a.applicant_id, "rejected")} className="h-6 px-1.5 text-[10px] text-red-500 hover:bg-red-500/10">
-                              <XCircle className="size-2.5 mr-0.5" />Decline
-                            </Button>
-                          </div>
-                        ) : (
-                          <Badge variant="secondary" className={`text-[9px] ${a.status === "accepted" ? "text-emerald-500" : a.status === "rejected" ? "text-red-500" : "text-amber-500"}`}>
-                            {a.status === "accepted" ? "Going" : a.status === "rejected" ? "Not Going" : "Waitlisted"}
+                        {/* AI recommendation */}
+                        {a.status !== "pending" && (
+                          <Badge variant="secondary" className={`text-[9px] mb-1 ${a.status === "accepted" ? "text-emerald-500 bg-emerald-500/10" : a.status === "rejected" ? "text-red-500 bg-red-500/10" : "text-amber-500 bg-amber-500/10"}`}>
+                            {a.status === "accepted" ? "Recommended" : a.status === "rejected" ? "Not Recommended" : "Maybe"}
                           </Badge>
                         )}
+                        {a.status === "pending" && (
+                          <Badge variant="secondary" className="text-[9px] mb-1 text-muted-foreground">Unranked</Badge>
+                        )}
+                        {/* User actions */}
+                        <div className="flex gap-0.5">
+                          <Button size="sm" variant="ghost" onClick={() => e.changeStatus(a.applicant_id, a.status === "accepted" ? "pending" : "accepted")}
+                            className={`h-6 px-1.5 text-[10px] ${a.status === "accepted" ? "text-emerald-500 bg-emerald-500/10" : "text-muted-foreground hover:text-emerald-500 hover:bg-emerald-500/10"}`}>
+                            <CheckCircle2 className="size-2.5" />
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => e.changeStatus(a.applicant_id, a.status === "rejected" ? "pending" : "rejected")}
+                            className={`h-6 px-1.5 text-[10px] ${a.status === "rejected" ? "text-red-500 bg-red-500/10" : "text-muted-foreground hover:text-red-500 hover:bg-red-500/10"}`}>
+                            <XCircle className="size-2.5" />
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   </CardContent>

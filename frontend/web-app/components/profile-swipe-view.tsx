@@ -247,6 +247,40 @@ export function ProfileSwipeView({
             {current.linkedin_url && <a href={current.linkedin_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-blue-500 hover:text-blue-400"><Linkedin className="size-3" />Profile<ExternalLink className="size-2.5" /></a>}
           </div>
 
+          {/* AI Summary — succinct 1-2 line overview */}
+          {(summary || current.ai_reasoning) && (
+            <div className="px-5 pb-3 border-t border-border/30 pt-3">
+              <div className="rounded-lg bg-gold/5 border border-gold/10 p-3">
+                <div className="flex items-start gap-2">
+                  <Sparkles className="size-3.5 text-gold mt-0.5 shrink-0" />
+                  <div className="space-y-1 text-sm leading-relaxed">
+                    {summary ? (
+                      <p className="text-foreground/90">{summary}</p>
+                    ) : current.ai_reasoning ? (
+                      <p className="text-foreground/90">
+                        {current.ai_reasoning.includes(" | ")
+                          ? (() => {
+                              const parts = current.ai_reasoning.split(" | ");
+                              const accepts = parts.filter((p) => p.includes("[ACCEPT]")).length;
+                              const total = parts.length;
+                              const firstReason = parts[0]?.replace(/^.*?\]:\s*/, "") || "";
+                              return `${accepts}/${total} judges accepted. ${firstReason}`;
+                            })()
+                          : current.ai_reasoning}
+                      </p>
+                    ) : null}
+                    {current.panel_votes && (
+                      <p className="text-xs text-muted-foreground">
+                        {current.panel_votes} judge votes
+                        {current.accepting_judges ? ` — ${current.accepting_judges}` : ""}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Content sections */}
           {(about || experience || education) && (
             <div className="px-5 pb-4 space-y-3 border-t border-border/30 pt-3">
@@ -266,46 +300,6 @@ export function ProfileSwipeView({
                 <div>
                   <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1 flex items-center gap-1"><GraduationCap className="size-3" />Education</h4>
                   <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-line line-clamp-2">{education}</p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* AI / Judge decisions */}
-          {current.ai_reasoning && (
-            <div className="px-5 pb-4 space-y-2">
-              <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1">
-                <Sparkles className="size-3 text-gold" />
-                {current.panel_votes ? "Judge Panel" : "AI Assessment"}
-                {current.panel_votes && (
-                  <span className="ml-auto text-xs font-medium text-foreground">{current.panel_votes} votes</span>
-                )}
-              </h4>
-              {current.ai_reasoning.includes(" | ") ? (
-                // Panel mode: show each judge's decision
-                <div className="space-y-1.5">
-                  {current.ai_reasoning.split(" | ").map((part, i) => {
-                    const match = part.match(/^(.+?)\s*\[(ACCEPT|PASS)\]:\s*(.*)$/);
-                    if (!match) return null;
-                    const [, judgeName, decision, reasoning] = match;
-                    const isAccept = decision === "ACCEPT";
-                    return (
-                      <div key={i} className={`rounded-lg p-2.5 text-xs ${isAccept ? "bg-emerald-500/5 border border-emerald-500/15" : "bg-muted/30 border border-border/30"}`}>
-                        <div className="flex items-center gap-2 mb-0.5">
-                          <span className={`font-semibold ${isAccept ? "text-emerald-400" : "text-muted-foreground"}`}>
-                            {isAccept ? "ACCEPT" : "PASS"}
-                          </span>
-                          <span className="text-muted-foreground">{judgeName}</span>
-                        </div>
-                        <p className="text-foreground/70 leading-relaxed">{reasoning}</p>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                // Single reviewer mode
-                <div className="rounded-lg bg-gold/5 border border-gold/10 p-2.5">
-                  <p className="text-xs text-foreground/80 leading-relaxed">{current.ai_reasoning}</p>
                 </div>
               )}
             </div>

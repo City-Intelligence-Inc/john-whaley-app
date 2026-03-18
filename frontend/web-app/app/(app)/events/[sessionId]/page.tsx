@@ -25,6 +25,9 @@ import {
   Zap,
   Check,
   Trash2,
+  ClipboardCopy,
+  FileDown,
+  ArrowRight,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -107,12 +110,14 @@ function getRejectionReason(a: Applicant): string {
 function AnalysisResultsTab({
   applicants,
   sessionId,
+  session,
   onStatusChange,
   onRefresh,
   onRunAnalysis,
 }: {
   applicants: Applicant[];
   sessionId: string;
+  session: { name?: string } | null;
   onStatusChange: (id: string, status: string) => void;
   onRefresh: () => Promise<void>;
   onRunAnalysis: () => void;
@@ -120,6 +125,7 @@ function AnalysisResultsTab({
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
   const [quotas, setQuotas] = useState<Record<string, number>>({});
   const [saving, setSaving] = useState(false);
+  const [copiedEmails, setCopiedEmails] = useState(false);
 
   // Group by category
   const grouped = useMemo(() => {
@@ -189,6 +195,34 @@ function AnalysisResultsTab({
       setSaving(false);
     }
   }, [sortedGroups, quotas, currentAccepted, onRefresh]);
+
+  // Export accepted as Luma-compatible CSV (name, email)
+  const handleExportAccepted = useCallback(() => {
+    const accepted = applicants.filter((a) => a.status === "accepted");
+    if (accepted.length === 0) { toast.error("No accepted guests to export"); return; }
+    const headers = ["name", "email", "company", "title", "attendee_type", "attendee_type_detail", "linkedin_url"];
+    const esc = (v: unknown) => { const s = String(v ?? ""); return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s; };
+    const rows = [headers.join(","), ...accepted.map((a) => headers.map((h) => esc(a[h])).join(","))];
+    const blob = new Blob([rows.join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${(session?.name || "event").replace(/\s+/g, "-").toLowerCase()}-accepted-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${accepted.length} accepted guests`);
+  }, [applicants, session]);
+
+  // Copy accepted emails to clipboard (for pasting into Luma)
+  const handleCopyEmails = useCallback(() => {
+    const accepted = applicants.filter((a) => a.status === "accepted");
+    const emails = accepted.map((a) => a.email).filter(Boolean);
+    if (emails.length === 0) { toast.error("No accepted guests with emails"); return; }
+    navigator.clipboard.writeText(emails.join("\n"));
+    setCopiedEmails(true);
+    toast.success(`Copied ${emails.length} emails to clipboard`);
+    setTimeout(() => setCopiedEmails(false), 2000);
+  }, [applicants]);
 
   const categoryOrder = [...ATTENDEE_TYPES.map((t) => t.key), "unclassified"];
 
@@ -329,6 +363,64 @@ function AnalysisResultsTab({
             </CardContent>
           </Card>
 
+          {/* ── Finalize & Export ── */}
+          <Card className="border-gold/20 bg-gradient-to-br from-gold/5 via-card to-card">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                <FileDown className="size-4 text-gold" />
+                Finalize & Export to Luma
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-start gap-8">
+                {/* Step indicators */}
+                <div className="space-y-4 text-sm">
+                  <div className="flex items-center gap-3">
+                    <div className={`size-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${totalAnalyzed > 0 ? "bg-emerald-500/20 text-emerald-400" : "bg-muted text-muted-foreground"}`}>
+                      {totalAnalyzed > 0 ? <Check className="size-3" /> : "1"}
+                    </div>
+                    <span className={totalAnalyzed > 0 ? "text-muted-foreground line-through" : "font-medium"}>Run AI analysis</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className={`size-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${totalAccepted > 0 ? "bg-emerald-500/20 text-emerald-400" : "bg-muted text-muted-foreground"}`}>
+                      {totalAccepted > 0 ? <Check className="size-3" /> : "2"}
+                    </div>
+                    <span className={totalAccepted > 0 ? "text-muted-foreground line-through" : "font-medium"}>Set quotas & apply ({totalAccepted} accepted)</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="size-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 bg-muted text-muted-foreground">3</div>
+                    <span className="font-medium">Export & paste into Luma</span>
+                  </div>
+                </div>
+              </div>
+
+              {totalAccepted > 0 && (
+                <div className="flex items-center gap-3 pt-2 border-t border-border/30">
+                  <Button
+                    onClick={handleExportAccepted}
+                    className="bg-gold text-gold-foreground hover:bg-gold/90"
+                    size="sm"
+                  >
+                    <Download className="size-4 mr-2" />
+                    Export {totalAccepted} Accepted (CSV)
+                  </Button>
+                  <Button
+                    onClick={handleCopyEmails}
+                    variant="outline"
+                    size="sm"
+                    className="border-border/50"
+                  >
+                    {copiedEmails ? <Check className="size-4 mr-2 text-emerald-400" /> : <ClipboardCopy className="size-4 mr-2" />}
+                    {copiedEmails ? "Copied!" : "Copy Emails"}
+                  </Button>
+                  <span className="text-xs text-muted-foreground ml-auto">
+                    Paste emails into Luma&apos;s guest list to approve
+                  </span>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Expanded Category Detail */}
           {expandedCategory && (
             <Card className="border-border/50">
@@ -386,7 +478,7 @@ function AnalysisResultsTab({
                           </div>
                         )}
 
-                        {/* Name + headline */}
+                        {/* Name + headline + AI reasoning */}
                         <div className="flex-1 min-w-0">
                           <span className={`text-sm font-medium truncate block ${notIn ? "text-muted-foreground" : ""}`}>
                             {getName(a)}
@@ -394,6 +486,18 @@ function AnalysisResultsTab({
                           {headline && (
                             <p className={`text-xs truncate ${notIn ? "text-muted-foreground/50" : "text-muted-foreground"}`}>
                               {headline}
+                            </p>
+                          )}
+                          {a.ai_reasoning && (
+                            <p className="text-[10px] text-muted-foreground/60 truncate mt-0.5 max-w-md">
+                              {a.ai_reasoning.includes(" | ")
+                                ? (() => {
+                                    const parts = a.ai_reasoning.split(" | ");
+                                    const accepts = parts.filter((p: string) => p.includes("[ACCEPT]")).length;
+                                    const firstReason = parts[0]?.replace(/^.*?\]:\s*/, "") || "";
+                                    return `${accepts}/${parts.length} accepted — ${firstReason}`;
+                                  })()
+                                : a.ai_reasoning}
                             </p>
                           )}
                         </div>
@@ -678,8 +782,18 @@ export default function EventWorkspacePage() {
               <CreditCard className="size-4 mr-2" />Review Guests
             </Button>
             <Button variant="outline" disabled={total === 0} onClick={handleExportCSV} className="border-border/50">
-              <Download className="size-4 mr-2" />Export
+              <Download className="size-4 mr-2" />Export All
             </Button>
+            {accepted > 0 && (
+              <Button variant="outline" onClick={() => {
+                const acc = applicants.filter((a) => a.status === "accepted");
+                const emails = acc.map((a) => a.email).filter(Boolean);
+                navigator.clipboard.writeText(emails.join("\n"));
+                toast.success(`Copied ${emails.length} accepted emails to clipboard — paste into Luma`);
+              }} className="border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/10">
+                <ClipboardCopy className="size-4 mr-2" />Copy {accepted} Emails
+              </Button>
+            )}
           </div>
 
           {/* Guest List */}
@@ -773,15 +887,22 @@ export default function EventWorkspacePage() {
                         </div>
                       )}
 
-                      {/* AI reasoning — show first judge's reasoning only */}
-                      {a.ai_reasoning && (
+                      {/* AI summary — show linkedin_summary or condensed reasoning */}
+                      {(a[`linkedin_summary`] || a.ai_reasoning) && (
                         <div className="px-4 pb-2">
                           <div className="rounded-lg bg-gold/5 border border-gold/10 px-2.5 py-1.5">
                             <p className="text-[11px] text-muted-foreground line-clamp-2 flex items-start gap-1.5">
                               <Sparkles className="size-3 mt-0.5 shrink-0 text-gold" />
-                              {a.ai_reasoning.includes(" | ")
-                                ? a.ai_reasoning.split(" | ")[0].replace(/^.*?\]:\s*/, "")
-                                : a.ai_reasoning}
+                              {(a[`linkedin_summary`] as string) || (
+                                a.ai_reasoning!.includes(" | ")
+                                  ? (() => {
+                                      const parts = a.ai_reasoning!.split(" | ");
+                                      const accepts = parts.filter((p) => p.includes("[ACCEPT]")).length;
+                                      const firstReason = parts[0]?.replace(/^.*?\]:\s*/, "") || "";
+                                      return `${accepts}/${parts.length} judges accepted. ${firstReason}`;
+                                    })()
+                                  : a.ai_reasoning
+                              )}
                             </p>
                           </div>
                         </div>
@@ -920,6 +1041,7 @@ export default function EventWorkspacePage() {
         <AnalysisResultsTab
           applicants={applicants}
           sessionId={sessionId}
+          session={session}
           onStatusChange={handleStatusChange}
           onRefresh={refreshAll}
           onRunAnalysis={() => router.push(`/events/${sessionId}/analyze`)}
