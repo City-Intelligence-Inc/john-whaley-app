@@ -138,9 +138,6 @@ export function ProfileCardGrid({
   });
 
   const sorted = [...filtered].sort((a, b) => {
-    const sa = a.ai_score ? parseInt(a.ai_score) : 0;
-    const sb = b.ai_score ? parseInt(b.ai_score) : 0;
-    if (sb !== sa) return sb - sa;
     return (a.name || "").localeCompare(b.name || "");
   });
 
@@ -207,7 +204,6 @@ export function ProfileCardGrid({
                     {bl && <Badge className="mt-1 bg-red-500/10 text-red-500 border-red-500/20 text-[10px]"><ShieldAlert className="size-2.5 mr-0.5" />Blacklisted</Badge>}
                   </div>
                   <div className="flex flex-col items-end gap-1 shrink-0">
-                    {score > 0 && <span className={`text-xl font-bold tabular-nums ${scoreColor(score)}`}>{score}</span>}
                     {statusBadge(a.status)}
                   </div>
                 </div>

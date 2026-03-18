@@ -149,13 +149,8 @@ export function ApplicantDetailSheet({
         </SheetHeader>
 
         <div className="space-y-5 px-4 pb-6">
-          {/* ── Score + Status + Type ── */}
+          {/* ── Status + Type ── */}
           <div className="flex items-center gap-3 flex-wrap">
-            {score > 0 && (
-              <span className={`text-3xl font-bold tabular-nums ${scc}`}>
-                {score}
-              </span>
-            )}
             <Badge
               variant={
                 applicant.status === "accepted"

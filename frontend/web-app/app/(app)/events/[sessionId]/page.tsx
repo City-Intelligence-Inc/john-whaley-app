@@ -20,6 +20,10 @@ import {
   Building2,
   GraduationCap,
   Sparkles,
+  Minus,
+  Plus,
+  Zap,
+  Check,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -45,6 +49,9 @@ import { ApplicantDetailSheet } from "@/components/applicant-detail-sheet";
 import { CSVUploader } from "@/components/csv-uploader";
 import { api } from "@/lib/api";
 import type { Applicant } from "@/lib/api";
+import { ATTENDEE_TYPES } from "@/lib/constants";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Slider } from "@/components/ui/slider";
 
 /* ── helpers ── */
 
@@ -68,6 +75,384 @@ function statusLabel(s: string) {
     case "waitlisted": return "Waitlisted";
     default: return "Pending";
   }
+}
+
+/* ── helpers for analysis tab ── */
+
+function getScore(a: Applicant): number {
+  if (!a.ai_score) return 0;
+  const n = Number(a.ai_score);
+  return isNaN(n) ? 0 : n;
+}
+
+function getTypeColor(key: string): string {
+  return ATTENDEE_TYPES.find((t) => t.key === key)?.color || "#6b7280";
+}
+
+function getTypeLabel(key: string): string {
+  return ATTENDEE_TYPES.find((t) => t.key === key)?.label || key;
+}
+
+function getRejectionReason(a: Applicant): string {
+  if (a.status === "accepted") return "";
+  if (a.status === "rejected") return "Rejected";
+  if (a.status === "waitlisted") return "Waitlisted";
+  if (!a.ai_reasoning) return "Not analyzed";
+  return "Pending";
+}
+
+/* ── Analysis Results Tab ── */
+
+function AnalysisResultsTab({
+  applicants,
+  sessionId,
+  onStatusChange,
+  onRefresh,
+  onRunAnalysis,
+}: {
+  applicants: Applicant[];
+  sessionId: string;
+  onStatusChange: (id: string, status: string) => void;
+  onRefresh: () => Promise<void>;
+  onRunAnalysis: () => void;
+}) {
+  const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
+  const [quotas, setQuotas] = useState<Record<string, number>>({});
+  const [saving, setSaving] = useState(false);
+
+  // Group by category
+  const grouped = useMemo(() => {
+    const groups: Record<string, Applicant[]> = {};
+    for (const t of ATTENDEE_TYPES) groups[t.key] = [];
+    groups["unclassified"] = [];
+    for (const a of applicants) {
+      const type = a.attendee_type || "unclassified";
+      if (!groups[type]) groups[type] = [];
+      groups[type].push(a);
+    }
+    return groups;
+  }, [applicants]);
+
+  // Initialize quotas from current accepted counts
+  const currentAccepted = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const [key, items] of Object.entries(grouped)) {
+      counts[key] = items.filter((a) => a.status === "accepted").length;
+    }
+    return counts;
+  }, [grouped]);
+
+  // Keep dataset order but put accepted first
+  const sortedGroups = useMemo(() => {
+    const result: Record<string, Applicant[]> = {};
+    for (const [key, items] of Object.entries(grouped)) {
+      result[key] = [...items].sort((a, b) => {
+        const aAccepted = a.status === "accepted" ? 0 : 1;
+        const bAccepted = b.status === "accepted" ? 0 : 1;
+        return aAccepted - bAccepted;
+      });
+    }
+    return result;
+  }, [grouped]);
+
+  const totalAccepted = applicants.filter((a) => a.status === "accepted").length;
+  const totalAnalyzed = applicants.filter((a) => a.ai_score).length;
+  const hasAnalysis = totalAnalyzed > 0;
+
+  // Get effective quota (user-set or current accepted count)
+  const getQuota = (key: string) => quotas[key] ?? currentAccepted[key] ?? 0;
+
+  // Auto-apply quotas: accept top N by score in each category
+  const handleAutoApply = useCallback(async () => {
+    setSaving(true);
+    try {
+      const toAccept: string[] = [];
+      const toWaitlist: string[] = [];
+      for (const [key, items] of Object.entries(sortedGroups)) {
+        const target = getQuota(key);
+        items.forEach((a, idx) => {
+          if (idx < target) {
+            if (a.status !== "accepted") toAccept.push(a.applicant_id);
+          } else {
+            if (a.status === "accepted") toWaitlist.push(a.applicant_id);
+          }
+        });
+      }
+      if (toAccept.length > 0) await api.batchUpdateStatus(toAccept, "accepted");
+      if (toWaitlist.length > 0) await api.batchUpdateStatus(toWaitlist, "waitlisted");
+      toast.success(`Updated: ${toAccept.length} accepted, ${toWaitlist.length} waitlisted`);
+      await onRefresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to apply quotas");
+    } finally {
+      setSaving(false);
+    }
+  }, [sortedGroups, quotas, currentAccepted, onRefresh]);
+
+  const categoryOrder = [...ATTENDEE_TYPES.map((t) => t.key), "unclassified"];
+
+  return (
+    <div className="space-y-6">
+      {/* Run analysis button */}
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm text-muted-foreground">
+            {hasAnalysis
+              ? `${totalAnalyzed} of ${applicants.length} guests analyzed. ${totalAccepted} accepted.`
+              : "Run the AI judge panel to score and classify all guests."}
+          </p>
+        </div>
+        <Button
+          onClick={onRunAnalysis}
+          disabled={applicants.length === 0}
+          variant={hasAnalysis ? "outline" : "default"}
+          className={hasAnalysis ? "border-border/50" : "bg-gold text-gold-foreground hover:bg-gold/90"}
+        >
+          <Brain className="size-4 mr-2" />
+          {hasAnalysis ? "Re-Run Analysis" : "Run Analysis"}
+        </Button>
+      </div>
+
+      {hasAnalysis && (
+        <>
+          {/* Category Summary Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+            {categoryOrder.map((key) => {
+              const items = grouped[key] || [];
+              if (items.length === 0) return null;
+              const accepted = items.filter((a) => a.status === "accepted").length;
+              const color = key === "unclassified" ? "#6b7280" : getTypeColor(key);
+              const label = key === "unclassified" ? "Unclassified" : getTypeLabel(key);
+              const isExpanded = expandedCategory === key;
+
+              return (
+                <button
+                  key={key}
+                  onClick={() => setExpandedCategory(isExpanded ? null : key)}
+                  className={`rounded-xl border p-4 text-left transition-all hover:border-border ${
+                    isExpanded
+                      ? "border-border bg-card ring-1"
+                      : "border-border/50 bg-card/50"
+                  }`}
+                  style={isExpanded ? { borderColor: color } : undefined}
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="size-3 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                    <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide truncate">{label}</span>
+                  </div>
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="text-2xl font-bold" style={{ color }}>{accepted}</span>
+                    <span className="text-sm text-muted-foreground">/ {items.length}</span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    {accepted === 0 ? "none accepted" : `${accepted} accepted`}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Quota Controls */}
+          <Card className="border-border/50 bg-card/50">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                  <Users className="size-4 text-gold" />
+                  Category Quotas
+                </CardTitle>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">
+                    Total: <span className="font-semibold text-foreground">{Object.entries(grouped).reduce((sum, [key, items]) => sum + Math.min(getQuota(key), items.length), 0)}</span>
+                  </span>
+                  <Button
+                    size="sm"
+                    className="h-7 text-xs bg-gold text-gold-foreground hover:bg-gold/90"
+                    onClick={handleAutoApply}
+                    disabled={saving}
+                  >
+                    {saving ? <Loader2 className="size-3 mr-1 animate-spin" /> : <Zap className="size-3 mr-1" />}
+                    Apply Quotas
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {categoryOrder.map((key) => {
+                const items = grouped[key] || [];
+                if (items.length === 0) return null;
+                const color = key === "unclassified" ? "#6b7280" : getTypeColor(key);
+                const label = key === "unclassified" ? "Unclassified" : getTypeLabel(key);
+                const quota = getQuota(key);
+                const accepted = currentAccepted[key] || 0;
+
+                return (
+                  <div key={key} className="flex items-center gap-4">
+                    <div className="flex items-center gap-2 w-40 shrink-0">
+                      <div className="size-2.5 rounded-full" style={{ backgroundColor: color }} />
+                      <span className="text-xs font-medium truncate">{label}</span>
+                      <span className="text-[10px] text-muted-foreground">({items.length})</span>
+                    </div>
+                    <div className="flex-1">
+                      <Slider
+                        value={[quota]}
+                        min={0}
+                        max={items.length}
+                        step={1}
+                        onValueChange={([val]) => setQuotas((prev) => ({ ...prev, [key]: val }))}
+                        className="h-4"
+                      />
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={() => setQuotas((prev) => ({ ...prev, [key]: Math.max(0, quota - 1) }))}
+                        className="size-6 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                      >
+                        <Minus className="size-3" />
+                      </button>
+                      <span className="text-sm font-semibold tabular-nums w-8 text-center">{quota}</span>
+                      <button
+                        onClick={() => setQuotas((prev) => ({ ...prev, [key]: Math.min(items.length, quota + 1) }))}
+                        className="size-6 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                      >
+                        <Plus className="size-3" />
+                      </button>
+                    </div>
+                    {quota !== accepted && (
+                      <Badge variant="outline" className="text-[10px] bg-gold/10 text-gold border-gold/30 shrink-0">
+                        was {accepted}
+                      </Badge>
+                    )}
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+
+          {/* Expanded Category Detail */}
+          {expandedCategory && (
+            <Card className="border-border/50">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="size-3 rounded-full"
+                      style={{ backgroundColor: expandedCategory === "unclassified" ? "#6b7280" : getTypeColor(expandedCategory) }}
+                    />
+                    <CardTitle className="text-sm font-semibold">
+                      {expandedCategory === "unclassified" ? "Unclassified" : getTypeLabel(expandedCategory)}
+                    </CardTitle>
+                    <Badge variant="secondary" className="text-xs">
+                      {(grouped[expandedCategory] || []).length} total
+                    </Badge>
+                  </div>
+                  <button
+                    onClick={() => setExpandedCategory(null)}
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="size-4" />
+                  </button>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <div className="rounded-lg border border-border/30 divide-y divide-border/20">
+                  {(sortedGroups[expandedCategory] || []).map((a, idx) => {
+                    const isAccepted = a.status === "accepted";
+                    const isRejected = a.status === "rejected";
+                    const isWaitlisted = a.status === "waitlisted";
+                    const notIn = !isAccepted;
+                    const photo = (a[`linkedin_image`] as string) || (a[`photo_url`] as string) || "";
+                    const headline = (a[`linkedin_headline`] as string) || a.title || "";
+                    const rejectionReason = getRejectionReason(a);
+
+                    return (
+                      <div
+                        key={a.applicant_id}
+                        className={`flex items-center gap-3 px-3 py-2.5 transition-colors ${
+                          notIn ? "opacity-50" : "hover:bg-muted/30"
+                        }`}
+                      >
+                        {/* Rank */}
+                        <span className="text-xs font-mono text-muted-foreground w-6 text-right shrink-0">
+                          {idx + 1}
+                        </span>
+
+                        {/* Photo */}
+                        {photo ? (
+                          <img src={photo} alt="" className="size-8 rounded-lg object-cover shrink-0" />
+                        ) : (
+                          <div className="size-8 rounded-lg bg-muted flex items-center justify-center shrink-0 text-xs font-semibold text-muted-foreground">
+                            {getName(a).charAt(0).toUpperCase()}
+                          </div>
+                        )}
+
+                        {/* Name + headline */}
+                        <div className="flex-1 min-w-0">
+                          <span className={`text-sm font-medium truncate block ${notIn ? "text-muted-foreground" : ""}`}>
+                            {getName(a)}
+                          </span>
+                          {headline && (
+                            <p className={`text-xs truncate ${notIn ? "text-muted-foreground/50" : "text-muted-foreground"}`}>
+                              {headline}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Status / rejection reason */}
+                        <div className="flex items-center gap-2 shrink-0">
+                          {isAccepted && (
+                            <Badge variant="outline" className="text-[10px] bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
+                              Accepted
+                            </Badge>
+                          )}
+                          {isRejected && (
+                            <span className="text-[10px] text-muted-foreground/60 max-w-[140px] truncate" title={rejectionReason}>
+                              {rejectionReason}
+                            </span>
+                          )}
+                          {isWaitlisted && (
+                            <span className="text-[10px] text-amber-500/60">Waitlisted</span>
+                          )}
+                          {a.status === "pending" && (
+                            <span className="text-[10px] text-muted-foreground/40">Pending</span>
+                          )}
+                        </div>
+
+                        {/* Quick accept/reject */}
+                        <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            onClick={() => onStatusChange(a.applicant_id, isAccepted ? "waitlisted" : "accepted")}
+                            className={`size-6 rounded flex items-center justify-center transition-colors ${
+                              isAccepted
+                                ? "bg-emerald-500/20 text-emerald-400"
+                                : "text-muted-foreground/40 hover:text-emerald-400 hover:bg-emerald-500/10"
+                            }`}
+                            title={isAccepted ? "Remove" : "Accept"}
+                          >
+                            <Check className="size-3" />
+                          </button>
+                          <button
+                            onClick={() => onStatusChange(a.applicant_id, isRejected ? "waitlisted" : "rejected")}
+                            className={`size-6 rounded flex items-center justify-center transition-colors ${
+                              isRejected
+                                ? "bg-red-500/20 text-red-400"
+                                : "text-muted-foreground/40 hover:text-red-400 hover:bg-red-500/10"
+                            }`}
+                            title={isRejected ? "Un-reject" : "Reject"}
+                          >
+                            <X className="size-3" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </>
+      )}
+    </div>
+  );
 }
 
 /* ── page ── */
@@ -316,7 +701,6 @@ export default function EventWorkspacePage() {
                   const company = a.company || (a[`linkedin_company`] as string) || "";
                   const location = a.location || (a[`linkedin_location`] as string) || "";
                   const education = (a[`linkedin_education`] as string) || "";
-                  const score = a.ai_score ? parseInt(a.ai_score) : 0;
                   const isPending = a.status === "pending";
                   const name = getName(a);
 
@@ -337,12 +721,7 @@ export default function EventWorkspacePage() {
                             </div>
                           )}
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <h3 className="text-sm font-semibold truncate group-hover:text-gold transition-colors">{name}</h3>
-                              {score > 0 && (
-                                <span className={`text-sm font-bold tabular-nums ${score >= 70 ? "text-emerald-500" : score >= 40 ? "text-amber-500" : "text-red-500"}`}>{score}</span>
-                              )}
-                            </div>
+                            <h3 className="text-sm font-semibold truncate group-hover:text-gold transition-colors">{name}</h3>
                             {headline && <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5 leading-relaxed">{headline}</p>}
                           </div>
                         </div>
@@ -434,19 +813,13 @@ export default function EventWorkspacePage() {
       {/*  ANALYSIS TAB                                */}
       {/* ════════════════════════════════════════════ */}
       {tab === "analysis" && (
-        <div className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            Run the AI judge panel to score and classify all guests automatically.
-          </p>
-          <Button
-            onClick={() => router.push(`/events/${sessionId}/analyze`)}
-            disabled={total === 0}
-            className="bg-gold text-gold-foreground hover:bg-gold/90"
-          >
-            <Brain className="size-4 mr-2" />
-            Configure & Run Analysis
-          </Button>
-        </div>
+        <AnalysisResultsTab
+          applicants={applicants}
+          sessionId={sessionId}
+          onStatusChange={handleStatusChange}
+          onRefresh={refreshAll}
+          onRunAnalysis={() => router.push(`/events/${sessionId}/analyze`)}
+        />
       )}
 
       {/* ── Detail Sheet ── */}

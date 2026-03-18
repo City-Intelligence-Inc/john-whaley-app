@@ -163,12 +163,10 @@ export function ProfileSwipeView({
   const education = (current[`linkedin_education`] as string) || "";
   const company = current.company || (current[`linkedin_company`] as string) || "";
   const location = current.location || (current[`linkedin_location`] as string) || "";
-  const score = current.ai_score ? parseInt(current.ai_score) : 0;
   const wl = isWl(current), bl = isBl(current);
   const wlCount = sorted.filter(isWl).length, blCount = sorted.filter(isBl).length;
   const acceptedCount = sorted.filter((a) => a.status === "accepted").length;
   const rejectedCount = sorted.filter((a) => a.status === "rejected").length;
-  const hasContent = !!(about || experience || education);
 
   return (
     <div className="flex gap-6 items-start">
@@ -226,23 +224,35 @@ export function ProfileSwipeView({
                 </div>
               )}
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <h2 className="text-lg font-bold text-foreground truncate">{getName(current)}</h2>
-                  {score > 0 && (
-                    <span className={`text-lg font-bold tabular-nums ${score >= 70 ? "text-emerald-500" : score >= 40 ? "text-amber-500" : "text-red-500"}`}>{score}</span>
-                  )}
-                </div>
+                <h2 className="text-lg font-bold text-foreground truncate">{getName(current)}</h2>
                 {headline && <p className="text-sm text-muted-foreground mt-0.5 line-clamp-2">{headline}</p>}
 
-                {/* Status + list badges */}
+                {/* Category badge + status + list badges */}
                 <div className="flex items-center gap-2 mt-2 flex-wrap">
+                  {current.attendee_type && (
+                    <Badge className="text-[10px] border" style={{
+                      backgroundColor: `${(() => {
+                        const types: Record<string, string> = { vc: "#6366f1", entrepreneur: "#f59e0b", faculty: "#10b981", alumni: "#3b82f6", press: "#ec4899", student: "#8b5cf6", other: "#6b7280" };
+                        return types[current.attendee_type] || "#6b7280";
+                      })()}20`,
+                      color: (() => {
+                        const types: Record<string, string> = { vc: "#6366f1", entrepreneur: "#f59e0b", faculty: "#10b981", alumni: "#3b82f6", press: "#ec4899", student: "#8b5cf6", other: "#6b7280" };
+                        return types[current.attendee_type] || "#6b7280";
+                      })(),
+                      borderColor: `${(() => {
+                        const types: Record<string, string> = { vc: "#6366f1", entrepreneur: "#f59e0b", faculty: "#10b981", alumni: "#3b82f6", press: "#ec4899", student: "#8b5cf6", other: "#6b7280" };
+                        return types[current.attendee_type] || "#6b7280";
+                      })()}40`,
+                    }}>
+                      {current.attendee_type_detail || current.attendee_type}
+                    </Badge>
+                  )}
                   <span className="flex items-center gap-1.5 text-xs">
                     <span className={`size-2 rounded-full ${statusDot(current.status)}`} />
                     {statusLabel(current.status)}
                   </span>
                   {wl && <Badge className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20 text-[10px]"><ShieldCheck className="size-2.5 mr-0.5" />WL</Badge>}
                   {bl && <Badge className="bg-red-500/10 text-red-500 border-red-500/20 text-[10px]"><ShieldAlert className="size-2.5 mr-0.5" />BL</Badge>}
-                  {current.attendee_type && <Badge variant="outline" className="text-[10px]">{current.attendee_type_detail || current.attendee_type}</Badge>}
                 </div>
               </div>
             </div>
@@ -256,48 +266,47 @@ export function ProfileSwipeView({
             {current.linkedin_url && <a href={current.linkedin_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-blue-500 hover:text-blue-400"><Linkedin className="size-3" />Profile<ExternalLink className="size-2.5" /></a>}
           </div>
 
-          {/* Content sections */}
-          {hasContent && (
-            <div className="px-5 pb-4 space-y-3 border-t border-border/30 pt-3">
-              {about && (
-                <div>
-                  <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1">About</h4>
-                  <p className="text-sm text-foreground/80 leading-relaxed">{about}</p>
-                </div>
-              )}
-              {experience && (
-                <div>
-                  <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1 flex items-center gap-1"><Briefcase className="size-3" />Experience</h4>
-                  <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-line line-clamp-6">{experience}</p>
-                </div>
-              )}
-              {education && (
-                <div>
-                  <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1 flex items-center gap-1"><GraduationCap className="size-3" />Education</h4>
-                  <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-line line-clamp-3">{education}</p>
-                </div>
+          {/* Content sections — always show headers */}
+          <div className="px-5 pb-4 space-y-3 border-t border-border/30 pt-3">
+            <div>
+              <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1">About</h4>
+              {about ? (
+                <p className="text-sm text-foreground/80 leading-relaxed">{about}</p>
+              ) : (
+                <p className="text-xs text-muted-foreground/40 italic">No about info</p>
               )}
             </div>
-          )}
+            <div>
+              <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1 flex items-center gap-1"><Briefcase className="size-3" />Experience</h4>
+              {experience ? (
+                <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-line line-clamp-6">{experience}</p>
+              ) : (
+                <p className="text-xs text-muted-foreground/40 italic">No experience info</p>
+              )}
+            </div>
+            <div>
+              <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1 flex items-center gap-1"><GraduationCap className="size-3" />Education</h4>
+              {education ? (
+                <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-line line-clamp-3">{education}</p>
+              ) : (
+                <p className="text-xs text-muted-foreground/40 italic">No education info</p>
+              )}
+            </div>
+          </div>
 
-          {/* No data message */}
-          {!hasContent && !headline && !company && (
-            <div className="px-5 pb-4 text-xs text-muted-foreground/50 italic">
-              No LinkedIn profile data available. Run LinkedIn enrichment to populate.
+          {/* AI reasoning — always show */}
+          <div className="px-5 pb-4">
+            <div className="rounded-lg bg-gold/5 border border-gold/10 p-3">
+              <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1 flex items-center gap-1">
+                <Sparkles className="size-3 text-gold" />AI Reasoning
+              </h4>
+              {current.ai_reasoning ? (
+                <p className="text-sm text-foreground/80 leading-relaxed">{current.ai_reasoning}</p>
+              ) : (
+                <p className="text-xs text-muted-foreground/40 italic">No AI analysis yet. Run analysis to populate.</p>
+              )}
             </div>
-          )}
-
-          {/* AI reasoning */}
-          {current.ai_reasoning && (
-            <div className="px-5 pb-4">
-              <div className="rounded-lg bg-gold/5 border border-gold/10 p-3">
-                <p className="text-sm text-foreground/80 flex items-start gap-2">
-                  <Sparkles className="size-4 mt-0.5 shrink-0 text-gold" />
-                  {current.ai_reasoning}
-                </p>
-              </div>
-            </div>
-          )}
+          </div>
 
           {/* ── Primary actions: Accept / Pass / Reject ── */}
           <div className="border-t border-border/50 p-3 flex items-center gap-2">

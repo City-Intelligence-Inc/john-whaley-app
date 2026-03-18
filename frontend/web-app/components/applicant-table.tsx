@@ -123,6 +123,7 @@ const DEFAULT_HIDDEN = new Set([
   "linkedin_image",
   "photo_url",
   "image",
+  "ai_score",
   "ai_review",
   "panel_votes",
   "accepting_judges",
@@ -136,7 +137,6 @@ const PRIORITY_COLS = [
   "title",
   "company",
   "location",
-  "ai_score",
   "status",
   "attendee_type",
 ];
@@ -258,8 +258,8 @@ export function ApplicantTable({
     [onStatusFilterChange],
   );
   const [searchQuery, setSearchQuery] = useState("");
-  const [sortField, setSortField] = useState<string>("ai_score");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [sortField, setSortField] = useState<string>("name");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [userToggledColumns, setUserToggledColumns] = useState<
@@ -434,9 +434,7 @@ export function ApplicantTable({
 
     const rows = [headers.join(",")];
     const sorted = [...filteredApplicants].sort((a, b) => {
-      const sa = a.ai_score ? parseInt(a.ai_score) : 0;
-      const sb = b.ai_score ? parseInt(b.ai_score) : 0;
-      return sb - sa;
+      return (a.name || "").localeCompare(b.name || "");
     });
     for (const a of sorted) {
       rows.push(headers.map((h) => escapeCSV(a[h])).join(","));
