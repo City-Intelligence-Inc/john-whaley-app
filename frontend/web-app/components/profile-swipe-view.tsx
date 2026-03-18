@@ -228,17 +228,43 @@ export function ProfileSwipeView({
             </div>
           )}
 
-          {/* AI reasoning */}
+          {/* AI / Judge decisions */}
           {current.ai_reasoning && (
-            <div className="px-5 pb-4">
-              <div className="rounded-lg bg-gold/5 border border-gold/10 p-3">
-                <p className="text-xs text-foreground/80 leading-relaxed line-clamp-3 flex items-start gap-1.5">
-                  <Sparkles className="size-3 mt-0.5 shrink-0 text-gold" />
-                  {current.ai_reasoning.includes(" | ")
-                    ? current.ai_reasoning.split(" | ")[0].replace(/^.*?\]:\s*/, "")
-                    : current.ai_reasoning}
-                </p>
-              </div>
+            <div className="px-5 pb-4 space-y-2">
+              <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1">
+                <Sparkles className="size-3 text-gold" />
+                {current.panel_votes ? "Judge Panel" : "AI Assessment"}
+                {current.panel_votes && (
+                  <span className="ml-auto text-xs font-medium text-foreground">{current.panel_votes} votes</span>
+                )}
+              </h4>
+              {current.ai_reasoning.includes(" | ") ? (
+                // Panel mode: show each judge's decision
+                <div className="space-y-1.5">
+                  {current.ai_reasoning.split(" | ").map((part, i) => {
+                    const match = part.match(/^(.+?)\s*\[(ACCEPT|PASS)\]:\s*(.*)$/);
+                    if (!match) return null;
+                    const [, judgeName, decision, reasoning] = match;
+                    const isAccept = decision === "ACCEPT";
+                    return (
+                      <div key={i} className={`rounded-lg p-2.5 text-xs ${isAccept ? "bg-emerald-500/5 border border-emerald-500/15" : "bg-muted/30 border border-border/30"}`}>
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <span className={`font-semibold ${isAccept ? "text-emerald-400" : "text-muted-foreground"}`}>
+                            {isAccept ? "ACCEPT" : "PASS"}
+                          </span>
+                          <span className="text-muted-foreground">{judgeName}</span>
+                        </div>
+                        <p className="text-foreground/70 leading-relaxed">{reasoning}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                // Single reviewer mode
+                <div className="rounded-lg bg-gold/5 border border-gold/10 p-2.5">
+                  <p className="text-xs text-foreground/80 leading-relaxed">{current.ai_reasoning}</p>
+                </div>
+              )}
             </div>
           )}
 
