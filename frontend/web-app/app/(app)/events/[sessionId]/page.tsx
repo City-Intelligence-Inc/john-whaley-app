@@ -88,6 +88,7 @@ export default function EventWorkspacePage() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [copiedEmails, setCopiedEmails] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [clearing, setClearing] = useState(false);
 
   /* ── Counts ── */
   const accepted = applicants.filter((a) => a.status === "accepted").length;
@@ -139,6 +140,21 @@ export default function EventWorkspacePage() {
       toast.error(err instanceof Error ? err.message : "Failed to delete");
     }
   }, [sessionId, router]);
+
+  const handleClearAll = useCallback(async () => {
+    if (!confirm(`Reset all ${total} guests to pending?`)) return;
+    setClearing(true);
+    try {
+      const ids = applicants.map((a) => a.applicant_id);
+      await api.batchUpdateStatus(ids, "pending");
+      toast.success("All statuses cleared to pending");
+      await refreshAll();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to clear");
+    } finally {
+      setClearing(false);
+    }
+  }, [applicants, total, refreshAll]);
 
   const handleExportAll = useCallback(() => {
     if (!applicants.length) return;
@@ -212,27 +228,60 @@ export default function EventWorkspacePage() {
         </div>
       </div>
 
-      {/* Stats cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        {[
-          { label: "Total", value: total, color: "text-foreground", filter: "all" },
-          { label: "Accepted", value: accepted, color: "text-emerald-600", filter: "accepted" },
-          { label: "Pending", value: pending, color: "text-blue-600", filter: "pending" },
-          { label: "Waitlisted", value: waitlisted, color: "text-amber-600", filter: "waitlisted" },
-          { label: "Rejected", value: rejected, color: "text-red-600", filter: "rejected" },
-        ].map((s) => (
-          <button
-            key={s.label}
-            onClick={() => setStatusFilter(statusFilter === s.filter ? "all" : s.filter)}
-            className={`rounded-xl border p-4 text-left transition-all hover:shadow-sm ${
-              statusFilter === s.filter ? "border-primary shadow-sm bg-accent/50" : "border-border"
-            }`}
-          >
-            <p className="text-xs font-medium text-muted-foreground">{s.label}</p>
-            <p className={`text-2xl font-bold tabular-nums ${s.color}`}>{s.value}</p>
-          </button>
-        ))}
-      </div>
+      {/* Status bar */}
+      {total > 0 && (
+        <div className="space-y-3">
+          {/* Proportional status bar */}
+          <div className="h-3 rounded-full overflow-hidden flex bg-muted">
+            {accepted > 0 && (
+              <button onClick={() => setStatusFilter(statusFilter === "accepted" ? "all" : "accepted")}
+                className="bg-emerald-500 transition-all hover:brightness-110" style={{ width: `${(accepted / total) * 100}%` }} title={`${accepted} accepted`} />
+            )}
+            {waitlisted > 0 && (
+              <button onClick={() => setStatusFilter(statusFilter === "waitlisted" ? "all" : "waitlisted")}
+                className="bg-amber-500 transition-all hover:brightness-110" style={{ width: `${(waitlisted / total) * 100}%` }} title={`${waitlisted} waitlisted`} />
+            )}
+            {pending > 0 && (
+              <button onClick={() => setStatusFilter(statusFilter === "pending" ? "all" : "pending")}
+                className="bg-blue-400 transition-all hover:brightness-110" style={{ width: `${(pending / total) * 100}%` }} title={`${pending} pending`} />
+            )}
+            {rejected > 0 && (
+              <button onClick={() => setStatusFilter(statusFilter === "rejected" ? "all" : "rejected")}
+                className="bg-red-500 transition-all hover:brightness-110" style={{ width: `${(rejected / total) * 100}%` }} title={`${rejected} rejected`} />
+            )}
+          </div>
+
+          {/* Legend + clear */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4 text-sm">
+              {[
+                { label: "Accepted", value: accepted, color: "bg-emerald-500", filter: "accepted" },
+                { label: "Waitlisted", value: waitlisted, color: "bg-amber-500", filter: "waitlisted" },
+                { label: "Pending", value: pending, color: "bg-blue-400", filter: "pending" },
+                { label: "Rejected", value: rejected, color: "bg-red-500", filter: "rejected" },
+              ].filter((s) => s.value > 0).map((s) => (
+                <button
+                  key={s.label}
+                  onClick={() => setStatusFilter(statusFilter === s.filter ? "all" : s.filter)}
+                  className={`flex items-center gap-1.5 transition-colors ${
+                    statusFilter === s.filter ? "font-semibold" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <span className={`size-2.5 rounded-full ${s.color}`} />
+                  <span className="tabular-nums">{s.value}</span> {s.label}
+                </button>
+              ))}
+            </div>
+            {(accepted + rejected + waitlisted > 0) && (
+              <Button variant="ghost" size="sm" className="text-xs text-muted-foreground h-7"
+                onClick={handleClearAll} disabled={clearing}>
+                {clearing ? <Loader2 className="size-3 mr-1.5 animate-spin" /> : <X className="size-3 mr-1.5" />}
+                Clear All Statuses
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
 
       <Tabs defaultValue="guests">
         <div className="flex items-center justify-between">
