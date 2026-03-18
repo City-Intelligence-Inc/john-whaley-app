@@ -74,6 +74,12 @@ async def upload_csv(file: UploadFile = File(...), session_id: str | None = Quer
                     fields["linkedin_about"] = profile["about"]
                 if profile.get("name") and not item.get("linkedin_name"):
                     fields["linkedin_name"] = profile["name"]
+                # Issues from linkedin-scrapes audit
+                issues = profile.get("issues")
+                if issues:
+                    fields["linkedin_issues"] = "; ".join(issues) if isinstance(issues, list) else str(issues)
+                else:
+                    fields["linkedin_issues"] = "clean"
                 if fields:
                     db.update_applicant_fields(item["applicant_id"], fields)
                     item.update(fields)

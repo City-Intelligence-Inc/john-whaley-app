@@ -21,6 +21,8 @@ import {
   Plus,
   ChevronDown,
   Trash2,
+  CircleCheck,
+  AlertTriangle,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -487,6 +489,24 @@ export default function MainPage() {
                         )}
                         <div className="px-4 py-2.5 border-t border-border/30 flex items-center justify-between" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center gap-2">
+                            {/* Issues indicator */}
+                            {(() => {
+                              const issues = (a[`linkedin_issues`] as string) || "";
+                              if (issues === "clean") {
+                                return (
+                                  <span className="flex items-center gap-1 text-[10px] text-emerald-500" title="Profile verified - no issues">
+                                    <CircleCheck className="size-3.5" />
+                                  </span>
+                                );
+                              } else if (issues) {
+                                return (
+                                  <span className="flex items-center gap-1 text-[10px] text-amber-500" title={issues}>
+                                    <AlertTriangle className="size-3.5" />
+                                  </span>
+                                );
+                              }
+                              return null;
+                            })()}
                             {a.attendee_type && <Badge variant="outline" className="text-[10px] h-5">{a.attendee_type_detail || a.attendee_type}</Badge>}
                             {a.linkedin_url && (
                               <a href={a.linkedin_url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-400">
