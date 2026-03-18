@@ -32,7 +32,26 @@ import {
   TableIcon,
   ShieldBan,
   AlertTriangle,
+  GripVertical,
+  Info,
 } from "lucide-react";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -108,6 +127,24 @@ function getTypeColor(key: string): string {
 
 function getTypeLabel(key: string): string {
   return ATTENDEE_TYPES.find((t) => t.key === key)?.label || key;
+}
+
+/* ── Sortable Table Row ── */
+function SortableRow({ id, children }: { id: string; children: React.ReactNode }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  return (
+    <TableRow
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 }}
+      className={`cursor-pointer hover:bg-muted/50 ${isDragging ? "bg-muted/80 shadow-lg z-50" : ""}`}
+      {...attributes}
+    >
+      <TableCell className="text-center w-10" {...listeners}>
+        <GripVertical className="size-3.5 text-muted-foreground/40 cursor-grab active:cursor-grabbing mx-auto" />
+      </TableCell>
+      {children}
+    </TableRow>
+  );
 }
 
 /* ── Mix Panel ── */
@@ -304,6 +341,12 @@ export default function EventWorkspacePage() {
   const [viewMode, setViewMode] = useState<"table" | "cards">("table");
   const [cardIndex, setCardIndex] = useState(0);
   const [ranking, setRanking] = useState(false);
+  const [showDragTip, setShowDragTip] = useState(true);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
 
   /* ── Counts ── */
   const accepted = applicants.filter((a) => (a.status || "pending") === "accepted").length;
@@ -346,6 +389,21 @@ export default function EventWorkspacePage() {
       return sortDir === "desc" ? -cmp : cmp;
     });
   }, [applicants, statusFilter, search, sortField, sortDir]);
+
+  const handleDragEnd = useCallback(async (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const newIndex = filtered.findIndex((a) => a.applicant_id === over.id);
+    if (newIndex === -1) return;
+    const newRank = newIndex + 1;
+    try {
+      await api.updateApplicant(String(active.id), { extra: { global_rank: newRank, rank: newRank } });
+      toast.success(`Moved to #${newRank}`);
+      await refreshApplicants();
+    } catch {
+      toast.error("Failed to update rank");
+    }
+  }, [filtered, refreshApplicants]);
 
   /* ── Handlers ── */
   const handleStatusChange = useCallback(async (id: string, status: string) => {
@@ -655,54 +713,44 @@ export default function EventWorkspacePage() {
               onBlacklist={handleBlacklist}
             />
           ) : (
-            <div className="rounded-lg border overflow-hidden">
-              <Table className="table-fixed w-full">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-10">#</TableHead>
-                    <TableHead>
-                      <button onClick={() => toggleSort("name")} className="flex items-center gap-1 hover:text-foreground">
-                        Guest <ArrowUpDown className="size-3" />
-                      </button>
-                    </TableHead>
-                    <TableHead className="w-28 hidden md:table-cell">Category</TableHead>
-                    <TableHead className="w-20">Status</TableHead>
-                    <TableHead className="w-28 text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filtered.map((a, idx) => {
-                    const photo = getPhoto(a);
-                    const headline = getHeadline(a);
-                    const summary = getSummary(a);
-                    const rank = getRank(a);
-                    return (
-                      <TableRow
-                        key={a.applicant_id}
-                        className="cursor-pointer hover:bg-muted/50"
-                        onClick={() => setSelectedId(a.applicant_id)}
-                      >
-                        <TableCell className="text-center">
-                          <TooltipProvider delayDuration={200}>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span className="text-xs font-mono font-bold text-muted-foreground cursor-help">
-                                  {rank?.rank || idx + 1}
-                                </span>
-                              </TooltipTrigger>
-                              <TooltipContent side="right" className="text-xs max-w-[220px]">
-                                {rank ? (
-                                  <div className="space-y-1">
-                                    <p className="font-semibold">Global rank #{rank.rank} of {rank.total}</p>
-                                    {rank.catRank > 0 && <p>{getTypeLabel(a.attendee_type || "other")} #{rank.catRank} of {rank.catTotal}</p>}
-                                    <p>Score: {rank.score}/100 (seniority within role)</p>
-                                    {a.rank_reason ? <p className="text-muted-foreground">{String(a.rank_reason)}</p> : null}
-                                  </div>
-                                ) : <p>Not ranked yet</p>}
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        </TableCell>
+            <>
+            {/* Drag tip */}
+            {showDragTip && (
+              <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-900 dark:bg-blue-950/30 px-3 py-2 text-xs text-blue-700 dark:text-blue-300 mb-2">
+                <Info className="size-3.5 shrink-0" />
+                <span>Drag the <GripVertical className="size-3 inline -mt-0.5" /> handle to reorder guests. New rank saves automatically.</span>
+                <button onClick={() => setShowDragTip(false)} className="ml-auto shrink-0 hover:text-blue-900 dark:hover:text-blue-100"><X className="size-3.5" /></button>
+              </div>
+            )}
+
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <div className="rounded-lg border overflow-hidden">
+                <Table className="table-fixed w-full">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-10" />
+                      <TableHead className="w-8">#</TableHead>
+                      <TableHead>
+                        <button onClick={() => toggleSort("name")} className="flex items-center gap-1 hover:text-foreground">
+                          Guest <ArrowUpDown className="size-3" />
+                        </button>
+                      </TableHead>
+                      <TableHead className="w-24 hidden md:table-cell">Category</TableHead>
+                      <TableHead className="w-20">Status</TableHead>
+                      <TableHead className="w-24 text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <SortableContext items={filtered.map((a) => a.applicant_id)} strategy={verticalListSortingStrategy}>
+                    <TableBody>
+                      {filtered.map((a, idx) => {
+                        const photo = getPhoto(a);
+                        const headline = getHeadline(a);
+                        const rank = getRank(a);
+                        return (
+                          <SortableRow key={a.applicant_id} id={a.applicant_id}>
+                            <TableCell className="text-center text-xs font-mono font-bold text-muted-foreground w-8" onClick={() => setSelectedId(a.applicant_id)}>
+                              {rank?.rank || idx + 1}
+                            </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-3 min-w-0">
                             {photo ? (
@@ -796,12 +844,15 @@ export default function EventWorkspacePage() {
                             </button>
                           </div>
                         </TableCell>
-                      </TableRow>
+                      </SortableRow>
                     );
                   })}
-                </TableBody>
-              </Table>
-            </div>
+                    </TableBody>
+                  </SortableContext>
+                </Table>
+              </div>
+            </DndContext>
+            </>
           )}
         </TabsContent>
 
@@ -1106,47 +1157,45 @@ function CardReview({
           </div>
         )}
 
-        {/* Action buttons */}
-        <div className="border-t p-4 flex items-center gap-2">
-          <Button size="sm" variant={current.status === "accepted" ? "default" : "outline"} className="flex-1"
-            onClick={() => onStatusChange(current.applicant_id, "accepted")}>
-            <CheckCircle2 className="size-4 mr-1.5" />Accept
-          </Button>
-          <Button size="sm" variant={current.status === "waitlisted" ? "default" : "outline"} className="flex-1"
-            onClick={() => onStatusChange(current.applicant_id, "waitlisted")}>
-            <Clock className="size-4 mr-1.5" />Waitlist
-          </Button>
-          <Button size="sm" variant={current.status === "rejected" ? "destructive" : "outline"} className="flex-1"
-            onClick={() => onStatusChange(current.applicant_id, "rejected")}>
-            <XCircle className="size-4 mr-1.5" />Reject
-          </Button>
-          <Button size="icon" variant="ghost" className="shrink-0 text-muted-foreground hover:text-destructive"
-            onClick={() => onBlacklist(current)} title="Blacklist & remove">
-            <ShieldBan className="size-4" />
-          </Button>
-        </div>
       </Card>
 
-      {/* Navigation */}
-      <div className="flex items-center gap-4">
-        <Button variant="outline" size="sm" disabled={index === 0}
-          onClick={() => onIndexChange(index - 1)}>
-          <ChevronLeft className="size-4 mr-1" />Prev
-        </Button>
-        <span className="text-xs text-muted-foreground">
-          <kbd className="px-1 py-0.5 rounded border bg-muted text-[10px] font-mono">A</kbd> prev
-          <span className="mx-2">|</span>
-          <kbd className="px-1 py-0.5 rounded border bg-muted text-[10px] font-mono">D</kbd> next
-          <span className="mx-2">|</span>
-          <kbd className="px-1 py-0.5 rounded border bg-muted text-[10px] font-mono">1</kbd>
-          <kbd className="px-1 py-0.5 rounded border bg-muted text-[10px] font-mono mx-0.5">2</kbd>
-          <kbd className="px-1 py-0.5 rounded border bg-muted text-[10px] font-mono">3</kbd> actions
-        </span>
-        <Button variant="outline" size="sm" disabled={index >= applicants.length - 1}
-          onClick={() => onIndexChange(index + 1)}>
-          Next<ChevronRight className="size-4 ml-1" />
-        </Button>
+      {/* Floating controls */}
+      <div className="fixed bottom-0 left-0 right-0 z-40 bg-background/95 backdrop-blur-sm border-t shadow-lg">
+        <div className="max-w-lg mx-auto p-3 space-y-2">
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant={current.status === "accepted" ? "default" : "outline"} className="flex-1"
+              onClick={() => onStatusChange(current.applicant_id, "accepted")}>
+              <CheckCircle2 className="size-4 mr-1.5" />Accept
+            </Button>
+            <Button size="sm" variant={current.status === "waitlisted" ? "default" : "outline"} className="flex-1"
+              onClick={() => onStatusChange(current.applicant_id, "waitlisted")}>
+              <Clock className="size-4 mr-1.5" />Waitlist
+            </Button>
+            <Button size="sm" variant={current.status === "rejected" ? "destructive" : "outline"} className="flex-1"
+              onClick={() => onStatusChange(current.applicant_id, "rejected")}>
+              <XCircle className="size-4 mr-1.5" />Reject
+            </Button>
+            <Button size="sm" variant="outline" className="shrink-0 text-destructive border-destructive/30 hover:bg-destructive/10"
+              onClick={() => onBlacklist(current)}>
+              <ShieldBan className="size-4 mr-1.5" />Blacklist
+            </Button>
+          </div>
+          <div className="flex items-center justify-between">
+            <Button variant="ghost" size="sm" disabled={index === 0} onClick={() => onIndexChange(index - 1)}>
+              <ChevronLeft className="size-4 mr-1" />Prev
+            </Button>
+            <span className="text-[10px] text-muted-foreground">
+              <kbd className="px-1 py-0.5 rounded border bg-muted font-mono">A</kbd>/<kbd className="px-1 py-0.5 rounded border bg-muted font-mono">D</kbd> nav
+              <span className="mx-1">|</span>
+              <kbd className="px-1 py-0.5 rounded border bg-muted font-mono">1</kbd><kbd className="px-1 py-0.5 rounded border bg-muted font-mono">2</kbd><kbd className="px-1 py-0.5 rounded border bg-muted font-mono">3</kbd>
+            </span>
+            <Button variant="ghost" size="sm" disabled={index >= applicants.length - 1} onClick={() => onIndexChange(index + 1)}>
+              Next<ChevronRight className="size-4 ml-1" />
+            </Button>
+          </div>
+        </div>
       </div>
+      <div className="h-28" />
     </div>
   );
 }
