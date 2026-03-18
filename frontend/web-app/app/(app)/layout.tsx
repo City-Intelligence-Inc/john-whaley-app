@@ -1,11 +1,13 @@
 "use client";
 
+import { AuthProvider } from "@/components/auth-provider";
 import { AppSidebar } from "@/components/app-sidebar";
 import { MobileNav } from "@/components/mobile-nav";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
+    <AuthProvider>
     <SidebarProvider defaultOpen={false} open={false}>
       <div className="hidden md:block">
         <AppSidebar />
@@ -19,5 +21,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </SidebarInset>
       <MobileNav />
     </SidebarProvider>
+    </AuthProvider>
   );
 }
