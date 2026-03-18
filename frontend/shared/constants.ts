@@ -3,11 +3,11 @@
 export const APP_NAME = "Selecta";
 
 export const ATTENDEE_TYPES = [
-  { key: "vc", label: "VCs / Investors", color: "#6366f1" },
-  { key: "entrepreneur", label: "Founders / Entrepreneurs", color: "#f59e0b" },
-  { key: "faculty", label: "Faculty / Researchers", color: "#10b981" },
-  { key: "alumni", label: "Alumni", color: "#3b82f6" },
-  { key: "press", label: "Press / Media", color: "#ec4899" },
+  { key: "vc", label: "VCs", color: "#6366f1" },
+  { key: "founder", label: "Founders", color: "#f59e0b" },
+  { key: "engineer", label: "Engineers", color: "#3b82f6" },
+  { key: "pm", label: "PMs", color: "#ec4899" },
+  { key: "researcher", label: "Researchers", color: "#10b981" },
   { key: "student", label: "Students", color: "#8b5cf6" },
   { key: "other", label: "Other", color: "#6b7280" },
 ] as const;
