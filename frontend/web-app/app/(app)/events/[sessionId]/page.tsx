@@ -518,6 +518,18 @@ export default function EventWorkspacePage() {
     }
   }, [refreshApplicants]);
 
+  const handleBlacklist = useCallback(async (email: string) => {
+    try {
+      // Get current blacklist, add email, save
+      const current = await api.getBlacklist();
+      const emails = [...(current.emails || []), email.toLowerCase()];
+      await api.updateBlacklist([...new Set(emails)]);
+      toast.success(`${email} blacklisted — will be auto-rejected on future events`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to blacklist");
+    }
+  }, []);
+
   const handleUploadSuccess = useCallback((_count: number) => {
     refreshAll();
     setShowImportDialog(false);
@@ -876,6 +888,7 @@ export default function EventWorkspacePage() {
             onStatusChange={handleStatusChange}
             onSelectApplicant={setSelectedApplicantId}
             onCategorize={handleCategorize}
+            onBlacklist={handleBlacklist}
           />
         </div>
       )}

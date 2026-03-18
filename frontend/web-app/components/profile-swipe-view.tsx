@@ -15,6 +15,7 @@ import {
   CheckCircle2,
   XCircle,
   Clock,
+  ShieldAlert,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -38,6 +39,7 @@ interface ProfileSwipeViewProps {
   onStatusChange: (id: string, status: string) => void;
   onSelectApplicant: (id: string) => void;
   onCategorize?: (id: string, type: string) => void;
+  onBlacklist?: (email: string) => void;
 }
 
 function getName(a: Applicant): string {
@@ -67,6 +69,7 @@ export function ProfileSwipeView({
   statusFilter,
   onStatusChange,
   onCategorize,
+  onBlacklist,
 }: ProfileSwipeViewProps) {
   const [index, setIndex] = useState(0);
 
@@ -270,6 +273,18 @@ export function ProfileSwipeView({
 
           {/* Action buttons */}
           <div className="border-t border-border/50 p-3 flex items-center gap-2">
+            {onBlacklist && current.email && (
+              <button
+                onClick={() => {
+                  onBlacklist(current.email!);
+                  handleAction("rejected");
+                }}
+                className="h-10 px-3 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors"
+                title="Blacklist & reject — this person will be auto-rejected on future events"
+              >
+                <ShieldAlert className="size-3.5" />
+              </button>
+            )}
             <button
               onClick={() => handleAction("rejected")}
               className={`flex-1 h-10 rounded-xl flex items-center justify-center gap-1.5 text-sm font-medium transition-colors ${
