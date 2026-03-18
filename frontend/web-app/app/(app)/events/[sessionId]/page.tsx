@@ -82,7 +82,8 @@ function getRank(a: Applicant): { rank: number; total: number; score: number } |
 }
 
 function getSummary(a: Applicant): string {
-  return (a.ai_summary as string) || (a.linkedin_summary as string) || "";
+  const s = a.ai_summary || a.linkedin_summary || "";
+  return typeof s === "string" ? s : String(s);
 }
 
 function getTypeColor(key: string): string {
@@ -624,7 +625,7 @@ export default function EventWorkspacePage() {
                             <div className="min-w-0 flex-1">
                               <p className="font-medium text-sm truncate">{getName(a)}</p>
                               {headline && <p className="text-xs text-muted-foreground truncate">{headline}</p>}
-                              {summary && <p className="text-[10px] text-muted-foreground/60 truncate mt-0.5">{summary.split("\n")[0]}</p>}
+                              {summary && <p className="text-[10px] text-muted-foreground/60 truncate mt-0.5">{String(summary).split("\n")[0]}</p>}
                             </div>
                           </div>
                         </TableCell>
