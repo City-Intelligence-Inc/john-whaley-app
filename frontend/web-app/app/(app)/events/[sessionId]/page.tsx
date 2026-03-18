@@ -104,6 +104,7 @@ function MixPanel({ applicants, onApply }: {
 }) {
   const [quotas, setQuotas] = useState<Record<string, number>>({});
   const [applying, setApplying] = useState(false);
+  const [target, setTarget] = useState(200);
 
   const byType = useMemo(() => {
     const groups: Record<string, Applicant[]> = {};
@@ -113,11 +114,10 @@ function MixPanel({ applicants, onApply }: {
       if (!groups[t]) groups[t] = [];
       groups[t].push(a);
     }
-    // Sort each group by rank if available, else by name
     for (const key of Object.keys(groups)) {
       groups[key].sort((a, b) => {
-        const ra = Number(a.rank || 999);
-        const rb = Number(b.rank || 999);
+        const ra = Number(a.global_rank || a.rank || 999);
+        const rb = Number(b.global_rank || b.rank || 999);
         if (ra !== rb) return ra - rb;
         return getName(a).localeCompare(getName(b));
       });
@@ -125,8 +125,49 @@ function MixPanel({ applicants, onApply }: {
     return groups;
   }, [applicants]);
 
-  const getQuota = (key: string) => quotas[key] ?? (byType[key] || []).filter((a) => a.status === "accepted").length;
+  const getQuota = (key: string) => quotas[key] ?? (byType[key] || []).filter((a) => (a.status || "pending") === "accepted").length;
   const totalSelected = ATTENDEE_TYPES.reduce((sum, t) => sum + Math.min(getQuota(t.key), (byType[t.key] || []).length), 0);
+  const remaining = target - totalSelected;
+
+  // Auto-distribute: proportionally fill to target
+  const autoFill = () => {
+    const totalAvailable = ATTENDEE_TYPES.reduce((s, t) => s + (byType[t.key] || []).length, 0);
+    if (totalAvailable === 0) return;
+    const newQuotas: Record<string, number> = {};
+    let assigned = 0;
+    const types = ATTENDEE_TYPES.filter((t) => (byType[t.key] || []).length > 0);
+    for (const t of types) {
+      const available = (byType[t.key] || []).length;
+      const share = Math.round((available / totalAvailable) * target);
+      newQuotas[t.key] = Math.min(share, available);
+      assigned += newQuotas[t.key];
+    }
+    // Distribute remainder to largest groups
+    let diff = target - assigned;
+    const sorted = [...types].sort((a, b) => (byType[b.key] || []).length - (byType[a.key] || []).length);
+    for (const t of sorted) {
+      if (diff <= 0) break;
+      const available = (byType[t.key] || []).length;
+      const can = available - newQuotas[t.key];
+      if (can > 0) { const add = Math.min(can, diff); newQuotas[t.key] += add; diff -= add; }
+    }
+    setQuotas(newQuotas);
+  };
+
+  // Accept top N from each group
+  const acceptTopN = () => {
+    const newQuotas: Record<string, number> = {};
+    // Take all from each category, limited by their count, up to target
+    let budget = target;
+    // Priority: VCs first, then founders, etc.
+    for (const t of ATTENDEE_TYPES) {
+      const available = (byType[t.key] || []).length;
+      const take = Math.min(available, budget);
+      newQuotas[t.key] = take;
+      budget -= take;
+    }
+    setQuotas(newQuotas);
+  };
 
   const handleApply = async () => {
     setApplying(true);
@@ -134,10 +175,10 @@ function MixPanel({ applicants, onApply }: {
     const waitlistIds: string[] = [];
     for (const t of ATTENDEE_TYPES) {
       const items = byType[t.key] || [];
-      const target = getQuota(t.key);
+      const q = getQuota(t.key);
       items.forEach((a, i) => {
-        if (i < target && a.status !== "accepted") acceptIds.push(a.applicant_id);
-        if (i >= target && a.status === "accepted") waitlistIds.push(a.applicant_id);
+        if (i < q && (a.status || "pending") !== "accepted") acceptIds.push(a.applicant_id);
+        if (i >= q && (a.status || "pending") === "accepted") waitlistIds.push(a.applicant_id);
       });
     }
     await onApply(acceptIds, waitlistIds);
@@ -145,79 +186,89 @@ function MixPanel({ applicants, onApply }: {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold">Category Mix</h2>
-          <p className="text-sm text-muted-foreground">Set how many from each category. Top-ranked people get accepted first.</p>
-        </div>
+    <div className="space-y-4">
+      {/* Target + actions */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <span className="text-sm font-semibold tabular-nums">{totalSelected} total</span>
-          <Button size="sm" onClick={handleApply} disabled={applying}>
-            {applying ? <Loader2 className="size-4 mr-2 animate-spin" /> : <Check className="size-4 mr-2" />}
-            Apply Mix
+          <span className="text-sm text-muted-foreground">Target:</span>
+          <div className="flex items-center gap-1">
+            {[100, 150, 200, 250].map((n) => (
+              <button key={n} onClick={() => setTarget(n)}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${target === n ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"}`}>
+                {n}
+              </button>
+            ))}
+            <Input type="number" value={target} onChange={(e) => setTarget(Number(e.target.value) || 0)}
+              className="w-16 h-7 text-xs text-center" />
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={autoFill}>
+            Auto-fill {target}
+          </Button>
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={acceptTopN}>
+            Top {target}
           </Button>
         </div>
       </div>
 
-      <div className="grid gap-4">
+      {/* Progress toward target */}
+      <div className="space-y-1">
+        <div className="flex items-center justify-between text-xs">
+          <span className={`font-semibold tabular-nums ${remaining < 0 ? "text-destructive" : remaining === 0 ? "text-emerald-600" : "text-foreground"}`}>
+            {totalSelected} / {target} selected
+          </span>
+          {remaining > 0 && <span className="text-muted-foreground">{remaining} spots left</span>}
+          {remaining < 0 && <span className="text-destructive font-medium">{Math.abs(remaining)} over capacity</span>}
+          {remaining === 0 && <span className="text-emerald-600 font-medium">Full</span>}
+        </div>
+        <div className="h-2 rounded-full bg-muted overflow-hidden">
+          <div className={`h-full rounded-full transition-all ${remaining < 0 ? "bg-destructive" : remaining === 0 ? "bg-emerald-500" : "bg-primary"}`}
+            style={{ width: `${Math.min(100, (totalSelected / target) * 100)}%` }} />
+        </div>
+      </div>
+
+      {/* Category sliders */}
+      <div className="space-y-2">
         {ATTENDEE_TYPES.map((t) => {
           const items = byType[t.key] || [];
           if (items.length === 0) return null;
           const quota = getQuota(t.key);
-          const currentAccepted = items.filter((a) => a.status === "accepted").length;
 
           return (
-            <Card key={t.key}>
-              <CardContent className="py-4">
-                <div className="flex items-center gap-4">
-                  {/* Category info */}
-                  <div className="flex items-center gap-2 w-32 shrink-0">
-                    <span className="size-3 rounded-full" style={{ backgroundColor: t.color }} />
-                    <span className="text-sm font-medium">{t.label}</span>
-                    <span className="text-xs text-muted-foreground">({items.length})</span>
-                  </div>
-
-                  {/* Slider */}
-                  <div className="flex-1">
-                    <Slider
-                      value={[quota]}
-                      min={0}
-                      max={items.length}
-                      step={1}
-                      onValueChange={([val]) => setQuotas((prev) => ({ ...prev, [t.key]: val }))}
-                    />
-                  </div>
-
-                  {/* Count */}
-                  <div className="flex items-center gap-1 w-20 justify-end shrink-0">
-                    <button onClick={() => setQuotas((p) => ({ ...p, [t.key]: Math.max(0, quota - 1) }))}
-                      className="size-6 rounded flex items-center justify-center text-muted-foreground hover:bg-muted">-</button>
-                    <span className="text-sm font-bold tabular-nums w-8 text-center">{quota}</span>
-                    <button onClick={() => setQuotas((p) => ({ ...p, [t.key]: Math.min(items.length, quota + 1) }))}
-                      className="size-6 rounded flex items-center justify-center text-muted-foreground hover:bg-muted">+</button>
-                  </div>
+            <div key={t.key} className="rounded-lg border p-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="size-2.5 rounded-full shrink-0" style={{ backgroundColor: t.color }} />
+                <span className="text-sm font-medium flex-1">{t.label}</span>
+                <span className="text-xs text-muted-foreground">{items.length} available</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <Slider
+                  value={[quota]}
+                  min={0}
+                  max={items.length}
+                  step={1}
+                  onValueChange={([val]) => setQuotas((prev) => ({ ...prev, [t.key]: val }))}
+                  className="flex-1"
+                />
+                <div className="flex items-center gap-0.5 shrink-0">
+                  <button onClick={() => setQuotas((p) => ({ ...p, [t.key]: Math.max(0, quota - 1) }))}
+                    className="size-7 rounded flex items-center justify-center text-muted-foreground hover:bg-muted text-lg">-</button>
+                  <span className="text-sm font-bold tabular-nums w-8 text-center">{quota}</span>
+                  <button onClick={() => setQuotas((p) => ({ ...p, [t.key]: Math.min(items.length, quota + 1) }))}
+                    className="size-7 rounded flex items-center justify-center text-muted-foreground hover:bg-muted text-lg">+</button>
                 </div>
-
-                {/* Preview of top picks */}
-                {quota > 0 && (
-                  <div className="mt-3 flex flex-wrap gap-1.5">
-                    {items.slice(0, Math.min(quota, 8)).map((a) => (
-                      <span key={a.applicant_id} className="inline-flex items-center gap-1 text-xs bg-muted px-2 py-0.5 rounded-full">
-                        {getPhoto(a) ? (
-                          <img src={getPhoto(a)} alt="" className="size-4 rounded-full object-cover" />
-                        ) : null}
-                        {getName(a)}
-                      </span>
-                    ))}
-                    {quota > 8 && <span className="text-xs text-muted-foreground px-2 py-0.5">+{quota - 8} more</span>}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           );
         })}
       </div>
+
+      {/* Apply */}
+      <Button onClick={handleApply} disabled={applying} className="w-full">
+        {applying ? <Loader2 className="size-4 mr-2 animate-spin" /> : <Check className="size-4 mr-2" />}
+        Accept Top {totalSelected} People
+      </Button>
     </div>
   );
 }
