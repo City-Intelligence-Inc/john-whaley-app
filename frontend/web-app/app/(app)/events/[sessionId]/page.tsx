@@ -635,26 +635,6 @@ export default function EventWorkspacePage() {
             <Button variant="outline" onClick={() => setTab("review")} className="border-border/50">
               <CreditCard className="size-4 mr-2" />Review Guests
             </Button>
-            <Popover open={showLiAtPopover} onOpenChange={setShowLiAtPopover}>
-              <PopoverTrigger asChild>
-                <Button variant="outline" disabled={enriching || total === 0} className="border-border/50">
-                  {enriching ? <Loader2 className="size-4 mr-2 animate-spin" /> : <Linkedin className="size-4 mr-2" />}
-                  Enrich LinkedIn
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-72" align="start">
-                <div className="space-y-3">
-                  <div>
-                    <Label className="text-xs font-medium">li_at Cookie (optional)</Label>
-                    <Input type="password" value={liAtCookie} onChange={(e) => setLiAtCookie(e.target.value)}
-                      placeholder="AQEDAQNh..." className="h-8 text-xs font-mono mt-1" />
-                  </div>
-                  <Button onClick={handleEnrichLinkedIn} disabled={enriching} className="w-full bg-gold text-gold-foreground hover:bg-gold/90" size="sm">
-                    {enriching ? "Enriching..." : "Start Enrichment"}
-                  </Button>
-                </div>
-              </PopoverContent>
-            </Popover>
             <Button variant="outline" disabled={total === 0} onClick={handleExportCSV} className="border-border/50">
               <Download className="size-4 mr-2" />Export
             </Button>

@@ -138,10 +138,12 @@ export function useEventsPage() {
       const q = search.toLowerCase();
       list = list.filter(a => [a.name, a.email, a.company, a.title, a[`linkedin_headline`] as string].filter(Boolean).join(" ").toLowerCase().includes(q));
     }
+    // Sort: pending first, then accepted, then waitlisted, rejected last
+    const statusOrder: Record<string, number> = { pending: 0, accepted: 1, waitlisted: 2, rejected: 3 };
     return list.sort((a, b) => {
-      const sa = a.ai_score ? parseInt(a.ai_score) : 0;
-      const sb = b.ai_score ? parseInt(b.ai_score) : 0;
-      if (sb !== sa) return sb - sa;
+      const sa = statusOrder[a.status] ?? 1;
+      const sb = statusOrder[b.status] ?? 1;
+      if (sa !== sb) return sa - sb;
       return (a.name || "").localeCompare(b.name || "");
     });
   }, [applicants, search]);
