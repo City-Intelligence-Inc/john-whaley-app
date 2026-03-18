@@ -127,6 +127,11 @@ export const api = {
       `/applicants/${id}/investigate`, { method: "POST", body: JSON.stringify({ ...data, prompt: agentId }) }),
   listInvestigationAgents: () =>
     fetchAPI<{ id: string; name: string; description: string }[]>("/applicants/investigation-agents"),
+  rankApplicants: (judgeId: string, sessionId: string, data: { api_key: string; model: string; provider: string }) =>
+    fetchAPI<{ judge: string; judge_name: string; ranked: number; total: number }>(
+      "/applicants/rank", { method: "POST", body: JSON.stringify({ ...data, prompt: judgeId, criteria: [sessionId] }) }),
+  listRankingJudges: () =>
+    fetchAPI<{ id: string; name: string; description: string }[]>("/applicants/ranking-judges"),
   analyzeAll: (data: BulkAnalyzeRequest) =>
     fetchAPI<AnalysisResult>("/applicants/analyze-all", { method: "POST", body: JSON.stringify(data) }),
 

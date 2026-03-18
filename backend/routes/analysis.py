@@ -1,6 +1,7 @@
 """
-AI analysis routes — classification, scoring, and SSE streaming.
+AI analysis routes — classification, ranking, scoring, and SSE streaming.
 
+POST /applicants/rank                  Rank all applicants by a judge lens
 POST /applicants/classify-stream       Classify all applicants (lightweight)
 POST /applicants/analyze-all-stream    Full analysis with scoring + judge panel
 POST /applicants/reallocate            Reallocate based on quotas
@@ -170,6 +171,170 @@ Write a brief summary (3-5 sentences): pool quality, acceptance patterns, recomm
 
 Return ONLY: {{"summary": "<your summary>"}}
 """.strip()
+
+
+# ── Ranking Judges ──
+
+RANKING_JUDGES = {
+    "vc_rank": {
+        "name": "VC Rank",
+        "description": "Ranks by investor quality: fund reputation, seniority, deal-making power, check size, portfolio track record",
+        "prompt": """You are a seasoned LP evaluating venture capitalists for an exclusive AI event.
+
+Rank ALL the people below from #1 (most important VC to have at the event) to #N (least important).
+
+Ranking criteria (in order of importance):
+1. Fund reputation and AUM (tier 1 funds like a16z, Sequoia, Accel > unknown funds)
+2. Seniority and decision-making power (GP/Managing Partner > Associate > Analyst > Scout)
+3. Investment track record (notable portfolio companies, exits)
+4. Relevance to AI/tech (AI-focused fund > generalist > unrelated sector)
+5. Check size capability (can they actually fund startups at this event?)
+
+People who are NOT investors at all should be ranked at the bottom.
+People with no verifiable fund affiliation go below verified investors.""",
+    },
+    "founder_rank": {
+        "name": "Founder Rank",
+        "description": "Ranks by founder quality: traction, funding raised, team, market, previous exits",
+        "prompt": """You are a top-tier VC evaluating founders for an exclusive AI event.
+
+Rank ALL the people below from #1 (strongest founder) to #N (weakest/not a founder).
+
+Ranking criteria (in order of importance):
+1. Traction (revenue, users, growth metrics, product shipped)
+2. Funding raised (Series B+ > Series A > Seed > Pre-seed > Nothing)
+3. Previous exits or successful companies
+4. Team quality (technical co-founders, team size, notable hires)
+5. Market size and relevance to AI
+6. Technical depth (can they actually build what they're claiming?)
+
+People who are NOT founders should be ranked at the bottom.
+Pre-idea, pre-team, pre-revenue solo "founders" rank below funded founders.""",
+    },
+    "engineer_rank": {
+        "name": "Engineer Rank",
+        "description": "Ranks by engineering depth: technical skills, systems built, research published, companies worked at",
+        "prompt": """You are a principal engineer at a top AI lab evaluating technical talent for an exclusive AI event.
+
+Rank ALL the people below from #1 (strongest technical person) to #N (least technical).
+
+Ranking criteria (in order of importance):
+1. Technical depth in AI/ML (published papers, models built, systems deployed)
+2. Company pedigree (FAANG/top AI labs > startups > unknown companies)
+3. Seniority and scope (Staff/Principal > Senior > Mid > Junior)
+4. Hands-on building (actually ships code/models vs manages people)
+5. Open source contributions, patents, research citations
+6. Relevant domain expertise (AI infra, LLMs, robotics, etc.)
+
+Non-technical people (VCs, BizDev, PMs with no eng background) rank at the bottom.""",
+    },
+}
+
+_RANK_PROMPT = """IMPORTANT: You MUST rank every single person. Do NOT skip anyone. Do NOT refuse.
+
+{judge_prompt}
+
+Here are ALL {count} people to rank. Each person has an ID and a summary of their profile:
+
+{profiles}
+
+Return ONLY a JSON array of objects, ordered from rank #1 (best) to #{count} (worst):
+[
+  {{"id": "<applicant_id>", "rank": 1, "reasoning": "<1 sentence why they're ranked here>"}},
+  {{"id": "<applicant_id>", "rank": 2, "reasoning": "<1 sentence>"}},
+  ...
+]
+
+RULES:
+- Every person MUST appear exactly once
+- Ranks must be sequential from 1 to {count}
+- Return ONLY the JSON array, nothing else
+"""
+
+
+@router.post("/rank")
+async def rank_applicants(body: ReviewRequest):
+    """Rank all applicants in a session using a ranking judge."""
+    judge_id = body.prompt  # We pass judge_id via the prompt field
+    judge = RANKING_JUDGES.get(judge_id)
+    if not judge:
+        raise HTTPException(400, f"Unknown judge: {judge_id}. Available: {list(RANKING_JUDGES.keys())}")
+
+    # Get session_id from criteria (hack: we pass it as first criterion)
+    session_id = body.criteria[0] if body.criteria else None
+    if not session_id:
+        raise HTTPException(400, "Pass session_id as first item in criteria array")
+
+    applicants = db.scan_all_applicants(session_id=session_id)
+    if not applicants:
+        raise HTTPException(400, "No applicants to rank")
+
+    # Build compact profile summaries for the LLM
+    profiles_text = ""
+    for i, a in enumerate(applicants):
+        aid = a["applicant_id"]
+        name = get_applicant_name(a)
+        headline = a.get("linkedin_headline") or a.get("title") or ""
+        company = a.get("company") or a.get("linkedin_company") or ""
+        about = (a.get("linkedin_about") or "")[:200]
+        experience = (a.get("linkedin_experience") or "")[:200]
+        education = a.get("linkedin_education") or ""
+        summary = a.get("ai_summary") or ""
+        category = a.get("attendee_type") or ""
+        detail = a.get("attendee_type_detail") or ""
+
+        profiles_text += f"""
+[{aid}] {name}
+Headline: {headline}
+Company: {company}
+Category: {category} ({detail})
+About: {about}
+Experience: {experience}
+Education: {education}
+Summary: {summary}
+---
+"""
+
+    # For large lists (>100), we might need to use a model with large context
+    full_prompt = _RANK_PROMPT.format(
+        judge_prompt=judge["prompt"],
+        count=len(applicants),
+        profiles=profiles_text,
+    )
+
+    try:
+        raw = call_ai(body.provider, body.api_key, body.model, full_prompt, max_tokens=4096)
+        rankings = parse_json_response(raw)
+    except Exception as e:
+        raise HTTPException(502, f"AI ranking failed: {e}")
+
+    # Save rankings to each applicant
+    rank_field = f"rank_{judge_id}"
+    reasoning_field = f"rank_{judge_id}_reasoning"
+    saved = 0
+    for entry in rankings:
+        aid = entry.get("id", "")
+        rank = entry.get("rank", 0)
+        reasoning = entry.get("reasoning", "")
+        if aid:
+            try:
+                db.update_applicant_fields(aid, {rank_field: rank, reasoning_field: reasoning})
+                saved += 1
+            except Exception:
+                pass
+
+    return {
+        "judge": judge_id,
+        "judge_name": judge["name"],
+        "ranked": saved,
+        "total": len(applicants),
+    }
+
+
+@router.get("/ranking-judges")
+def list_ranking_judges():
+    """List available ranking judges."""
+    return [{"id": k, "name": v["name"], "description": v["description"]} for k, v in RANKING_JUDGES.items()]
 
 
 # ── Classification ──
