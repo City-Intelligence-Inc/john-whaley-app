@@ -795,9 +795,9 @@ async def analyze_all_stream(body: BulkAnalyzeRequest):
     if not all_applicants:
         raise HTTPException(status_code=400, detail="No applicants to analyze")
 
-    # Split: only analyze pending applicants; pre-decided ones keep their status
-    applicants = [a for a in all_applicants if a.get("status") == "pending"]
-    pre_decided = [a for a in all_applicants if a.get("status") != "pending"]
+    # Analyze ALL applicants (re-running overwrites previous results)
+    applicants = list(all_applicants)
+    pre_decided: list[dict] = []
 
     # Persist analysis config on the session before LLM runs
     if body.session_id:
@@ -905,7 +905,7 @@ async def analyze_all_stream(body: BulkAnalyzeRequest):
         exclude_ids = auto_accepted_ids | listed_ids
         applicants_refreshed = [
             a for a in db.scan_all_applicants(session_id=body.session_id)
-            if a["applicant_id"] not in exclude_ids and a.get("status") == "pending"
+            if a["applicant_id"] not in exclude_ids
         ]
         scoring_total = len(applicants_refreshed)
         auto_accepted_count = len(auto_accepted_ids)
