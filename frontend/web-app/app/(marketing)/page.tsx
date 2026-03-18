@@ -11,9 +11,7 @@ import {
   Linkedin,
   SlidersHorizontal,
   Shield,
-  Zap,
   ArrowRight,
-  UserCheck,
   Clock,
   Target,
   ListChecks,
@@ -35,7 +33,6 @@ export default async function LandingPage() {
           <nav className="hidden md:flex items-center gap-8 text-sm text-muted-foreground">
             <a href="#features" className="hover:text-foreground transition-colors">Features</a>
             <a href="#how-it-works" className="hover:text-foreground transition-colors">How It Works</a>
-            <a href="#pricing" className="hover:text-foreground transition-colors">Pricing</a>
           </nav>
           <div className="flex items-center gap-3">
             {!isSignedIn ? (
@@ -95,7 +92,7 @@ export default async function LandingPage() {
                 href="/events"
                 className="inline-flex items-center justify-center gap-2 rounded-lg bg-gold px-6 py-3 text-base font-medium text-gold-foreground hover:bg-gold/90 transition-colors"
               >
-                Start Reviewing Free
+                Get Started
                 <ArrowRight className="size-4" />
               </Link>
               <a
@@ -108,15 +105,15 @@ export default async function LandingPage() {
             <div className="mt-12 flex flex-wrap items-center gap-8 text-sm text-muted-foreground">
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="size-4 text-emerald-400" />
-                No credit card required
+                Free to use
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="size-4 text-emerald-400" />
-                Pay per applicant reviewed
+                Bring your own API key
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="size-4 text-emerald-400" />
-                Works with Luma, CSV, and more
+                Works with Luma and CSV
               </div>
             </div>
           </div>
@@ -125,9 +122,9 @@ export default async function LandingPage() {
           <div className="mt-16 md:absolute md:right-6 md:top-32 md:mt-0 md:w-80 space-y-3">
             {[
               { icon: Upload, label: "Import", desc: "CSV, Google Sheets, Luma" },
-              { icon: Brain, label: "Match", desc: "Smart matching algorithms" },
-              { icon: ListChecks, label: "Review", desc: "Intuitive judging interfaces" },
-              { icon: Sparkles, label: "Select", desc: "Clear ranking dashboards" },
+              { icon: Brain, label: "Analyze", desc: "AI categorization & scoring" },
+              { icon: ListChecks, label: "Review", desc: "Accept, reject, waitlist" },
+              { icon: Sparkles, label: "Curate", desc: "Composition sliders & filters" },
             ].map((item) => (
               <div
                 key={item.label}
@@ -138,25 +135,6 @@ export default async function LandingPage() {
                   <div className="font-medium text-sm">{item.label}</div>
                   <div className="text-xs text-muted-foreground">{item.desc}</div>
                 </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Social proof bar */}
-      <section className="border-y border-border/50 bg-secondary/50">
-        <div className="mx-auto max-w-6xl px-6 py-8">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
-            {[
-              { value: "10,000+", label: "Applicants Reviewed" },
-              { value: "85%", label: "Time Saved on Curation" },
-              { value: "50+", label: "Events Powered" },
-              { value: "3 min", label: "Avg. Review Time per 100" },
-            ].map((stat) => (
-              <div key={stat.label}>
-                <div className="text-3xl font-bold text-gold">{stat.value}</div>
-                <div className="mt-1 text-sm text-muted-foreground">{stat.label}</div>
               </div>
             ))}
           </div>
@@ -193,11 +171,11 @@ export default async function LandingPage() {
             </h3>
             <div className="mt-6 space-y-4">
               {[
-                "AI enriches every profile with real data — photos, titles, company, social links",
+                "AI enriches profiles with LinkedIn data — photos, titles, company info",
                 "Smart categorization distinguishes real investors from dabblers",
                 "VC hierarchy taxonomy: Partner > Principal > Associate > Analyst",
                 "Post-analysis sliders let you adjust composition in real-time",
-                "Multiplayer mode: your whole team reviews and tags together",
+                "Whitelist and blacklist carry across events",
               ].map((solution) => (
                 <div key={solution} className="flex items-start gap-3">
                   <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-gold" />
@@ -222,9 +200,9 @@ export default async function LandingPage() {
           </div>
           <div className="mt-16 grid md:grid-cols-3 gap-8">
             {[
-              { icon: Upload, step: "Step 1", title: "Upload & Enrich", color: "text-blue-400 bg-blue-400/10", desc: "Upload a CSV from Luma or any platform. AI automatically enriches each applicant with LinkedIn data, photos, company info, and social profiles." },
+              { icon: Upload, step: "Step 1", title: "Upload & Enrich", color: "text-blue-400 bg-blue-400/10", desc: "Upload a CSV from Luma or import via Google Sheets. AI enriches each applicant with LinkedIn data, photos, and company info." },
               { icon: Brain, step: "Step 2", title: "AI Analysis & Categorization", color: "text-purple-400 bg-purple-400/10", desc: "Set your event capacity and selection criteria. AI categorizes applicants — distinguishing professional investors from hobbyists, ranking by relevance." },
-              { icon: SlidersHorizontal, step: "Step 3", title: "Tune & Finalize", color: "text-gold bg-gold/10", desc: "Use real-time sliders to adjust the mix. See accept/reject counts update instantly. Tag, comment, and collaborate with your team. Export your final list." },
+              { icon: SlidersHorizontal, step: "Step 3", title: "Tune & Finalize", color: "text-gold bg-gold/10", desc: "Use real-time sliders to adjust the mix. Accept, reject, or waitlist individually or in bulk. Export your final list." },
             ].map((item) => (
               <div key={item.step} className="rounded-2xl border border-border bg-card p-8">
                 <div className={`flex size-12 items-center justify-center rounded-xl ${item.color}`}>
@@ -251,15 +229,12 @@ export default async function LandingPage() {
         </div>
         <div className="mt-16 grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {[
-            { icon: Linkedin, title: "Profile Enrichment", description: "Auto-scrape LinkedIn, GitHub, and Instagram to fill in missing data. Add photos, bios, and company info automatically." },
+            { icon: Linkedin, title: "LinkedIn Enrichment", description: "Enrich applicant profiles with LinkedIn data — photos, headlines, experience, and company info." },
             { icon: Target, title: "Smart Categorization", description: "AI distinguishes real VCs from angel dabblers. Understands title hierarchy — Partner vs. Associate vs. Analyst." },
             { icon: SlidersHorizontal, title: "Real-Time Composition Sliders", description: "Adjust your event mix after analysis. Drag sliders to see how changing thresholds affects your accept/reject counts." },
-            { icon: Users, title: "Multiplayer Collaboration", description: "Multiple organizers review the same event. Tag applicants, leave comments, and make team decisions together." },
-            { icon: BarChart3, title: "Capacity Management", description: "Set separate limits for virtual and in-person. Different qualification criteria for each track." },
-            { icon: Shield, title: "Whitelist & Blacklist", description: "Auto-accept VIPs and auto-reject known bad actors. Your preferences carry across events." },
-            { icon: Upload, title: "CSV & Luma Integration", description: "Import from Luma, Eventbrite, or any CSV. Export your curated list right back." },
-            { icon: UserCheck, title: "Manual Override & Learning", description: "Correct AI decisions and it learns your preferences. The more you use it, the smarter it gets." },
-            { icon: Zap, title: "Outcome-Based Pricing", description: "Pay per applicant reviewed — not monthly seats. Only pay for what you use." },
+            { icon: Users, title: "AI Judge Panel", description: "Configure multiple AI judges with different specialties and knowledgebases. Each judge scores independently." },
+            { icon: BarChart3, title: "Capacity Management", description: "Set separate limits for virtual and in-person attendees. Track how many spots remain as you accept applicants." },
+            { icon: Shield, title: "Whitelist & Blacklist", description: "Auto-accept VIPs and auto-reject known bad actors. Per-event and global lists that carry across events." },
           ].map((feature) => (
             <div key={feature.title} className="group rounded-xl border border-border bg-card p-6 hover:border-gold/30 transition-all">
               <feature.icon className="size-8 text-muted-foreground group-hover:text-gold transition-colors" />
@@ -270,92 +245,6 @@ export default async function LandingPage() {
         </div>
       </section>
 
-      {/* Pricing */}
-      <section id="pricing" className="border-y border-border/50 bg-secondary/30">
-        <div className="mx-auto max-w-6xl px-6 py-20 md:py-28">
-          <div className="text-center">
-            <h2 className="text-3xl font-bold tracking-tight">
-              Simple, outcome-based pricing
-            </h2>
-            <p className="mt-4 text-muted-foreground max-w-xl mx-auto">
-              No monthly subscriptions. No per-seat fees. Pay only for the applicants you review.
-            </p>
-          </div>
-          <div className="mt-16 grid md:grid-cols-3 gap-8 max-w-4xl mx-auto">
-            {/* Free */}
-            <div className="rounded-2xl border border-border bg-card p-8">
-              <h3 className="text-lg font-semibold">Starter</h3>
-              <div className="mt-4">
-                <span className="text-4xl font-bold">Free</span>
-              </div>
-              <p className="mt-2 text-sm text-muted-foreground">For trying it out</p>
-              <ul className="mt-8 space-y-3 text-sm text-muted-foreground">
-                {["Up to 50 applicants", "Basic AI enrichment", "CSV upload & export", "Single user"].map((item) => (
-                  <li key={item} className="flex items-center gap-2">
-                    <CheckCircle2 className="size-4 text-emerald-400 shrink-0" />
-                    {item}
-                  </li>
-                ))}
-              </ul>
-              <Link
-                href="/events"
-                className="mt-8 block w-full rounded-lg border border-border py-2.5 text-center text-sm font-medium hover:bg-secondary transition-colors"
-              >
-                Get Started
-              </Link>
-            </div>
-            {/* Pro */}
-            <div className="rounded-2xl border-2 border-gold bg-card p-8 relative">
-              <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-gold px-3 py-0.5 text-xs font-medium text-gold-foreground">
-                Most Popular
-              </div>
-              <h3 className="text-lg font-semibold">Pro</h3>
-              <div className="mt-4">
-                <span className="text-4xl font-bold">$0.10</span>
-                <span className="text-muted-foreground text-sm"> / applicant</span>
-              </div>
-              <p className="mt-2 text-sm text-muted-foreground">For regular event organizers</p>
-              <ul className="mt-8 space-y-3 text-sm text-muted-foreground">
-                {["Unlimited applicants", "Full AI enrichment & scraping", "Composition sliders", "Luma integration", "Team collaboration (up to 5)", "Whitelist & blacklist"].map((item) => (
-                  <li key={item} className="flex items-center gap-2">
-                    <CheckCircle2 className="size-4 text-gold shrink-0" />
-                    {item}
-                  </li>
-                ))}
-              </ul>
-              <Link
-                href="/events"
-                className="mt-8 block w-full rounded-lg bg-gold py-2.5 text-center text-sm font-medium text-gold-foreground hover:bg-gold/90 transition-colors"
-              >
-                Start Free Trial
-              </Link>
-            </div>
-            {/* Enterprise */}
-            <div className="rounded-2xl border border-border bg-card p-8">
-              <h3 className="text-lg font-semibold">Enterprise</h3>
-              <div className="mt-4">
-                <span className="text-4xl font-bold">Custom</span>
-              </div>
-              <p className="mt-2 text-sm text-muted-foreground">For large-scale operations</p>
-              <ul className="mt-8 space-y-3 text-sm text-muted-foreground">
-                {["Everything in Pro", "Unlimited team members", "Custom AI training", "API access", "Dedicated support", "SSO & audit logs"].map((item) => (
-                  <li key={item} className="flex items-center gap-2">
-                    <CheckCircle2 className="size-4 text-emerald-400 shrink-0" />
-                    {item}
-                  </li>
-                ))}
-              </ul>
-              <a
-                href="mailto:hello@aiselect.app"
-                className="mt-8 block w-full rounded-lg border border-border py-2.5 text-center text-sm font-medium hover:bg-secondary transition-colors"
-              >
-                Contact Sales
-              </a>
-            </div>
-          </div>
-        </div>
-      </section>
-
       {/* CTA */}
       <section className="mx-auto max-w-6xl px-6 py-20 md:py-28">
         <div className="rounded-2xl border border-gold/20 bg-gradient-to-br from-gold/10 via-card to-card p-12 md:p-16 text-center">
@@ -363,15 +252,15 @@ export default async function LandingPage() {
             Ready to curate your next event?
           </h2>
           <p className="mt-4 text-lg text-muted-foreground max-w-xl mx-auto">
-            Join event organizers who save hours on applicant review and build
-            better guest lists with AI.
+            Stop spending hours on applicant review. Let AI handle the screening
+            so you can focus on building an incredible guest list.
           </p>
           <div className="mt-10 flex flex-col sm:flex-row gap-4 justify-center">
             <Link
               href="/events"
               className="inline-flex items-center justify-center gap-2 rounded-lg bg-gold px-6 py-3 text-base font-medium text-gold-foreground hover:bg-gold/90 transition-colors"
             >
-              Start Reviewing Free
+              Get Started
               <ArrowRight className="size-4" />
             </Link>
           </div>
@@ -398,11 +287,10 @@ export default async function LandingPage() {
             </div>
             <div className="flex items-center gap-8 text-sm text-muted-foreground">
               <a href="#features" className="hover:text-foreground transition-colors">Features</a>
-              <a href="#pricing" className="hover:text-foreground transition-colors">Pricing</a>
               <a href="#how-it-works" className="hover:text-foreground transition-colors">How It Works</a>
             </div>
             <div className="text-sm text-muted-foreground">
-              Built by City Intelligence
+              Built by Stardrop
             </div>
           </div>
         </div>
