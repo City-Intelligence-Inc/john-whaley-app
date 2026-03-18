@@ -91,10 +91,10 @@ export default function EventsPage() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8">
-      <div className="flex items-center justify-between">
+    <div className="max-w-4xl mx-auto space-y-6 md:space-y-8">
+      <div className="flex items-center justify-between gap-2">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Events</h1>
+          <h1 className="text-xl md:text-2xl font-bold tracking-tight">Events</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Select an event to review its guest list.
           </p>

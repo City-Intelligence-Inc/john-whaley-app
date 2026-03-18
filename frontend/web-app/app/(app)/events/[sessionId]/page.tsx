@@ -265,19 +265,20 @@ export default function EventWorkspacePage() {
   if (error) return <div className="flex flex-col items-center justify-center py-20"><p className="text-sm text-destructive mb-4">{error}</p><Button variant="outline" onClick={() => refreshAll()}>Retry</Button></div>;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 md:space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">{session?.name || "Event"}</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">{total} guests</p>
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <h1 className="text-xl md:text-2xl font-bold tracking-tight truncate">{session?.name || "Event"}</h1>
+          <p className="text-xs md:text-sm text-muted-foreground mt-0.5">{total} guests</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={handleRankAll} disabled={ranking || total === 0}>
-            {ranking ? <Loader2 className="size-4 mr-2 animate-spin" /> : <Brain className="size-4 mr-2" />}
-            {ranking ? "Ranking..." : "Rank All"}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <Button variant="outline" size="sm" className="h-8 text-xs" onClick={handleRankAll} disabled={ranking || total === 0}>
+            {ranking ? <Loader2 className="size-3.5 mr-1.5 animate-spin" /> : <Brain className="size-3.5 mr-1.5" />}
+            <span className="hidden sm:inline">{ranking ? "Ranking..." : "Rank All"}</span>
+            <span className="sm:hidden">{ranking ? "..." : "Rank"}</span>
           </Button>
-          <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" onClick={handleDelete}>
+          <Button variant="ghost" size="icon" className="size-8 text-muted-foreground hover:text-destructive" onClick={handleDelete}>
             <Trash2 className="size-4" />
           </Button>
         </div>
@@ -307,8 +308,8 @@ export default function EventWorkspacePage() {
           </div>
 
           {/* Legend + clear */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4 text-sm">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2 md:gap-4 text-xs md:text-sm flex-wrap">
               {[
                 { label: "Accepted", value: accepted, color: "bg-emerald-500", filter: "accepted" },
                 { label: "Waitlisted", value: waitlisted, color: "bg-amber-500", filter: "waitlisted" },
@@ -749,7 +750,7 @@ function CardReview({
   const location = current.location || (current.linkedin_location as string) || "";
 
   return (
-    <div className="flex flex-col items-center gap-4 max-w-lg mx-auto">
+    <div className="flex flex-col items-center gap-4 w-full max-w-lg mx-auto">
       {/* Progress */}
       <div className="w-full flex items-center gap-3 text-xs text-muted-foreground">
         <span className="tabular-nums font-medium">{index + 1} / {applicants.length}</span>
