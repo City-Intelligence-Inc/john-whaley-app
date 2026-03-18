@@ -128,12 +128,14 @@ export function CSVUploader({ onUploadSuccess, sessionId }: {
       ) : (
         <div className="rounded-xl border border-border/50 bg-card/50 overflow-hidden">
           {/* File header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-border/50">
-            <div className="flex items-center gap-2">
-              <FileText className="size-4 text-gold" />
-              <span className="text-sm font-medium">{file.name}</span>
+          <div className="flex items-center justify-between px-4 py-3 border-b border-border/50 gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <FileText className="size-4 text-gold shrink-0" />
+              <span className="text-sm font-medium truncate">{file.name}</span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
               <span className="text-xs text-muted-foreground">
-                {totalRows} {totalRows === 1 ? "row" : "rows"}
+                {totalRows} rows
               </span>
             </div>
             <button onClick={() => { setFile(null); setPreview([]); }}
@@ -144,12 +146,12 @@ export function CSVUploader({ onUploadSuccess, sessionId }: {
 
           {/* Clean preview - only key columns */}
           {preview.length > 0 && visibleCols.length > 0 && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+            <div className="overflow-hidden">
+              <table className="w-full text-sm table-fixed">
                 <thead>
                   <tr className="border-b border-border/50 bg-muted/30">
                     {visibleCols.map((col) => (
-                      <th key={col} className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">
+                      <th key={col} className="px-3 py-2 text-left text-xs font-medium text-muted-foreground truncate">
                         {COL_LABELS[col] || col}
                       </th>
                     ))}
@@ -159,7 +161,7 @@ export function CSVUploader({ onUploadSuccess, sessionId }: {
                   {preview.map((row, i) => (
                     <tr key={i} className="border-b border-border/30 last:border-0">
                       {visibleCols.map((col) => (
-                        <td key={col} className="px-4 py-2 text-sm truncate max-w-[200px]">
+                        <td key={col} className="px-3 py-2 text-sm truncate">
                           {col === "linkedin_url" && row[col] ? (
                             <span className="text-blue-500 text-xs">{row[col].replace(/https?:\/\/(www\.)?linkedin\.com\/in\//, "")}</span>
                           ) : (
@@ -172,7 +174,7 @@ export function CSVUploader({ onUploadSuccess, sessionId }: {
                 </tbody>
               </table>
               {totalRows > 5 && (
-                <p className="px-4 py-2 text-xs text-muted-foreground border-t border-border/30">
+                <p className="px-3 py-2 text-xs text-muted-foreground border-t border-border/30">
                   + {totalRows - 5} more rows
                 </p>
               )}
