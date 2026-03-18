@@ -674,6 +674,9 @@ async def _classify_one(applicant: dict, body: BulkAnalyzeRequest, semaphore: as
                 fields["verification_notes"] = result["verification_notes"]
             if result.get("verification_flags"):
                 fields["verification_flags"] = result["verification_flags"]
+            # Store one-line summary
+            if result.get("summary"):
+                fields["ai_summary"] = result["summary"]
 
             db.update_applicant_fields(applicant_id, fields)
 
@@ -792,6 +795,45 @@ def _build_pool_summary(type_counts: dict[str, int], total: int) -> str:
         pct = round(count / total * 100) if total > 0 else 0
         lines.append(f"- {label}: {count} ({pct}%)")
     return "\n".join(lines)
+
+
+@router.post("/classify-stream")
+async def classify_stream(body: BulkAnalyzeRequest):
+    """Lightweight classification-only pass — no scoring or judging. Classifies all
+    applicants that don't already have an attendee_type and generates a one-line summary."""
+    all_applicants = db.scan_all_applicants(session_id=body.session_id)
+    if not all_applicants:
+        raise HTTPException(status_code=400, detail="No applicants to classify")
+
+    # Only classify those without a type yet
+    to_classify = [a for a in all_applicants if not a.get("attendee_type")]
+    already = len(all_applicants) - len(to_classify)
+
+    async def event_stream():
+        total = len(to_classify)
+        semaphore = asyncio.Semaphore(10)
+
+        yield f"event: start\ndata: {json.dumps({'total': total, 'already_classified': already})}\n\n"
+
+        if total == 0:
+            yield f"event: complete\ndata: {json.dumps({'completed': 0, 'total': 0, 'errors': 0})}\n\n"
+            return
+
+        completed, errors = 0, 0
+        tasks = {asyncio.ensure_future(_classify_one(a, body, semaphore)): a for a in to_classify}
+
+        for coro in asyncio.as_completed(tasks.keys()):
+            result = await coro
+            completed += 1
+            if "error" in result:
+                errors += 1
+                yield f"event: classify_error\ndata: {json.dumps({**result, 'completed': completed, 'total': total})}\n\n"
+            else:
+                yield f"event: classify\ndata: {json.dumps({**result, 'completed': completed, 'total': total})}\n\n"
+
+        yield f"event: complete\ndata: {json.dumps({'completed': completed, 'total': total, 'errors': errors})}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @router.post("/analyze-all-stream")

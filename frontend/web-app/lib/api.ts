@@ -153,6 +153,25 @@ export const api = {
     });
   },
 
+  // Classify-only stream (lightweight, no scoring)
+  classifyStream: async (data: { api_key: string; model: string; provider: string; session_id: string }, callbacks: { onStart?: (d: { total: number; already_classified: number }) => void; onClassify?: (d: Record<string, unknown>) => void; onComplete?: (d: { completed: number; total: number; errors: number }) => void; onError?: (d: Record<string, unknown>) => void }) => {
+    const authHeaders = await getAuthHeaders();
+    const res = await fetch(`${API_URL}/applicants/classify-stream`, {
+      method: "POST", headers: { "Content-Type": "application/json", ...authHeaders },
+      body: JSON.stringify({ ...data, prompt: "", criteria: [] }),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(error.detail || "Classify request failed");
+    }
+    await readSSEStream(res, (eventType, d) => {
+      if (eventType === "start") callbacks.onStart?.(d as { total: number; already_classified: number });
+      else if (eventType === "classify") callbacks.onClassify?.(d as Record<string, unknown>);
+      else if (eventType === "classify_error") callbacks.onError?.(d as Record<string, unknown>);
+      else if (eventType === "complete") callbacks.onComplete?.(d as { completed: number; total: number; errors: number });
+    });
+  },
+
   // Enrich-only stream (classification, no scoring)
   enrichStream: async (data: { api_key: string; model: string; provider: string; prompt?: string; session_id?: string }, callbacks: AnalyzeStreamCallbacks) => {
     const authHeaders = await getAuthHeaders();

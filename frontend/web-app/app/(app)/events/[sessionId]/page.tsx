@@ -650,7 +650,30 @@ export default function EventWorkspacePage() {
     toast.success(`Imported ${_count} guests`);
     await refreshAll();
     setShowImportDialog(false);
-  }, [refreshAll]);
+
+    // Auto-classify in background if API key is available
+    const apiKey = typeof window !== "undefined" ? localStorage.getItem("ai_api_key") || "" : "";
+    const provider = typeof window !== "undefined" ? localStorage.getItem("ai_provider") || "anthropic" : "anthropic";
+    const model = typeof window !== "undefined" ? localStorage.getItem("ai_model") || "claude-sonnet-4-20250514" : "claude-sonnet-4-20250514";
+    if (apiKey) {
+      const classifyToast = toast.loading("Classifying guests...");
+      try {
+        await api.classifyStream(
+          { api_key: apiKey, model, provider, session_id: sessionId },
+          {
+            onStart: (d) => toast.loading(`Classifying ${d.total} guests...`, { id: classifyToast }),
+            onClassify: (d) => toast.loading(`[${d.completed}/${d.total}] ${d.name || "..."}`, { id: classifyToast }),
+            onComplete: (d) => {
+              toast.success(`Classified ${d.completed} guests (${d.errors} errors)`, { id: classifyToast });
+              refreshApplicants();
+            },
+          }
+        );
+      } catch {
+        toast.dismiss(classifyToast);
+      }
+    }
+  }, [refreshAll, sessionId, refreshApplicants]);
 
   const handleEnrichLinkedIn = useCallback(async () => {
     if (liAtCookie.trim()) localStorage.setItem("li_at_cookie", liAtCookie);
@@ -887,17 +910,17 @@ export default function EventWorkspacePage() {
                         </div>
                       )}
 
-                      {/* AI summary — show linkedin_summary or condensed reasoning */}
-                      {(a[`linkedin_summary`] || a.ai_reasoning) && (
+                      {/* AI summary */}
+                      {(a[`ai_summary`] || a[`linkedin_summary`] || a.ai_reasoning) && (
                         <div className="px-4 pb-2">
                           <div className="rounded-lg bg-gold/5 border border-gold/10 px-2.5 py-1.5">
                             <p className="text-[11px] text-muted-foreground line-clamp-2 flex items-start gap-1.5">
                               <Sparkles className="size-3 mt-0.5 shrink-0 text-gold" />
-                              {(a[`linkedin_summary`] as string) || (
+                              {(a[`ai_summary`] as string) || (a[`linkedin_summary`] as string) || (
                                 a.ai_reasoning!.includes(" | ")
                                   ? (() => {
                                       const parts = a.ai_reasoning!.split(" | ");
-                                      const accepts = parts.filter((p) => p.includes("[ACCEPT]")).length;
+                                      const accepts = parts.filter((p: string) => p.includes("[ACCEPT]")).length;
                                       const firstReason = parts[0]?.replace(/^.*?\]:\s*/, "") || "";
                                       return `${accepts}/${parts.length} judges accepted. ${firstReason}`;
                                     })()
