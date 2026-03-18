@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { auth } from "@clerk/nextjs/server";
-import { UserButton } from "@clerk/nextjs";
+
+
 import {
   Users,
   Brain,
@@ -17,9 +17,9 @@ import {
   ListChecks,
 } from "lucide-react";
 
-export default async function LandingPage() {
-  const { userId } = await auth();
-  const isSignedIn = !!userId;
+export default function LandingPage() {
+  const userId = null;
+  const isSignedIn = false;
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -58,7 +58,6 @@ export default async function LandingPage() {
                 >
                   Open Selecta
                 </Link>
-                <UserButton />
               </>
             )}
           </div>

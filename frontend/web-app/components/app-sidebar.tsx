@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { UserButton } from "@clerk/nextjs";
 import {
   CalendarDays,
   Users,
@@ -76,19 +75,7 @@ export function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <div className="flex items-center gap-2 px-2 py-1.5">
-              <UserButton
-                appearance={{
-                  elements: { avatarBox: "size-7" },
-                }}
-              />
-            </div>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarFooter>
+      <SidebarFooter />
     </Sidebar>
   );
 }
