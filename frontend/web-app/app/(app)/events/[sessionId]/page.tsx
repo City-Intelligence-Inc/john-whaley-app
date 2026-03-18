@@ -30,6 +30,8 @@ import {
   Mail,
   LayoutGrid,
   TableIcon,
+  ShieldBan,
+  AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -167,6 +169,26 @@ export default function EventWorkspacePage() {
     }
   }, [applicants, total, refreshAll]);
 
+  const handleBlacklist = useCallback(async (applicant: Applicant) => {
+    const email = applicant.email;
+    if (!email) { toast.error("No email to blacklist"); return; }
+    try {
+      // Add to global blacklist
+      const current = await api.getBlacklist();
+      const emails = [...new Set([...(current.emails || []), email.toLowerCase()])];
+      await api.updateBlacklist(emails);
+      // Delete the applicant from this event
+      await api.deleteApplicant(applicant.applicant_id);
+      toast.success(`${getName(applicant)} blacklisted and removed`);
+      await refreshAll();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to blacklist");
+    }
+  }, [refreshAll]);
+
+  const VENUE_CAPACITY = 200;
+  const overCapacity = accepted > VENUE_CAPACITY ? accepted - VENUE_CAPACITY : 0;
+
   const handleExportAll = useCallback(() => {
     if (!applicants.length) return;
     const skip = new Set(["applicant_id", "session_id"]);
@@ -283,13 +305,24 @@ export default function EventWorkspacePage() {
                 </button>
               ))}
             </div>
-            {(accepted + rejected + waitlisted > 0) && (
-              <Button variant="ghost" size="sm" className="text-xs text-muted-foreground h-7"
-                onClick={handleClearAll} disabled={clearing}>
-                {clearing ? <Loader2 className="size-3 mr-1.5 animate-spin" /> : <X className="size-3 mr-1.5" />}
-                Clear All Statuses
-              </Button>
-            )}
+            <div className="flex items-center gap-2 ml-auto">
+              {/* Capacity indicator */}
+              <span className={`text-xs tabular-nums font-medium ${overCapacity > 0 ? "text-destructive" : "text-muted-foreground"}`}>
+                {accepted} / {VENUE_CAPACITY}
+                {overCapacity > 0 && (
+                  <span className="inline-flex items-center gap-1 ml-1">
+                    <AlertTriangle className="size-3" />+{overCapacity} over
+                  </span>
+                )}
+              </span>
+              {(accepted + rejected + waitlisted > 0) && (
+                <Button variant="ghost" size="sm" className="text-xs text-muted-foreground h-7"
+                  onClick={handleClearAll} disabled={clearing}>
+                  {clearing ? <Loader2 className="size-3 mr-1.5 animate-spin" /> : <X className="size-3 mr-1.5" />}
+                  Clear All
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -346,29 +379,31 @@ export default function EventWorkspacePage() {
               index={cardIndex}
               onIndexChange={setCardIndex}
               onStatusChange={handleStatusChange}
+              onBlacklist={handleBlacklist}
             />
           ) : (
-            <div className="rounded-lg border">
+            <div className="rounded-lg border overflow-hidden">
+              <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-[280px]">
+                    <TableHead className="w-[260px] min-w-[200px]">
                       <button onClick={() => toggleSort("name")} className="flex items-center gap-1 hover:text-foreground">
                         Guest <ArrowUpDown className="size-3" />
                       </button>
                     </TableHead>
-                    <TableHead>
+                    <TableHead className="w-[200px] min-w-[160px]">
                       <button onClick={() => toggleSort("type")} className="flex items-center gap-1 hover:text-foreground">
                         Category <ArrowUpDown className="size-3" />
                       </button>
                     </TableHead>
-                    <TableHead className="hidden lg:table-cell">AI Summary</TableHead>
-                    <TableHead>
+                    <TableHead className="w-[300px] min-w-[200px]">AI Summary</TableHead>
+                    <TableHead className="w-[100px] min-w-[90px]">
                       <button onClick={() => toggleSort("status")} className="flex items-center gap-1 hover:text-foreground">
                         Status <ArrowUpDown className="size-3" />
                       </button>
                     </TableHead>
-                    <TableHead className="w-[140px] text-right">Actions</TableHead>
+                    <TableHead className="w-[120px] min-w-[100px] text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -470,6 +505,13 @@ export default function EventWorkspacePage() {
                             >
                               <XCircle className="size-4" />
                             </button>
+                            <button
+                              onClick={() => handleBlacklist(a)}
+                              className="size-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-red-50 transition-colors"
+                              title="Blacklist & remove"
+                            >
+                              <ShieldBan className="size-4" />
+                            </button>
                           </div>
                         </TableCell>
                       </TableRow>
@@ -477,6 +519,7 @@ export default function EventWorkspacePage() {
                   })}
                 </TableBody>
               </Table>
+              </div>
             </div>
           )}
         </TabsContent>
@@ -610,11 +653,13 @@ function CardReview({
   index,
   onIndexChange,
   onStatusChange,
+  onBlacklist,
 }: {
   applicants: Applicant[];
   index: number;
   onIndexChange: (i: number) => void;
   onStatusChange: (id: string, status: string) => void;
+  onBlacklist: (a: Applicant) => void;
 }) {
   const current = applicants[index];
 
@@ -762,6 +807,10 @@ function CardReview({
           <Button size="sm" variant={current.status === "rejected" ? "destructive" : "outline"} className="flex-1"
             onClick={() => onStatusChange(current.applicant_id, "rejected")}>
             <XCircle className="size-4 mr-1.5" />Reject
+          </Button>
+          <Button size="icon" variant="ghost" className="shrink-0 text-muted-foreground hover:text-destructive"
+            onClick={() => onBlacklist(current)} title="Blacklist & remove">
+            <ShieldBan className="size-4" />
           </Button>
         </div>
       </Card>
