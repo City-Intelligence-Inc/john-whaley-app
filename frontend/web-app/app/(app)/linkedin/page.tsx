@@ -195,25 +195,22 @@ export default function LinkedInPage() {
       </div>
 
       {/* Table */}
-      <div className="rounded-lg border overflow-x-auto">
-        <Table>
+      <div className="rounded-lg border">
+        <Table className="table-fixed w-full">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[200px] sticky left-0 bg-background z-10">Profile</TableHead>
-              <TableHead className="min-w-[200px]">Headline</TableHead>
-              <TableHead className="min-w-[120px]">Company</TableHead>
-              <TableHead className="min-w-[140px]">Location</TableHead>
-              <TableHead className="min-w-[200px]">Experience</TableHead>
-              <TableHead className="min-w-[160px]">Education</TableHead>
-              <TableHead className="min-w-[200px]">About</TableHead>
-              <TableHead className="min-w-[200px]">AI Summary</TableHead>
-              <TableHead className="w-[50px]"></TableHead>
+              <TableHead className="w-[25%]">Profile</TableHead>
+              <TableHead className="w-[30%]">Headline</TableHead>
+              <TableHead className="w-[15%] hidden md:table-cell">Company</TableHead>
+              <TableHead className="w-[15%] hidden lg:table-cell">Location</TableHead>
+              <TableHead className="hidden xl:table-cell">Summary</TableHead>
+              <TableHead className="w-10"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {filtered.map((p) => (
               <TableRow key={p.url}>
-                <TableCell className="sticky left-0 bg-background z-10">
+                <TableCell>
                   <div className="flex items-center gap-3">
                     {p.photo_url ? (
                       <img src={p.photo_url} alt="" className="size-8 rounded-full object-cover shrink-0" />
@@ -222,33 +219,25 @@ export default function LinkedInPage() {
                         {(p.name || "?").charAt(0).toUpperCase()}
                       </div>
                     )}
-                    <p className="font-medium text-sm truncate max-w-[140px]">{p.name || "Unknown"}</p>
+                    <p className="font-medium text-sm truncate">{p.name || "Unknown"}</p>
                   </div>
                 </TableCell>
                 <TableCell>
-                  <p className="text-sm text-muted-foreground line-clamp-2">{p.headline || "—"}</p>
+                  <p className="text-sm text-muted-foreground truncate">{p.headline || "—"}</p>
                 </TableCell>
-                <TableCell>
+                <TableCell className="hidden md:table-cell">
                   <p className="text-sm text-muted-foreground truncate">{p.company || "—"}</p>
                 </TableCell>
-                <TableCell>
+                <TableCell className="hidden lg:table-cell">
                   <p className="text-sm text-muted-foreground truncate">{p.location || "—"}</p>
                 </TableCell>
-                <TableCell>
-                  <p className="text-xs text-muted-foreground line-clamp-2">{p.experience ? p.experience.split("\n")[0] : "—"}</p>
-                </TableCell>
-                <TableCell>
-                  <p className="text-xs text-muted-foreground line-clamp-2">{p.education ? p.education.split("\n")[0] : "—"}</p>
-                </TableCell>
-                <TableCell>
-                  <p className="text-xs text-muted-foreground line-clamp-2">{p.about ? p.about.slice(0, 120) : "—"}</p>
-                </TableCell>
-                <TableCell>
+                <TableCell className="hidden xl:table-cell">
                   {(p as Record<string, unknown>).ai_summary ? (
-                    <p className="text-xs text-muted-foreground line-clamp-3 flex items-start gap-1">
-                      <Sparkles className="size-3 mt-0.5 shrink-0 text-gold" />
+                    <p className="text-xs text-muted-foreground truncate">
                       {String((p as Record<string, unknown>).ai_summary)}
                     </p>
+                  ) : p.about ? (
+                    <p className="text-xs text-muted-foreground truncate">{p.about.slice(0, 80)}</p>
                   ) : (
                     <span className="text-xs text-muted-foreground/30">—</span>
                   )}

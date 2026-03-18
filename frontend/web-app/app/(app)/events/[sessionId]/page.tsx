@@ -404,29 +404,28 @@ export default function EventWorkspacePage() {
               onBlacklist={handleBlacklist}
             />
           ) : (
-            <div className="rounded-lg border overflow-hidden">
-              <div className="overflow-x-auto">
-              <Table>
+            <div className="rounded-lg border">
+              <Table className="table-fixed w-full">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-[50px] min-w-[50px]">
+                    <TableHead className="w-10">
                       <button onClick={() => toggleSort("score")} className="flex items-center gap-1 hover:text-foreground">
-                        # <ArrowUpDown className="size-3" />
+                        #
                       </button>
                     </TableHead>
-                    <TableHead className="w-[240px] min-w-[180px]">
+                    <TableHead className="w-[30%]">
                       <button onClick={() => toggleSort("name")} className="flex items-center gap-1 hover:text-foreground">
                         Guest <ArrowUpDown className="size-3" />
                       </button>
                     </TableHead>
-                    <TableHead className="w-[160px] min-w-[120px]">
+                    <TableHead className="w-[15%] hidden md:table-cell">
                       <button onClick={() => toggleSort("type")} className="flex items-center gap-1 hover:text-foreground">
-                        Category <ArrowUpDown className="size-3" />
+                        Category
                       </button>
                     </TableHead>
-                    <TableHead className="w-[60px] min-w-[50px]">Score</TableHead>
-                    <TableHead className="w-[280px] min-w-[180px]">Summary</TableHead>
-                    <TableHead className="w-[100px] min-w-[90px]">
+                    <TableHead className="w-10 hidden lg:table-cell">Score</TableHead>
+                    <TableHead className="hidden xl:table-cell">Summary</TableHead>
+                    <TableHead className="w-[90px]">
                       <button onClick={() => toggleSort("status")} className="flex items-center gap-1 hover:text-foreground">
                         Status <ArrowUpDown className="size-3" />
                       </button>
@@ -470,7 +469,7 @@ export default function EventWorkspacePage() {
                             </div>
                           </div>
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="hidden md:table-cell">
                           {a.attendee_type && (
                             <Badge
                               variant="outline"
@@ -485,18 +484,18 @@ export default function EventWorkspacePage() {
                             </Badge>
                           )}
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="hidden lg:table-cell">
                           {rank ? (
                             <span className="text-xs font-semibold tabular-nums">{rank.score}</span>
                           ) : (
                             <span className="text-xs text-muted-foreground/30">—</span>
                           )}
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="hidden xl:table-cell">
                           {(a.rank_reason as string) ? (
-                            <p className="text-xs text-muted-foreground line-clamp-2 max-w-xs">{a.rank_reason as string}</p>
+                            <p className="text-xs text-muted-foreground line-clamp-1 truncate">{a.rank_reason as string}</p>
                           ) : summary ? (
-                            <p className="text-xs text-muted-foreground line-clamp-2 max-w-xs">{summary}</p>
+                            <p className="text-xs text-muted-foreground line-clamp-1 truncate">{summary}</p>
                           ) : null}
                         </TableCell>
                         <TableCell>
@@ -560,7 +559,6 @@ export default function EventWorkspacePage() {
                   })}
                 </TableBody>
               </Table>
-              </div>
             </div>
           )}
         </TabsContent>
