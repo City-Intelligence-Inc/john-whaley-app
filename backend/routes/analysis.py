@@ -46,7 +46,7 @@ def _selection_context(prefs: SelectionPreferences | None) -> str:
         parts.append(f"VENUE CAPACITY: {prefs.venue_capacity} attendees.")
     if prefs.attendee_mix:
         type_labels = {
-            "vc": "VCs / Investors", "founder": "Founders",
+            "vc": "VCs / Investors", "founder": "Founders", "government": "Government",
             "engineer": "Engineers", "pm": "PMs",
             "student": "Students", "press": "Press / Media", "other": "Other",
         }
@@ -68,7 +68,7 @@ def _selection_context(prefs: SelectionPreferences | None) -> str:
 
 def _build_pool_summary(type_counts: dict[str, int], total: int) -> str:
     type_labels = {
-        "vc": "VCs / Investors", "founder": "Founders",
+        "vc": "VCs / Investors", "founder": "Founders", "government": "Government",
         "engineer": "Engineers", "pm": "PMs",
         "student": "Students", "press": "Press / Media", "other": "Other",
     }
@@ -95,7 +95,7 @@ Classify this applicant AND cross-check their claimed role against any LinkedIn 
 
 Return ONLY a JSON object:
 {{
-  "attendee_type": "<MUST be one of: vc, founder, engineer, pm, student, press, other>",
+  "attendee_type": "<MUST be one of: vc, founder, engineer, pm, student, press, government, other>",
   "attendee_type_detail": "<specific label, e.g. 'Partner at Sequoia', 'AI Startup Founder', 'Staff Engineer at Google'>",
   "summary": "<2-4 bullet points: current role & company, key background/experience, what makes them relevant. Use format like '- Role at Company\\n- 10 yrs AI/ML experience\\n- Stanford PhD'. Be specific, use real data from their profile.>"
 }}
@@ -107,6 +107,7 @@ STRICT CATEGORY RULES:
 - "pm": Product managers, product leads, program managers, operations leads
 - "student": Current students (undergrad, grad, MBA, PhD candidates)
 - "press": Journalists, reporters, media professionals, content creators with press credentials
+- "government": Government officials, diplomats, trade representatives, public sector leaders
 - "other": Everyone else (consultants, academics/professors, biz dev, sales, marketing, designers, etc.)
 
 Return ONLY the JSON, no other text.
@@ -684,7 +685,7 @@ async def reallocate(body: ReallocateRequest):
     if not applicants:
         raise HTTPException(status_code=400, detail="No applicants")
 
-    type_labels = {"vc": "VCs", "entrepreneur": "Founders", "faculty": "Faculty", "alumni": "Alumni", "press": "Press", "student": "Students", "other": "Other"}
+    type_labels = {"vc": "VCs", "founder": "Founders", "engineer": "Engineers", "pm": "PMs", "student": "Students", "press": "Press", "government": "Government", "other": "Other"}
     by_type: dict[str, list] = {k: [] for k in type_labels}
 
     for a in applicants:

@@ -41,6 +41,7 @@ const CATEGORIES = [
   { key: "pm", label: "PM", color: "#10b981" },
   { key: "student", label: "Student", color: "#6366f1" },
   { key: "press", label: "Press", color: "#ec4899" },
+  { key: "government", label: "Government", color: "#0ea5e9" },
   { key: "other", label: "Other", color: "#6b7280" },
 ];
 

@@ -9,6 +9,7 @@ export const ATTENDEE_TYPES = [
   { key: "pm", label: "PMs", color: "#ec4899" },
   { key: "student", label: "Students", color: "#8b5cf6" },
   { key: "press", label: "Press/Media", color: "#10b981" },
+  { key: "government", label: "Government", color: "#0ea5e9" },
   { key: "other", label: "Other", color: "#6b7280" },
 ] as const;
 
