@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect } from "react";
 import {
   Mail,
   Linkedin,
@@ -10,19 +10,10 @@ import {
   Sparkles,
   ChevronLeft,
   ChevronRight,
-  ShieldCheck,
-  ShieldAlert,
-  SkipForward,
   ExternalLink,
   Briefcase,
-  CheckCircle2,
-  XCircle,
-  Clock,
-  Keyboard,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { toast } from "sonner";
-import { api } from "@/lib/api";
 import type { Applicant } from "@/lib/api";
 import { ATTENDEE_TYPES } from "@/lib/constants";
 
@@ -63,81 +54,14 @@ function statusDot(s: string) {
 export function ProfileSwipeView({
   applicants,
   statusFilter,
-  sessionId,
-  onStatusChange,
 }: ProfileSwipeViewProps) {
   const [index, setIndex] = useState(0);
-  const [showKeys, setShowKeys] = useState(false);
-  const [animDir, setAnimDir] = useState<"left" | "right" | null>(null);
-  const cardRef = useRef<HTMLDivElement>(null);
-
-  // Whitelist / blacklist
-  const [wlEmails, setWlEmails] = useState<Set<string>>(new Set());
-  const [blEmails, setBlEmails] = useState<Set<string>>(new Set());
-  const [wlUrls, setWlUrls] = useState<Set<string>>(new Set());
-  const [blUrls, setBlUrls] = useState<Set<string>>(new Set());
-
-  const loadLists = useCallback(async () => {
-    try {
-      const [wl, bl] = await Promise.all([
-        api.getSessionWhitelist(sessionId),
-        api.getSessionBlacklist(sessionId),
-      ]);
-      setWlEmails(new Set((wl.emails || []).map((e: string) => e.toLowerCase())));
-      setBlEmails(new Set((bl.emails || []).map((e: string) => e.toLowerCase())));
-      setWlUrls(new Set((wl.linkedin_urls || []).map((u: string) => u.toLowerCase())));
-      setBlUrls(new Set((bl.linkedin_urls || []).map((u: string) => u.toLowerCase())));
-    } catch { /* ignore */ }
-  }, [sessionId]);
-
-  useEffect(() => { loadLists(); }, [loadLists]);
 
   const filtered = applicants.filter((a) => statusFilter === "all" || a.status === statusFilter);
   const sorted = [...filtered].sort((a, b) => getName(a).localeCompare(getName(b)));
   const current = sorted[index];
 
-  const isWl = (a: Applicant) => {
-    const e = (a.email || "").toLowerCase(), u = (a.linkedin_url || "").toLowerCase();
-    return (e && wlEmails.has(e)) || (u && wlUrls.has(u));
-  };
-  const isBl = (a: Applicant) => {
-    const e = (a.email || "").toLowerCase(), u = (a.linkedin_url || "").toLowerCase();
-    return (e && blEmails.has(e)) || (u && blUrls.has(u));
-  };
-
-  const advance = useCallback((dir: "left" | "right") => {
-    setAnimDir(dir);
-    setTimeout(() => {
-      if (index < sorted.length - 1) setIndex(index + 1);
-      setAnimDir(null);
-    }, 150);
-  }, [index, sorted.length]);
-
-  const addToList = async (a: Applicant, list: "whitelist" | "blacklist") => {
-    const email = (a.email || "").toLowerCase(), url = (a.linkedin_url || "").toLowerCase();
-    const nwE = new Set(wlEmails), nwU = new Set(wlUrls), nbE = new Set(blEmails), nbU = new Set(blUrls);
-    if (list === "whitelist") {
-      if (email) { nwE.add(email); nbE.delete(email); }
-      if (url) { nwU.add(url); nbU.delete(url); }
-    } else {
-      if (email) { nbE.add(email); nwE.delete(email); }
-      if (url) { nbU.add(url); nwU.delete(url); }
-    }
-    setWlEmails(nwE); setWlUrls(nwU); setBlEmails(nbE); setBlUrls(nbU);
-    try {
-      await Promise.all([
-        api.updateSessionWhitelist(sessionId, { emails: [...nwE], linkedin_urls: [...nwU] }),
-        api.updateSessionBlacklist(sessionId, { emails: [...nbE], linkedin_urls: [...nbU] }),
-      ]);
-    } catch { toast.error("Failed to update list"); loadLists(); }
-    advance(list === "whitelist" ? "right" : "left");
-  };
-
-  const handleAccept = (a: Applicant) => { onStatusChange(a.applicant_id, "accepted"); advance("right"); };
-  const handleReject = (a: Applicant) => { onStatusChange(a.applicant_id, "rejected"); advance("left"); };
-  const handlePass = () => advance("right");
-
-  // Keyboard — just navigation
+  // Keyboard navigation
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if (!current) return;
@@ -164,10 +88,6 @@ export function ProfileSwipeView({
   const education = (current[`linkedin_education`] as string) || "";
   const company = current.company || (current[`linkedin_company`] as string) || "";
   const location = current.location || (current[`linkedin_location`] as string) || "";
-  const wl = isWl(current), bl = isBl(current);
-  const wlCount = sorted.filter(isWl).length, blCount = sorted.filter(isBl).length;
-  const acceptedCount = sorted.filter((a) => a.status === "accepted").length;
-  const rejectedCount = sorted.filter((a) => a.status === "rejected").length;
 
   return (
     <div className="flex gap-6 items-start">
@@ -182,17 +102,7 @@ export function ProfileSwipeView({
         </div>
 
         {/* Card */}
-        <div
-          ref={cardRef}
-          className={`w-full rounded-2xl border bg-card overflow-hidden transition-all duration-150 ${
-            animDir === "left" ? "-translate-x-4 opacity-50" :
-            animDir === "right" ? "translate-x-4 opacity-50" : ""
-          } ${
-            wl ? "ring-2 ring-emerald-500/30 border-emerald-500/20" :
-            bl ? "ring-2 ring-red-500/30 border-red-500/20" :
-            "border-border/50"
-          }`}
-        >
+        <div className="w-full rounded-2xl border border-border/50 bg-card overflow-hidden">
           {/* Profile header */}
           <div className="p-5">
             <div className="flex items-start gap-4">
@@ -204,7 +114,10 @@ export function ProfileSwipeView({
                 </div>
               )}
               <div className="flex-1 min-w-0">
-                <h2 className="text-lg font-bold text-foreground truncate">{getName(current)}</h2>
+                <div className="flex items-center gap-3">
+                  <h2 className="text-lg font-bold text-foreground truncate">{getName(current)}</h2>
+                  <span className="text-lg font-bold tabular-nums text-muted-foreground">#{index + 1}</span>
+                </div>
                 {headline && <p className="text-sm text-muted-foreground mt-0.5 line-clamp-2">{headline}</p>}
 
                 {/* Category + status badges */}
@@ -221,8 +134,6 @@ export function ProfileSwipeView({
                     <span className={`size-2 rounded-full ${statusDot(current.status)}`} />
                     {statusLabel(current.status)}
                   </span>
-                  {wl && <Badge className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20 text-[10px]"><ShieldCheck className="size-2.5 mr-0.5" />WL</Badge>}
-                  {bl && <Badge className="bg-red-500/10 text-red-500 border-red-500/20 text-[10px]"><ShieldAlert className="size-2.5 mr-0.5" />BL</Badge>}
                 </div>
               </div>
             </div>
@@ -236,7 +147,7 @@ export function ProfileSwipeView({
             {current.linkedin_url && <a href={current.linkedin_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-blue-500 hover:text-blue-400"><Linkedin className="size-3" />Profile<ExternalLink className="size-2.5" /></a>}
           </div>
 
-          {/* Content sections — only show if data exists */}
+          {/* Content sections */}
           {(about || experience || education) && (
             <div className="px-5 pb-4 space-y-3 border-t border-border/30 pt-3">
               {about && (
@@ -260,7 +171,7 @@ export function ProfileSwipeView({
             </div>
           )}
 
-          {/* AI reasoning — truncated, only show if exists */}
+          {/* AI reasoning */}
           {current.ai_reasoning && (
             <div className="px-5 pb-4">
               <div className="rounded-lg bg-gold/5 border border-gold/10 p-3">
@@ -273,12 +184,6 @@ export function ProfileSwipeView({
               </div>
             </div>
           )}
-
-          {/* ── Rank ── */}
-          <div className="border-t border-border/50 px-5 py-3 flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Rank</span>
-            <span className="text-2xl font-bold tabular-nums text-foreground">#{index + 1}<span className="text-sm font-normal text-muted-foreground ml-1">of {sorted.length}</span></span>
-          </div>
         </div>
 
         {/* Nav */}
@@ -299,7 +204,7 @@ export function ProfileSwipeView({
         <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest px-2 py-1">All Guests</p>
         {sorted.map((a, i) => {
           const active = i === index;
-          const photo = (a[`linkedin_image`] as string) || "";
+          const sidePhoto = (a[`linkedin_image`] as string) || "";
           return (
             <button
               key={a.applicant_id}
@@ -308,8 +213,8 @@ export function ProfileSwipeView({
                 active ? "bg-gold/10" : "hover:bg-muted/50"
               }`}
             >
-              {photo ? (
-                <img src={photo} alt="" className="size-6 rounded-full object-cover shrink-0" />
+              {sidePhoto ? (
+                <img src={sidePhoto} alt="" className="size-6 rounded-full object-cover shrink-0" />
               ) : (
                 <div className="size-6 rounded-full bg-muted flex items-center justify-center shrink-0 text-[10px] font-medium text-muted-foreground">
                   {getName(a).charAt(0).toUpperCase()}
@@ -320,7 +225,7 @@ export function ProfileSwipeView({
                   {getName(a)}
                 </p>
               </div>
-              <span className={`size-2 rounded-full shrink-0 ${statusDot(a.status)}`} />
+              <span className="text-[10px] text-muted-foreground/50 tabular-nums shrink-0">#{i + 1}</span>
             </button>
           );
         })}
