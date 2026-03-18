@@ -34,6 +34,8 @@ import {
   AlertTriangle,
   GripVertical,
   Info,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import {
   DndContext,
@@ -155,6 +157,7 @@ function MixPanel({ applicants, onApply }: {
   const [quotas, setQuotas] = useState<Record<string, number>>({});
   const [applying, setApplying] = useState(false);
   const [target, setTarget] = useState(200);
+  const [expandedCat, setExpandedCat] = useState<string | null>(null);
 
   const byType = useMemo(() => {
     const groups: Record<string, Applicant[]> = {};
@@ -278,37 +281,87 @@ function MixPanel({ applicants, onApply }: {
         </div>
       </div>
 
-      {/* Category sliders */}
+      {/* Category sliders + expandable people lists */}
       <div className="space-y-2">
         {ATTENDEE_TYPES.map((t) => {
           const items = byType[t.key] || [];
           if (items.length === 0) return null;
           const quota = getQuota(t.key);
+          const isExpanded = expandedCat === t.key;
 
           return (
-            <div key={t.key} className="rounded-lg border p-3 space-y-2">
-              <div className="flex items-center gap-2">
-                <span className="size-2.5 rounded-full shrink-0" style={{ backgroundColor: t.color }} />
-                <span className="text-sm font-medium flex-1">{t.label}</span>
-                <span className="text-xs text-muted-foreground">{items.length} available</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <Slider
-                  value={[quota]}
-                  min={0}
-                  max={items.length}
-                  step={1}
-                  onValueChange={([val]) => setQuotas((prev) => ({ ...prev, [t.key]: val }))}
-                  className="flex-1"
-                />
-                <div className="flex items-center gap-0.5 shrink-0">
-                  <button onClick={() => setQuotas((p) => ({ ...p, [t.key]: Math.max(0, quota - 1) }))}
-                    className="size-7 rounded flex items-center justify-center text-muted-foreground hover:bg-muted text-lg">-</button>
-                  <span className="text-sm font-bold tabular-nums w-8 text-center">{quota}</span>
-                  <button onClick={() => setQuotas((p) => ({ ...p, [t.key]: Math.min(items.length, quota + 1) }))}
-                    className="size-7 rounded flex items-center justify-center text-muted-foreground hover:bg-muted text-lg">+</button>
+            <div key={t.key} className="rounded-lg border overflow-hidden">
+              <div className="p-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="size-2.5 rounded-full shrink-0" style={{ backgroundColor: t.color }} />
+                  <span className="text-sm font-medium flex-1">{t.label}</span>
+                  <span className="text-xs text-muted-foreground">{items.length} available</span>
+                  <button onClick={() => setExpandedCat(isExpanded ? null : t.key)}
+                    className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
+                    {isExpanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+                    {isExpanded ? "Hide" : "Show"}
+                  </button>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Slider
+                    value={[quota]}
+                    min={0}
+                    max={items.length}
+                    step={1}
+                    onValueChange={([val]) => setQuotas((prev) => ({ ...prev, [t.key]: val }))}
+                    className="flex-1"
+                  />
+                  <div className="flex items-center gap-0.5 shrink-0">
+                    <button onClick={() => setQuotas((p) => ({ ...p, [t.key]: Math.max(0, quota - 1) }))}
+                      className="size-7 rounded flex items-center justify-center text-muted-foreground hover:bg-muted text-lg">-</button>
+                    <span className="text-sm font-bold tabular-nums w-8 text-center">{quota}</span>
+                    <button onClick={() => setQuotas((p) => ({ ...p, [t.key]: Math.min(items.length, quota + 1) }))}
+                      className="size-7 rounded flex items-center justify-center text-muted-foreground hover:bg-muted text-lg">+</button>
+                  </div>
                 </div>
               </div>
+
+              {/* Expandable people list */}
+              {isExpanded && (
+                <div className="border-t divide-y max-h-80 overflow-y-auto">
+                  {items.map((a, i) => {
+                    const isIn = i < quota;
+                    const photo = getPhoto(a);
+                    const score = Number(a.rank_score || 0);
+                    return (
+                      <div key={a.applicant_id}
+                        className={`flex items-center gap-2 px-3 py-2 text-sm transition-colors ${isIn ? "bg-background" : "bg-muted/30 opacity-60"}`}>
+                        <span className="text-xs font-mono text-muted-foreground w-5 text-right shrink-0">{i + 1}</span>
+                        {photo ? (
+                          <img src={photo} alt="" className="size-6 rounded-full object-cover shrink-0" />
+                        ) : (
+                          <div className="size-6 rounded-full bg-muted flex items-center justify-center shrink-0 text-[10px] font-medium text-muted-foreground">
+                            {getName(a).charAt(0).toUpperCase()}
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <span className="text-xs font-medium truncate block">{getName(a)}</span>
+                          <span className="text-[10px] text-muted-foreground truncate block">
+                            {a.attendee_type_detail || getHeadline(a) || ""}
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-mono text-muted-foreground shrink-0">{score}pts</span>
+                        {a.linkedin_url && (
+                          <a href={a.linkedin_url} target="_blank" rel="noopener noreferrer"
+                            className="text-blue-500 hover:text-blue-600 shrink-0">
+                            <Linkedin className="size-3" />
+                          </a>
+                        )}
+                        {isIn ? (
+                          <CheckCircle2 className="size-3.5 text-emerald-500 shrink-0" />
+                        ) : (
+                          <XCircle className="size-3.5 text-muted-foreground/30 shrink-0" />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           );
         })}
@@ -545,11 +598,6 @@ export default function EventWorkspacePage() {
           <p className="text-xs md:text-sm text-muted-foreground mt-0.5">{total} guests</p>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
-          <Button variant="outline" size="sm" className="h-8 text-xs" onClick={handleRankAll} disabled={ranking || total === 0}>
-            {ranking ? <Loader2 className="size-3.5 mr-1.5 animate-spin" /> : <Brain className="size-3.5 mr-1.5" />}
-            <span className="hidden sm:inline">{ranking ? "Ranking..." : "Rank All"}</span>
-            <span className="sm:hidden">{ranking ? "..." : "Rank"}</span>
-          </Button>
           <Button variant="ghost" size="icon" className="size-8 text-muted-foreground hover:text-destructive" onClick={handleDelete}>
             <Trash2 className="size-4" />
           </Button>
