@@ -30,6 +30,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
+import { Separator } from "@/components/ui/separator";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Dialog,
   DialogContent,
@@ -409,14 +414,18 @@ export default function MainPage() {
                     <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search" className="pl-9 h-9" />
                     {search && <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"><X className="size-4" /></button>}
                   </div>
-                  <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
-                    className="h-9 rounded-md border border-border/50 bg-background px-3 text-sm text-foreground">
-                    <option value="all">All Guests</option>
-                    <option value="accepted">Going</option>
-                    <option value="pending">Pending</option>
-                    <option value="waitlisted">Waitlisted</option>
-                    <option value="rejected">Not Going</option>
-                  </select>
+                  <Select value={statusFilter} onValueChange={setStatusFilter}>
+                    <SelectTrigger className="w-[140px] h-9">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Guests</SelectItem>
+                      <SelectItem value="accepted">Going</SelectItem>
+                      <SelectItem value="pending">Pending</SelectItem>
+                      <SelectItem value="waitlisted">Waitlisted</SelectItem>
+                      <SelectItem value="rejected">Not Going</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               )}
 
@@ -434,6 +443,7 @@ export default function MainPage() {
 
               {/* Guest cards */}
               {total > 0 && (
+                <TooltipProvider>
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                   {filtered.map((a) => {
                     const photo = (a[`linkedin_image`] as string) || (a[`photo_url`] as string) || "";
@@ -445,17 +455,20 @@ export default function MainPage() {
                     const score = a.ai_score ? parseInt(a.ai_score) : 0;
                     const isPending = a.status === "pending";
                     const name = getName(a);
+                    const issues = (a[`linkedin_issues`] as string) || "";
+                    const isClean = issues === "clean";
+                    const hasIssues = issues && !isClean;
+                    const issueLabels = hasIssues ? issues.split("; ").map(i => i.replace("missing_", "No ").replace("scrape_error", "Scrape failed").replace(/_/g, " ")) : [];
 
                     return (
-                      <div key={a.applicant_id}
-                        className="rounded-xl border border-border/50 bg-card/50 hover:border-border transition-all overflow-hidden cursor-pointer group"
+                      <Card key={a.applicant_id} className="group hover:border-border transition-all cursor-pointer overflow-hidden"
                         onClick={() => setSelectedApplicantId(a.applicant_id)}>
-                        <div className="p-4 pb-3">
+                        <CardHeader className="pb-3 space-y-0">
                           <div className="flex items-start gap-3">
                             {photo ? (
-                              <img src={photo} alt="" className="size-14 rounded-xl object-cover shrink-0 ring-1 ring-border/50" />
+                              <img src={photo} alt="" className="size-14 rounded-xl object-cover shrink-0 ring-1 ring-border" />
                             ) : (
-                              <div className="size-14 rounded-xl bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center shrink-0 text-xl font-bold text-muted-foreground/50">
+                              <div className="size-14 rounded-xl bg-muted flex items-center justify-center shrink-0 text-xl font-bold text-muted-foreground/40">
                                 {name.charAt(0).toUpperCase()}
                               </div>
                             )}
@@ -463,83 +476,93 @@ export default function MainPage() {
                               <div className="flex items-center gap-2">
                                 <h3 className="text-sm font-semibold truncate group-hover:text-gold transition-colors">{name}</h3>
                                 {score > 0 && (
-                                  <span className={`text-sm font-bold tabular-nums ${score >= 70 ? "text-emerald-500" : score >= 40 ? "text-amber-500" : "text-red-500"}`}>{score}</span>
+                                  <Badge variant="secondary" className={`text-xs tabular-nums px-1.5 ${score >= 70 ? "text-emerald-500" : score >= 40 ? "text-amber-500" : "text-red-500"}`}>{score}</Badge>
                                 )}
                               </div>
                               {headline && <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5 leading-relaxed">{headline}</p>}
                             </div>
                           </div>
-                        </div>
-                        {(company || location || education) && (
-                          <div className="px-4 pb-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-                            {company && <span className="flex items-center gap-1"><Building2 className="size-3" />{company}</span>}
-                            {location && <span className="flex items-center gap-1"><MapPin className="size-3" />{location}</span>}
-                            {education && <span className="flex items-center gap-1"><GraduationCap className="size-3" /><span className="truncate max-w-[150px]">{education.split("\n")[0]}</span></span>}
-                          </div>
-                        )}
-                        {about && <div className="px-4 pb-2"><p className="text-[11px] text-muted-foreground/70 line-clamp-2 leading-relaxed">{about}</p></div>}
-                        {a.ai_reasoning && (
-                          <div className="px-4 pb-2">
-                            <div className="rounded-lg bg-gold/5 border border-gold/10 px-2.5 py-1.5">
-                              <p className="text-[11px] text-muted-foreground line-clamp-2 flex items-start gap-1.5">
-                                <Sparkles className="size-3 mt-0.5 shrink-0 text-gold" />{a.ai_reasoning}
-                              </p>
+                        </CardHeader>
+
+                        <CardContent className="pt-0 space-y-2.5">
+                          {/* Info chips */}
+                          {(company || location || education) && (
+                            <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                              {company && <span className="flex items-center gap-1"><Building2 className="size-3" />{company}</span>}
+                              {location && <span className="flex items-center gap-1"><MapPin className="size-3" />{location}</span>}
+                              {education && <span className="flex items-center gap-1"><GraduationCap className="size-3" /><span className="truncate max-w-[150px]">{education.split("\n")[0]}</span></span>}
+                            </div>
+                          )}
+
+                          {/* About */}
+                          {about && <p className="text-[11px] text-muted-foreground/70 line-clamp-2 leading-relaxed">{about}</p>}
+
+                          {/* AI reasoning */}
+                          {a.ai_reasoning && (
+                            <Card className="bg-gold/5 border-gold/10">
+                              <CardContent className="p-2.5">
+                                <p className="text-[11px] text-muted-foreground line-clamp-2 flex items-start gap-1.5">
+                                  <Sparkles className="size-3 mt-0.5 shrink-0 text-gold" />{a.ai_reasoning}
+                                </p>
+                              </CardContent>
+                            </Card>
+                          )}
+
+                          {/* Issues */}
+                          {isClean && (
+                            <Badge variant="secondary" className="text-emerald-500 bg-emerald-500/10 border-emerald-500/20">
+                              <CircleCheck className="size-3 mr-1" />Verified
+                            </Badge>
+                          )}
+                          {hasIssues && (
+                            <div className="flex items-start gap-1.5 text-[10px] text-amber-500">
+                              <AlertTriangle className="size-3 mt-0.5 shrink-0" />
+                              <span>{issueLabels.join(" / ")}</span>
+                            </div>
+                          )}
+
+                          <Separator />
+
+                          {/* Footer: badges + actions */}
+                          <div className="flex items-center justify-between" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center gap-2">
+                              {a.attendee_type && <Badge variant="outline" className="text-[10px] h-5">{a.attendee_type_detail || a.attendee_type}</Badge>}
+                              {a.linkedin_url && (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <a href={a.linkedin_url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-400">
+                                      <Linkedin className="size-3.5" />
+                                    </a>
+                                  </TooltipTrigger>
+                                  <TooltipContent>View LinkedIn</TooltipContent>
+                                </Tooltip>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1">
+                              {isPending ? (
+                                <>
+                                  <Button size="sm" variant="ghost" onClick={() => handleStatusChange(a.applicant_id, "accepted")}
+                                    className="h-7 px-2 text-[11px] text-emerald-500 hover:text-emerald-400 hover:bg-emerald-500/10">
+                                    <CheckCircle2 className="size-3 mr-1" />Approve
+                                  </Button>
+                                  <Button size="sm" variant="ghost" onClick={() => handleStatusChange(a.applicant_id, "rejected")}
+                                    className="h-7 px-2 text-[11px] text-red-500 hover:text-red-400 hover:bg-red-500/10">
+                                    <XCircle className="size-3 mr-1" />Decline
+                                  </Button>
+                                </>
+                              ) : (
+                                <Badge variant="secondary" className={statusColor(a.status)}>
+                                  {statusLabel(a.status)}
+                                </Badge>
+                              )}
                             </div>
                           </div>
-                        )}
-                        <div className="px-4 py-2.5 border-t border-border/30 flex items-center justify-between" onClick={(e) => e.stopPropagation()}>
-                          <div className="flex items-center gap-2">
-                            {/* Issues indicator */}
-                            {(() => {
-                              const issues = (a[`linkedin_issues`] as string) || "";
-                              if (issues === "clean") {
-                                return (
-                                  <span className="flex items-center gap-1 text-[10px] text-emerald-500">
-                                    <CircleCheck className="size-3" />Verified
-                                  </span>
-                                );
-                              } else if (issues) {
-                                const labels = issues.split("; ").map(i => i.replace("missing_", "No ").replace("scrape_error", "Scrape failed").replace("_", " "));
-                                return (
-                                  <span className="flex items-center gap-1 text-[10px] text-amber-500 flex-wrap">
-                                    <AlertTriangle className="size-3 shrink-0" />
-                                    {labels.join(" / ")}
-                                  </span>
-                                );
-                              }
-                              return null;
-                            })()}
-                            {a.attendee_type && <Badge variant="outline" className="text-[10px] h-5">{a.attendee_type_detail || a.attendee_type}</Badge>}
-                            {a.linkedin_url && (
-                              <a href={a.linkedin_url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-400">
-                                <Linkedin className="size-3.5" />
-                              </a>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            {isPending ? (
-                              <>
-                                <button onClick={() => handleStatusChange(a.applicant_id, "accepted")}
-                                  className="h-7 px-2.5 rounded-md text-[11px] font-medium text-emerald-500 hover:bg-emerald-500/10 flex items-center gap-1 transition-colors">
-                                  <CheckCircle2 className="size-3" />Approve
-                                </button>
-                                <button onClick={() => handleStatusChange(a.applicant_id, "rejected")}
-                                  className="h-7 px-2.5 rounded-md text-[11px] font-medium text-red-500 hover:bg-red-500/10 flex items-center gap-1 transition-colors">
-                                  <XCircle className="size-3" />Decline
-                                </button>
-                              </>
-                            ) : (
-                              <span className={`text-xs font-medium flex items-center gap-1 ${statusColor(a.status)}`}>
-                                <span className={`size-1.5 rounded-full ${a.status === "accepted" ? "bg-emerald-500" : a.status === "rejected" ? "bg-red-500" : a.status === "waitlisted" ? "bg-amber-500" : "bg-blue-500"}`} />
-                                {statusLabel(a.status)}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
+                        </CardContent>
+                      </Card>
                     );
                   })}
                 </div>
+                </TooltipProvider>
               )}
             </div>
           )}
