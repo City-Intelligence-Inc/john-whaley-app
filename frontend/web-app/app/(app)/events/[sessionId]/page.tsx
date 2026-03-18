@@ -24,6 +24,7 @@ import {
   Plus,
   Zap,
   Check,
+  Trash2,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -530,10 +531,21 @@ export default function EventWorkspacePage() {
     }
   }, []);
 
-  const handleUploadSuccess = useCallback((_count: number) => {
-    refreshAll();
-    setShowImportDialog(false);
+  const handleDeleteSession = useCallback(async () => {
+    if (!confirm("Delete this event and all its applicants? This cannot be undone.")) return;
+    try {
+      await api.deleteSession(sessionId);
+      toast.success("Event deleted");
+      router.push("/events");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete");
+    }
+  }, [sessionId, router]);
+
+  const handleUploadSuccess = useCallback(async (_count: number) => {
     toast.success(`Imported ${_count} guests`);
+    await refreshAll();
+    setShowImportDialog(false);
   }, [refreshAll]);
 
   const handleEnrichLinkedIn = useCallback(async () => {
@@ -597,10 +609,18 @@ export default function EventWorkspacePage() {
   return (
     <div className="space-y-6">
       {/* ── Event Title ── */}
-      <div>
+      <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold tracking-tight text-foreground">
           {session?.name || "Event"}
         </h1>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleDeleteSession}
+          className="text-muted-foreground hover:text-red-500 hover:bg-red-500/10"
+        >
+          <Trash2 className="size-4 mr-1.5" />Delete
+        </Button>
       </div>
 
       {/* ── Tabs ── */}
