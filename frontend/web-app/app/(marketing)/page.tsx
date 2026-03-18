@@ -216,6 +216,162 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* Ranking Criteria */}
+      <section className="mx-auto max-w-6xl px-6 py-20 md:py-28">
+        <div className="text-center mb-16">
+          <h2 className="text-3xl font-bold tracking-tight">
+            How Selecta ranks your guests
+          </h2>
+          <p className="mt-4 text-muted-foreground max-w-xl mx-auto">
+            Every applicant is classified and scored using their LinkedIn profile data. No AI hallucination — pure pattern matching on real titles and experience.
+          </p>
+        </div>
+
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {/* VC */}
+          <div className="rounded-2xl border border-indigo-500/20 bg-indigo-500/5 p-6 space-y-4">
+            <div className="flex items-center gap-2">
+              <span className="size-3 rounded-full bg-indigo-500" />
+              <h3 className="font-semibold">VCs / Investors</h3>
+            </div>
+            <div className="space-y-1.5 text-sm">
+              {[
+                { role: "Managing Partner / GP", score: "100", tier: "text-emerald-400" },
+                { role: "Partner", score: "85", tier: "text-emerald-400" },
+                { role: "Principal / Director", score: "75", tier: "text-yellow-400" },
+                { role: "VP", score: "65", tier: "text-yellow-400" },
+                { role: "Angel Investor", score: "50", tier: "text-yellow-400" },
+                { role: "Associate", score: "25", tier: "text-red-400" },
+                { role: "Analyst", score: "15", tier: "text-red-400" },
+                { role: "Intern / Scout", score: "10", tier: "text-red-400" },
+              ].map((r) => (
+                <div key={r.role} className="flex items-center justify-between">
+                  <span className="text-muted-foreground">{r.role}</span>
+                  <span className={`font-mono text-xs font-bold ${r.tier}`}>{r.score}</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground/70">
+              Fund affiliation (Sequoia, a16z, etc.) adds +5 bonus. Self-employed &quot;investors&quot; are penalized.
+            </p>
+          </div>
+
+          {/* Founders */}
+          <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-6 space-y-4">
+            <div className="flex items-center gap-2">
+              <span className="size-3 rounded-full bg-amber-500" />
+              <h3 className="font-semibold">Founders</h3>
+            </div>
+            <div className="space-y-1.5 text-sm">
+              {[
+                { role: "CEO", score: "100" },
+                { role: "Co-Founder", score: "95" },
+                { role: "CTO / CPO / COO", score: "85" },
+                { role: "Managing Director", score: "80" },
+                { role: "VP / Head of", score: "70" },
+                { role: "Director", score: "60" },
+              ].map((r) => (
+                <div key={r.role} className="flex items-center justify-between">
+                  <span className="text-muted-foreground">{r.role}</span>
+                  <span className="font-mono text-xs font-bold text-amber-400">{r.score}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Engineers */}
+          <div className="rounded-2xl border border-blue-500/20 bg-blue-500/5 p-6 space-y-4">
+            <div className="flex items-center gap-2">
+              <span className="size-3 rounded-full bg-blue-500" />
+              <h3 className="font-semibold">Engineers</h3>
+            </div>
+            <div className="space-y-1.5 text-sm">
+              {[
+                { role: "CTO", score: "100" },
+                { role: "Distinguished / Fellow", score: "95" },
+                { role: "Staff / Principal", score: "85" },
+                { role: "Senior Engineer", score: "65" },
+                { role: "Mid-level", score: "50" },
+                { role: "Junior / Intern", score: "20-35" },
+              ].map((r) => (
+                <div key={r.role} className="flex items-center justify-between">
+                  <span className="text-muted-foreground">{r.role}</span>
+                  <span className="font-mono text-xs font-bold text-blue-400">{r.score}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* PMs */}
+          <div className="rounded-2xl border border-pink-500/20 bg-pink-500/5 p-6 space-y-4">
+            <div className="flex items-center gap-2">
+              <span className="size-3 rounded-full bg-pink-500" />
+              <h3 className="font-semibold">Product Managers</h3>
+            </div>
+            <div className="space-y-1.5 text-sm">
+              {[
+                { role: "CPO", score: "100" },
+                { role: "VP Product", score: "90" },
+                { role: "Director of Product", score: "80" },
+                { role: "Senior PM", score: "70" },
+                { role: "PM / TPM", score: "55" },
+                { role: "APM", score: "40" },
+              ].map((r) => (
+                <div key={r.role} className="flex items-center justify-between">
+                  <span className="text-muted-foreground">{r.role}</span>
+                  <span className="font-mono text-xs font-bold text-pink-400">{r.score}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Researchers */}
+          <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-6 space-y-4">
+            <div className="flex items-center gap-2">
+              <span className="size-3 rounded-full bg-emerald-500" />
+              <h3 className="font-semibold">Researchers</h3>
+            </div>
+            <div className="space-y-1.5 text-sm">
+              {[
+                { role: "Professor", score: "90-100" },
+                { role: "Assistant Professor", score: "80" },
+                { role: "Principal Scientist", score: "75" },
+                { role: "Research Scientist", score: "65" },
+                { role: "PostDoc", score: "55" },
+                { role: "PhD Student", score: "35" },
+              ].map((r) => (
+                <div key={r.role} className="flex items-center justify-between">
+                  <span className="text-muted-foreground">{r.role}</span>
+                  <span className="font-mono text-xs font-bold text-emerald-400">{r.score}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Students */}
+          <div className="rounded-2xl border border-violet-500/20 bg-violet-500/5 p-6 space-y-4">
+            <div className="flex items-center gap-2">
+              <span className="size-3 rounded-full bg-violet-500" />
+              <h3 className="font-semibold">Students</h3>
+            </div>
+            <div className="space-y-1.5 text-sm">
+              {[
+                { role: "PhD", score: "80" },
+                { role: "MBA", score: "65" },
+                { role: "Masters", score: "55" },
+                { role: "Undergraduate", score: "40" },
+                { role: "High School", score: "15" },
+              ].map((r) => (
+                <div key={r.role} className="flex items-center justify-between">
+                  <span className="text-muted-foreground">{r.role}</span>
+                  <span className="font-mono text-xs font-bold text-violet-400">{r.score}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Features grid */}
       <section id="features" className="mx-auto max-w-6xl px-6 py-20 md:py-28">
         <div className="text-center">
