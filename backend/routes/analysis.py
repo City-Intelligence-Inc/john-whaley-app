@@ -373,7 +373,8 @@ async def _classify_one(applicant: dict, body: BulkAnalyzeRequest, semaphore: as
                 "attendee_type_detail": result.get("attendee_type_detail", ""),
             }
             if result.get("summary"):
-                fields["ai_summary"] = result["summary"]
+                s = result["summary"]
+                fields["ai_summary"] = "\n".join(s) if isinstance(s, list) else str(s)
             db.update_applicant_fields(applicant_id, fields)
             return {"applicant_id": applicant_id, "name": name, **fields, "summary": result.get("summary", "")}
         except json.JSONDecodeError:

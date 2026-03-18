@@ -85,6 +85,7 @@ function getRank(a: Applicant): { rank: number; total: number; score: number; ca
 
 function getSummary(a: Applicant): string {
   const s = a.ai_summary || a.linkedin_summary || "";
+  if (Array.isArray(s)) return (s as string[]).join("\n");
   return typeof s === "string" ? s : String(s);
 }
 
