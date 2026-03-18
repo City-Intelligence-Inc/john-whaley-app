@@ -273,9 +273,9 @@ export default function EventWorkspacePage() {
           <p className="text-sm text-muted-foreground mt-0.5">{total} guests</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => router.push(`/events/${sessionId}/analyze`)}>
-            <Brain className="size-4 mr-2" />
-            {analyzed > 0 ? "Re-Analyze" : "Run Analysis"}
+          <Button variant="outline" size="sm" onClick={handleRankAll} disabled={ranking || total === 0}>
+            {ranking ? <Loader2 className="size-4 mr-2 animate-spin" /> : <Brain className="size-4 mr-2" />}
+            {ranking ? "Ranking..." : "Rank All"}
           </Button>
           <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" onClick={handleDelete}>
             <Trash2 className="size-4" />
@@ -409,17 +409,23 @@ export default function EventWorkspacePage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-[260px] min-w-[200px]">
+                    <TableHead className="w-[50px] min-w-[50px]">
+                      <button onClick={() => toggleSort("score")} className="flex items-center gap-1 hover:text-foreground">
+                        # <ArrowUpDown className="size-3" />
+                      </button>
+                    </TableHead>
+                    <TableHead className="w-[240px] min-w-[180px]">
                       <button onClick={() => toggleSort("name")} className="flex items-center gap-1 hover:text-foreground">
                         Guest <ArrowUpDown className="size-3" />
                       </button>
                     </TableHead>
-                    <TableHead className="w-[200px] min-w-[160px]">
+                    <TableHead className="w-[160px] min-w-[120px]">
                       <button onClick={() => toggleSort("type")} className="flex items-center gap-1 hover:text-foreground">
                         Category <ArrowUpDown className="size-3" />
                       </button>
                     </TableHead>
-                    <TableHead className="w-[300px] min-w-[200px]">AI Summary</TableHead>
+                    <TableHead className="w-[60px] min-w-[50px]">Score</TableHead>
+                    <TableHead className="w-[280px] min-w-[180px]">Summary</TableHead>
                     <TableHead className="w-[100px] min-w-[90px]">
                       <button onClick={() => toggleSort("status")} className="flex items-center gap-1 hover:text-foreground">
                         Status <ArrowUpDown className="size-3" />
@@ -433,12 +439,22 @@ export default function EventWorkspacePage() {
                     const photo = getPhoto(a);
                     const headline = getHeadline(a);
                     const summary = getSummary(a);
+                    const rank = getRank(a);
                     return (
                       <TableRow
                         key={a.applicant_id}
                         className="cursor-pointer hover:bg-muted/50"
                         onClick={() => setSelectedId(a.applicant_id)}
                       >
+                        <TableCell className="text-center">
+                          {rank ? (
+                            <span className="text-xs font-mono font-bold text-muted-foreground">
+                              {rank.rank}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground/30">—</span>
+                          )}
+                        </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-3">
                             {photo ? (
@@ -469,15 +485,18 @@ export default function EventWorkspacePage() {
                             </Badge>
                           )}
                         </TableCell>
-                        <TableCell className="hidden lg:table-cell">
-                          {summary ? (
+                        <TableCell>
+                          {rank ? (
+                            <span className="text-xs font-semibold tabular-nums">{rank.score}</span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground/30">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {(a.rank_reason as string) ? (
+                            <p className="text-xs text-muted-foreground line-clamp-2 max-w-xs">{a.rank_reason as string}</p>
+                          ) : summary ? (
                             <p className="text-xs text-muted-foreground line-clamp-2 max-w-xs">{summary}</p>
-                          ) : a.ai_reasoning ? (
-                            <p className="text-xs text-muted-foreground line-clamp-2 max-w-xs">
-                              {a.ai_reasoning.includes(" | ")
-                                ? a.ai_reasoning.split(" | ")[0]?.replace(/^.*?\]:\s*/, "")
-                                : a.ai_reasoning}
-                            </p>
                           ) : null}
                         </TableCell>
                         <TableCell>
@@ -724,6 +743,7 @@ function CardReview({
   const photo = getPhoto(current);
   const headline = getHeadline(current);
   const summary = getSummary(current);
+  const rank = getRank(current);
   const about = (current.about as string) || (current.linkedin_about as string) || "";
   const experience = (current.experience as string) || (current.linkedin_experience as string) || "";
   const education = (current.education as string) || (current.linkedin_education as string) || "";
@@ -753,7 +773,20 @@ function CardReview({
               </div>
             )}
             <div className="flex-1 min-w-0 pt-1">
-              <h2 className="text-xl font-bold tracking-tight">{getName(current)}</h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-xl font-bold tracking-tight">{getName(current)}</h2>
+                {rank && (
+                  <span className="text-sm font-bold text-muted-foreground tabular-nums">
+                    #{rank.rank}
+                    <span className="text-xs font-normal text-muted-foreground/60">/{rank.total}</span>
+                  </span>
+                )}
+                {rank && (
+                  <span className="text-xs font-semibold px-1.5 py-0.5 rounded bg-primary/10 text-primary tabular-nums">
+                    {rank.score}
+                  </span>
+                )}
+              </div>
               {headline && <p className="text-sm text-muted-foreground mt-0.5 line-clamp-2">{headline}</p>}
               <div className="flex items-center gap-2 mt-2 flex-wrap">
                 {current.attendee_type && (
