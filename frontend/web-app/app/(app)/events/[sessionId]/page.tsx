@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -21,6 +21,15 @@ import {
   ExternalLink,
   ArrowUpDown,
   Trash2,
+  ChevronLeft,
+  ChevronRight,
+  Building2,
+  MapPin,
+  GraduationCap,
+  Briefcase,
+  Mail,
+  LayoutGrid,
+  TableIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -89,6 +98,8 @@ export default function EventWorkspacePage() {
   const [copiedEmails, setCopiedEmails] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [clearing, setClearing] = useState(false);
+  const [viewMode, setViewMode] = useState<"table" | "cards">("table");
+  const [cardIndex, setCardIndex] = useState(0);
 
   /* ── Counts ── */
   const accepted = applicants.filter((a) => a.status === "accepted").length;
@@ -298,7 +309,7 @@ export default function EventWorkspacePage() {
 
         {/* ── Guests Tab ── */}
         <TabsContent value="guests" className="mt-4 space-y-4">
-          {/* Search */}
+          {/* Search + view toggle */}
           <div className="flex items-center gap-3">
             <div className="relative flex-1 max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
@@ -306,9 +317,18 @@ export default function EventWorkspacePage() {
               {search && <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2"><X className="size-4 text-muted-foreground" /></button>}
             </div>
             <p className="text-xs text-muted-foreground">{filtered.length} results</p>
+            <div className="flex items-center rounded-lg border p-0.5 ml-auto">
+              <button onClick={() => setViewMode("table")}
+                className={`px-2 py-1 rounded-md text-xs font-medium transition-colors ${viewMode === "table" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+                <TableIcon className="size-4" />
+              </button>
+              <button onClick={() => { setViewMode("cards"); setCardIndex(0); }}
+                className={`px-2 py-1 rounded-md text-xs font-medium transition-colors ${viewMode === "cards" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+                <LayoutGrid className="size-4" />
+              </button>
+            </div>
           </div>
 
-          {/* Table */}
           {total === 0 ? (
             <Card className="border-dashed">
               <CardContent className="flex flex-col items-center justify-center py-16">
@@ -320,6 +340,13 @@ export default function EventWorkspacePage() {
                 </Button>
               </CardContent>
             </Card>
+          ) : viewMode === "cards" ? (
+            <CardReview
+              applicants={filtered}
+              index={cardIndex}
+              onIndexChange={setCardIndex}
+              onStatusChange={handleStatusChange}
+            />
           ) : (
             <div className="rounded-lg border">
               <Table>
@@ -572,6 +599,193 @@ export default function EventWorkspacePage() {
           />
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/* ── Card Review ── */
+
+function CardReview({
+  applicants,
+  index,
+  onIndexChange,
+  onStatusChange,
+}: {
+  applicants: Applicant[];
+  index: number;
+  onIndexChange: (i: number) => void;
+  onStatusChange: (id: string, status: string) => void;
+}) {
+  const current = applicants[index];
+
+  // Keyboard nav
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      switch (e.key) {
+        case "ArrowLeft": case "a":
+          e.preventDefault();
+          if (index > 0) onIndexChange(index - 1);
+          break;
+        case "ArrowRight": case "d":
+          e.preventDefault();
+          if (index < applicants.length - 1) onIndexChange(index + 1);
+          break;
+        case "1":
+          e.preventDefault();
+          if (current) onStatusChange(current.applicant_id, "accepted");
+          break;
+        case "2":
+          e.preventDefault();
+          if (current) onStatusChange(current.applicant_id, "waitlisted");
+          break;
+        case "3":
+          e.preventDefault();
+          if (current) onStatusChange(current.applicant_id, "rejected");
+          break;
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  });
+
+  if (!current || applicants.length === 0) {
+    return <p className="text-center py-12 text-sm text-muted-foreground">No guests to review.</p>;
+  }
+
+  const photo = getPhoto(current);
+  const headline = getHeadline(current);
+  const summary = getSummary(current);
+  const about = (current.about as string) || (current.linkedin_about as string) || "";
+  const experience = (current.experience as string) || (current.linkedin_experience as string) || "";
+  const education = (current.education as string) || (current.linkedin_education as string) || "";
+  const company = current.company || (current.linkedin_company as string) || "";
+  const location = current.location || (current.linkedin_location as string) || "";
+
+  return (
+    <div className="flex flex-col items-center gap-4 max-w-lg mx-auto">
+      {/* Progress */}
+      <div className="w-full flex items-center gap-3 text-xs text-muted-foreground">
+        <span className="tabular-nums font-medium">{index + 1} / {applicants.length}</span>
+        <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+          <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${((index + 1) / applicants.length) * 100}%` }} />
+        </div>
+      </div>
+
+      {/* Card */}
+      <Card className="w-full shadow-lg border-border/80">
+        {/* Photo + Name header */}
+        <div className="p-6 pb-4">
+          <div className="flex items-start gap-4">
+            {photo ? (
+              <img src={photo} alt="" className="size-20 rounded-2xl object-cover shrink-0 shadow-md" />
+            ) : (
+              <div className="size-20 rounded-2xl bg-gradient-to-br from-muted to-muted/60 flex items-center justify-center shrink-0 text-3xl font-bold text-muted-foreground/50 shadow-md">
+                {getName(current).charAt(0).toUpperCase()}
+              </div>
+            )}
+            <div className="flex-1 min-w-0 pt-1">
+              <h2 className="text-xl font-bold tracking-tight">{getName(current)}</h2>
+              {headline && <p className="text-sm text-muted-foreground mt-0.5 line-clamp-2">{headline}</p>}
+              <div className="flex items-center gap-2 mt-2 flex-wrap">
+                {current.attendee_type && (
+                  <Badge variant="outline" className="text-[11px]"
+                    style={{ borderColor: getTypeColor(current.attendee_type) + "40", color: getTypeColor(current.attendee_type), backgroundColor: getTypeColor(current.attendee_type) + "10" }}>
+                    {current.attendee_type_detail || getTypeLabel(current.attendee_type)}
+                  </Badge>
+                )}
+                <Badge variant={current.status === "accepted" ? "default" : current.status === "rejected" ? "destructive" : "secondary"} className="text-[11px]">
+                  {current.status.charAt(0).toUpperCase() + current.status.slice(1)}
+                </Badge>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Info chips */}
+        {(company || location || current.email || current.linkedin_url) && (
+          <div className="px-6 pb-3 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
+            {company && <span className="flex items-center gap-1"><Building2 className="size-3" />{company}</span>}
+            {location && <span className="flex items-center gap-1"><MapPin className="size-3" />{location}</span>}
+            {current.email && <a href={`mailto:${current.email}`} className="flex items-center gap-1 hover:text-foreground"><Mail className="size-3" />{current.email}</a>}
+            {current.linkedin_url && <a href={current.linkedin_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-blue-600 hover:text-blue-500"><Linkedin className="size-3" />Profile<ExternalLink className="size-2.5" /></a>}
+          </div>
+        )}
+
+        {/* AI Summary */}
+        {(summary || current.ai_reasoning) && (
+          <div className="px-6 pb-3">
+            <div className="rounded-lg bg-muted/50 border border-border/50 p-3">
+              <div className="flex items-start gap-2">
+                <Sparkles className="size-3.5 text-primary mt-0.5 shrink-0" />
+                <p className="text-sm leading-relaxed">{summary || current.ai_reasoning}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Content: About, Experience, Education */}
+        {(about || experience || education) && (
+          <div className="px-6 pb-4 space-y-3 border-t pt-4">
+            {about && (
+              <div>
+                <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1">About</h4>
+                <p className="text-sm text-muted-foreground leading-relaxed line-clamp-3">{about}</p>
+              </div>
+            )}
+            {experience && (
+              <div>
+                <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1 flex items-center gap-1"><Briefcase className="size-3" />Experience</h4>
+                <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-line line-clamp-4">{experience}</p>
+              </div>
+            )}
+            {education && (
+              <div>
+                <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1 flex items-center gap-1"><GraduationCap className="size-3" />Education</h4>
+                <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-line line-clamp-3">{education}</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Action buttons */}
+        <div className="border-t p-4 flex items-center gap-2">
+          <Button size="sm" variant={current.status === "accepted" ? "default" : "outline"} className="flex-1"
+            onClick={() => onStatusChange(current.applicant_id, "accepted")}>
+            <CheckCircle2 className="size-4 mr-1.5" />Accept
+          </Button>
+          <Button size="sm" variant={current.status === "waitlisted" ? "default" : "outline"} className="flex-1"
+            onClick={() => onStatusChange(current.applicant_id, "waitlisted")}>
+            <Clock className="size-4 mr-1.5" />Waitlist
+          </Button>
+          <Button size="sm" variant={current.status === "rejected" ? "destructive" : "outline"} className="flex-1"
+            onClick={() => onStatusChange(current.applicant_id, "rejected")}>
+            <XCircle className="size-4 mr-1.5" />Reject
+          </Button>
+        </div>
+      </Card>
+
+      {/* Navigation */}
+      <div className="flex items-center gap-4">
+        <Button variant="outline" size="sm" disabled={index === 0}
+          onClick={() => onIndexChange(index - 1)}>
+          <ChevronLeft className="size-4 mr-1" />Prev
+        </Button>
+        <span className="text-xs text-muted-foreground">
+          <kbd className="px-1 py-0.5 rounded border bg-muted text-[10px] font-mono">A</kbd> prev
+          <span className="mx-2">|</span>
+          <kbd className="px-1 py-0.5 rounded border bg-muted text-[10px] font-mono">D</kbd> next
+          <span className="mx-2">|</span>
+          <kbd className="px-1 py-0.5 rounded border bg-muted text-[10px] font-mono">1</kbd>
+          <kbd className="px-1 py-0.5 rounded border bg-muted text-[10px] font-mono mx-0.5">2</kbd>
+          <kbd className="px-1 py-0.5 rounded border bg-muted text-[10px] font-mono">3</kbd> actions
+        </span>
+        <Button variant="outline" size="sm" disabled={index >= applicants.length - 1}
+          onClick={() => onIndexChange(index + 1)}>
+          Next<ChevronRight className="size-4 ml-1" />
+        </Button>
+      </div>
     </div>
   );
 }
