@@ -145,7 +145,7 @@ export function ProfileSwipeView({
   const education = (current[`education`] as string) || (current[`linkedin_education`] as string) || "";
   const company = current.company || (current[`linkedin_company`] as string) || "";
   const location = current.location || (current[`linkedin_location`] as string) || "";
-  const summary = (current[`linkedin_summary`] as string) || "";
+  const summary = (current[`ai_summary`] as string) || (current[`linkedin_summary`] as string) || "";
   const investorScore = Number(current[`investor_score`] || current[`ai_score`] || 0);
   const rank = index + 1;
   const totalInCategory = sorted.length;
@@ -255,7 +255,7 @@ export function ProfileSwipeView({
                   <Sparkles className="size-3.5 text-gold mt-0.5 shrink-0" />
                   <div className="space-y-1 text-sm leading-relaxed">
                     {summary ? (
-                      <p className="text-foreground/90">{summary}</p>
+                      <p className="text-foreground/90 whitespace-pre-line">{summary}</p>
                     ) : current.ai_reasoning ? (
                       <p className="text-foreground/90">
                         {current.ai_reasoning.includes(" | ")

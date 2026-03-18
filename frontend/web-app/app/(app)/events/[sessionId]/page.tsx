@@ -903,33 +903,29 @@ export default function EventWorkspacePage() {
                         </div>
                       )}
 
-                      {/* About snippet */}
-                      {about && (
-                        <div className="px-4 pb-2">
-                          <p className="text-[11px] text-muted-foreground/70 line-clamp-2 leading-relaxed">{about}</p>
-                        </div>
-                      )}
-
                       {/* AI summary */}
-                      {(a[`ai_summary`] || a[`linkedin_summary`] || a.ai_reasoning) && (
-                        <div className="px-4 pb-2">
-                          <div className="rounded-lg bg-gold/5 border border-gold/10 px-2.5 py-1.5">
-                            <p className="text-[11px] text-muted-foreground line-clamp-2 flex items-start gap-1.5">
-                              <Sparkles className="size-3 mt-0.5 shrink-0 text-gold" />
-                              {(a[`ai_summary`] as string) || (a[`linkedin_summary`] as string) || (
-                                a.ai_reasoning!.includes(" | ")
-                                  ? (() => {
-                                      const parts = a.ai_reasoning!.split(" | ");
-                                      const accepts = parts.filter((p: string) => p.includes("[ACCEPT]")).length;
-                                      const firstReason = parts[0]?.replace(/^.*?\]:\s*/, "") || "";
-                                      return `${accepts}/${parts.length} judges accepted. ${firstReason}`;
-                                    })()
-                                  : a.ai_reasoning
-                              )}
-                            </p>
-                          </div>
-                        </div>
-                      )}
+                      {(() => {
+                        const summary = (a[`ai_summary`] as string) || (a[`linkedin_summary`] as string) || "";
+                        if (summary) {
+                          return (
+                            <div className="px-4 pb-2">
+                              <div className="rounded-lg bg-gold/5 border border-gold/10 px-2.5 py-1.5">
+                                <div className="text-[11px] text-muted-foreground leading-relaxed whitespace-pre-line line-clamp-4">
+                                  {summary}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        }
+                        if (about) {
+                          return (
+                            <div className="px-4 pb-2">
+                              <p className="text-[11px] text-muted-foreground/70 line-clamp-2 leading-relaxed">{about}</p>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
 
                       {/* Footer: status + actions */}
                       <div className="px-4 py-2.5 border-t border-border/30 flex items-center justify-between" onClick={(e) => e.stopPropagation()}>

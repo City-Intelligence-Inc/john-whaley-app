@@ -283,7 +283,7 @@ Return ONLY a JSON object with these fields:
   "verification_status": "<verified|mismatch|needs_review|unverifiable>",
   "verification_notes": "<1-2 sentences explaining your verification reasoning>",
   "verification_flags": [<list of flag codes, or empty array>],
-  "summary": "<1 sentence: who they are and why they'd attend>"
+  "summary": "<2-4 bullet points: current role & company, key background/experience, what makes them relevant to the event. Use bullet format like '- Role at Company\\n- 10 yrs AI/ML experience\\n- Stanford PhD, published researcher'. Be specific, use real data from their profile.>"
 }}
 
 ═══════════════════════════════════════════════════════
@@ -805,8 +805,8 @@ async def classify_stream(body: BulkAnalyzeRequest):
     if not all_applicants:
         raise HTTPException(status_code=400, detail="No applicants to classify")
 
-    # Only classify those without a type yet
-    to_classify = [a for a in all_applicants if not a.get("attendee_type")]
+    # Classify those without a type OR without an ai_summary
+    to_classify = [a for a in all_applicants if not a.get("attendee_type") or not a.get("ai_summary")]
     already = len(all_applicants) - len(to_classify)
 
     async def event_stream():
