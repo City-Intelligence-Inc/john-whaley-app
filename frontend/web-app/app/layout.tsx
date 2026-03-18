@@ -26,22 +26,12 @@ export default function RootLayout({
 }>) {
   return (
     <ClerkProvider>
-      <html lang="en" className="dark" suppressHydrationWarning>
+      <html lang="en" suppressHydrationWarning>
         <body
           className={`${geistSans.variable} ${geistMono.variable} antialiased`}
         >
           {children}
-          <Toaster
-            richColors
-            theme="dark"
-            toastOptions={{
-              style: {
-                background: "hsl(220 18% 10%)",
-                border: "1px solid hsl(220 15% 18%)",
-                color: "hsl(40 10% 92%)",
-              },
-            }}
-          />
+          <Toaster richColors />
         </body>
       </html>
     </ClerkProvider>

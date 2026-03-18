@@ -1,26 +1,23 @@
 """
-Entry point. Creates the FastAPI app, configures CORS, and mounts all routers.
+Entry point. Creates the FastAPI app, configures CORS, and mounts routers.
 
 Run locally:  uvicorn main:app --reload
 Production:   uvicorn main:app --host 0.0.0.0 --port 8000
 """
 
-from fastapi import Depends, FastAPI
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from typing import Optional
+from pydantic import BaseModel
 
-from auth import require_auth
 from routes.applicants import router as applicants_router
 from routes.import_data import router as import_router
 from routes.analysis import router as analysis_router
 from routes.settings import router as settings_router
 from routes.sessions import router as sessions_router
-from routes.admin import router as admin_router
-from routes.scraper import router as scraper_router
 from routes.linkedin import router as linkedin_router
-from routes.luma import router as luma_router
-from routes.judges import router as judges_router
 
-app = FastAPI(title="John Whaley Applicant Reviewer")
+app = FastAPI(title="Selecta API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -31,9 +28,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── No-auth endpoints (must be registered BEFORE auth-protected routers) ──
-from pydantic import BaseModel
-from typing import Optional
+# ── No-auth endpoints (for local dev — registered before auth routers) ──
 
 
 class ManualScrapeIn(BaseModel):
@@ -53,35 +48,37 @@ def manual_scrape_noauth(body: ManualScrapeIn):
 
 @app.get("/sessions", tags=["sessions"])
 def list_sessions_noauth():
-    """List all sessions — no auth for local dev."""
     import db as _db
     return _db.list_sessions()
 
 
 @app.post("/sessions", tags=["sessions"])
 def create_session_noauth(body: dict):
-    """Create a session — no auth for local dev."""
     import db as _db
     return _db.create_session(body)
 
 
 @app.get("/sessions/{session_id}", tags=["sessions"])
 def get_session_noauth(session_id: str):
-    """Get a single session — no auth for local dev."""
     import db as _db
     return _db.get_session_or_404(session_id)
 
 
+@app.delete("/sessions/{session_id}", tags=["sessions"])
+def delete_session_noauth(session_id: str):
+    import db as _db
+    _db.delete_session(session_id)
+    return {"detail": "Session deleted"}
+
+
 @app.get("/applicants", tags=["applicants"])
 def list_applicants_noauth(session_id: Optional[str] = None):
-    """List applicants — no auth for local dev."""
     import db as _db
     return _db.scan_all_applicants(session_id=session_id)
 
 
 @app.get("/applicants/stats", tags=["applicants"])
 def applicant_stats_noauth(session_id: Optional[str] = None):
-    """Applicant stats — no auth for local dev."""
     import db as _db
     applicants = _db.scan_all_applicants(session_id=session_id)
     stats = {"total": 0, "pending": 0, "accepted": 0, "rejected": 0, "waitlisted": 0}
@@ -95,14 +92,12 @@ def applicant_stats_noauth(session_id: Optional[str] = None):
 
 @app.put("/applicants/{applicant_id}", tags=["applicants"])
 def update_applicant_noauth(applicant_id: str, body: dict):
-    """Update applicant — no auth for local dev."""
     import db as _db
     return _db.update_applicant_fields(applicant_id, body)
 
 
 @app.put("/applicants/batch-status", tags=["applicants"])
 def batch_status_noauth(body: dict):
-    """Batch status update — no auth for local dev."""
     import db as _db
     ids = body.get("applicant_ids", [])
     status = body.get("status", "pending")
@@ -111,23 +106,6 @@ def batch_status_noauth(body: dict):
         _db.update_applicant_fields(aid, {"status": status})
         updated.append(aid)
     return {"updated": updated}
-
-
-@app.get("/sessions/{session_id}/collaborators", tags=["sessions"])
-def get_collaborators_noauth(session_id: str):
-    """Get collaborators for a session."""
-    import db as _db
-    session = _db.get_session_or_404(session_id)
-    return {"collaborators": session.get("collaborators", [])}
-
-
-@app.put("/sessions/{session_id}/collaborators", tags=["sessions"])
-def update_collaborators_noauth(session_id: str, body: dict):
-    """Update collaborators for a session."""
-    import db as _db
-    collaborators = body.get("collaborators", [])
-    _db.update_session_fields(session_id, {"collaborators": collaborators})
-    return {"collaborators": collaborators}
 
 
 @app.get("/linkedin/database", tags=["linkedin"])
@@ -142,46 +120,17 @@ def linkedin_database_noauth():
     return {"items": items, "count": len(items)}
 
 
-# Settings router mounted WITHOUT auth for local dev convenience
+# Settings router (no auth)
 app.include_router(settings_router)
 
-# All routers — no auth for now (auth handled per-route where needed)
+# All routers
 app.include_router(sessions_router)
 app.include_router(applicants_router)
 app.include_router(import_router)
 app.include_router(analysis_router)
-app.include_router(admin_router)
-app.include_router(scraper_router)
 app.include_router(linkedin_router)
-app.include_router(luma_router)
-app.include_router(judges_router)
 
 
 @app.get("/")
 def health():
     return {"status": "ok"}
-
-
-# ── No-auth single-profile scrape (for local HTML tool) ──
-class ScrapeOneIn(BaseModel):
-    url: str
-    li_at: Optional[str] = None
-    user_agent: Optional[str] = None
-
-
-@app.post("/linkedin/scrape-one", tags=["linkedin"])
-async def scrape_one_noauth(body: ScrapeOneIn):
-    """Scrape a single LinkedIn profile using li_at cookie, save to DB, return result."""
-    from routes.linkedin import _scrape_profile_requests, normalize_linkedin_url
-    import db as _db
-
-    norm = normalize_linkedin_url(body.url)
-    if not norm:
-        return {"error": f"Invalid LinkedIn URL: {body.url}"}
-
-    result = await _scrape_profile_requests(norm, body.li_at, body.user_agent)
-    result_dict = result.model_dump()
-
-    # Save to linkedin-scrapes table
-    _db.save_linkedin_scrape(result_dict)
-    return result_dict

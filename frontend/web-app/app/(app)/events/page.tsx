@@ -1,345 +1,224 @@
 "use client";
 
-import { useState } from "react";
-import {
-  Upload, Loader2, Brain, Download, Users, Search, X, Plus, ChevronDown,
-  Key, Eye, EyeOff, CheckCircle2, XCircle, Building2, MapPin, Sparkles,
-  Linkedin, ScanSearch, CircleCheck, AlertTriangle, Trash2, Hash,
-} from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import {
+  Plus,
+  CalendarDays,
+  Users,
+  Loader2,
+  ExternalLink,
+  Trash2,
+  Link2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
 } from "@/components/ui/dialog";
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { ApplicantDetailSheet } from "@/components/applicant-detail-sheet";
-import { CSVUploader } from "@/components/csv-uploader";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api";
-import { useEventsPage } from "./_hooks/use-events-page";
+import type { Session } from "@/lib/api";
 
 export default function EventsPage() {
-  const e = useEventsPage();
   const router = useRouter();
-
-  const [selectedApplicantId, setSelectedApplicantId] = useState<string | null>(null);
-  const [showImport, setShowImport] = useState(false);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
+  const [lumaUrl, setLumaUrl] = useState("");
   const [creating, setCreating] = useState(false);
-  const [showKey, setShowKey] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [deleting, setDeleting] = useState(false);
 
-  const selectedApplicant = selectedApplicantId ? e.applicants.find(a => a.applicant_id === selectedApplicantId) || null : null;
+  const loadSessions = useCallback(async () => {
+    try {
+      const data = await api.listSessions();
+      setSessions(data);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to load events");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadSessions(); }, [loadSessions]);
 
   const handleCreate = async () => {
-    if (!newName.trim()) return;
+    if (!newName.trim() && !lumaUrl.trim()) return;
     setCreating(true);
-    try { await e.createEvent(newName.trim()); setShowCreate(false); setNewName(""); }
-    catch { toast.error("Failed to create"); }
-    finally { setCreating(false); }
-  };
-
-  const handleDelete = async () => {
-    if (!e.selectedSessionId) return;
-    setDeleting(true);
     try {
-      await api.deleteSession(e.selectedSessionId);
-      e.setSelectedSessionId(null);
-      await e.loadSessions();
-      setShowDeleteConfirm(false);
+      if (lumaUrl.trim()) {
+        const event = await api.lookupLumaEvent(lumaUrl.trim());
+        const result = await api.importFromLuma(event.api_id);
+        toast.success(`Imported from Luma: ${event.name}`);
+        router.push(`/events/${result.session_id}`);
+      } else {
+        const session = await api.createSession({ name: newName.trim() });
+        toast.success("Event created");
+        router.push(`/events/${session.session_id}`);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleDelete = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm("Delete this event and all its applicants?")) return;
+    try {
+      await api.deleteSession(id);
       toast.success("Event deleted");
-    } catch { toast.error("Failed to delete"); }
-    finally { setDeleting(false); }
+      setSessions((prev) => prev.filter((s) => s.session_id !== id));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete");
+    }
   };
 
-  const handleExport = () => {
-    if (!e.applicants.length) return;
-    const headers = ["rank", "name", "email", "approval_status", "category", "ai_reasoning", "company", "title", "location", "linkedin_url"];
-    const statusMap: Record<string, string> = { accepted: "approved", rejected: "declined", waitlisted: "pending_approval", pending: "pending_approval" };
-    const esc = (v: unknown) => { const s = String(v ?? ""); return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s; };
-    const rows = [
-      headers.join(","),
-      ...e.filtered.map((a, i) => [
-        i + 1, esc(a.name), esc(a.email), statusMap[a.status] || "pending_approval",
-        esc(a.attendee_type), esc(a.ai_reasoning),
-        esc(a.company), esc(a.title), esc(a.location), esc(a.linkedin_url),
-      ].join(","))
-    ];
-    const blob = new Blob([rows.join("\n")], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a"); link.href = url;
-    link.download = `${(e.session?.name || "event").replace(/\s+/g, "-").toLowerCase()}-rankings.csv`;
-    link.click(); URL.revokeObjectURL(url);
-  };
-
-  if (e.sessionsLoading) return <div className="flex items-center justify-center py-20"><Loader2 className="size-6 animate-spin text-gold" /></div>;
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-4">
-      {/* ── Top Bar ── */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" className="gap-2 min-w-[160px] justify-between">
-              <span className="truncate">{e.session?.name || "Select event"}</span>
-              <ChevronDown className="size-3 text-muted-foreground" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-[240px]">
-            {e.sessions.map(s => (
-              <DropdownMenuItem key={s.session_id} onClick={() => e.setSelectedSessionId(s.session_id)}>
-                <span className="truncate flex-1">{s.name}</span>
-                <span className="text-xs text-muted-foreground ml-2">{s.applicant_count}</span>
-              </DropdownMenuItem>
-            ))}
-            {e.sessions.length > 0 && <DropdownMenuSeparator />}
-            <DropdownMenuItem onClick={() => setShowCreate(true)}><Plus className="size-3 mr-2" />New Event</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        {e.selectedSessionId && (
-          <>
-            <Button size="sm" onClick={() => setShowImport(true)} className="bg-gold text-gold-foreground hover:bg-gold/90">
-              <Upload className="size-3 mr-1.5" />Import
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => router.push(`/events/${e.selectedSessionId}/analyze`)} disabled={e.total === 0}>
-              <Brain className="size-3 mr-1.5" />Analyze
-            </Button>
-            <Button size="sm" variant="outline" onClick={handleExport} disabled={e.total === 0}>
-              <Download className="size-3 mr-1.5" />Export
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => setShowDeleteConfirm(true)} className="text-destructive hover:bg-destructive/10">
-              <Trash2 className="size-3" />
-            </Button>
-          </>
-        )}
-
-        <div className="flex items-center gap-1 ml-auto">
-          <div className="relative">
-            <Key className="absolute left-2 top-1/2 -translate-y-1/2 size-3 text-muted-foreground" />
-            <Input type={showKey ? "text" : "password"} value={e.apiKey} onChange={ev => e.setApiKey(ev.target.value)}
-              placeholder="AI API key" className="h-7 w-[160px] pl-6 pr-7 text-[11px] font-mono" />
-            <button onClick={() => setShowKey(!showKey)} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground">
-              {showKey ? <EyeOff className="size-3" /> : <Eye className="size-3" />}
-            </button>
-          </div>
-          {e.total > 0 && (
-            <span className="text-[11px] text-muted-foreground ml-2">
-              {e.accepted}/{e.total} going
-            </span>
-          )}
+    <div className="max-w-4xl mx-auto space-y-8">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Events</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Select an event to review its guest list.
+          </p>
         </div>
+        <Button onClick={() => setShowCreate(true)}>
+          <Plus className="size-4 mr-2" />
+          New Event
+        </Button>
       </div>
 
-      {/* ── Empty ── */}
-      {!e.selectedSessionId && (
-        <Card className="py-12"><CardContent className="flex flex-col items-center text-center">
-          <Users className="size-8 text-muted-foreground/20 mb-2" />
-          <p className="text-sm font-medium mb-1">No events</p>
-          <p className="text-xs text-muted-foreground mb-3">Create an event and import guests</p>
-          <Button size="sm" onClick={() => setShowCreate(true)} className="bg-gold text-gold-foreground hover:bg-gold/90">
-            <Plus className="size-3 mr-1.5" />New Event
-          </Button>
-        </CardContent></Card>
-      )}
-
-      {e.selectedSessionId && e.eventLoading && (
-        <div className="flex items-center justify-center py-12"><Loader2 className="size-5 animate-spin text-gold" /></div>
-      )}
-
-      {/* ── Ranked Guest List ── */}
-      {e.selectedSessionId && !e.eventLoading && (
-        <div className="space-y-3">
-          {e.total > 0 && (
-            <div className="relative max-w-xs">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground" />
-              <Input value={e.search} onChange={ev => e.setSearch(ev.target.value)} placeholder="Search..." className="pl-8 h-7 text-xs" />
-              {e.search && <button onClick={() => e.setSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"><X className="size-3" /></button>}
-            </div>
-          )}
-
-          {e.total === 0 && (
-            <Card className="py-10"><CardContent className="flex flex-col items-center text-center">
-              <Upload className="size-6 text-muted-foreground/20 mb-2" />
-              <p className="text-sm font-medium mb-1">No guests</p>
-              <Button size="sm" onClick={() => setShowImport(true)} className="bg-gold text-gold-foreground hover:bg-gold/90 mt-2">
-                <Upload className="size-3 mr-1.5" />Import CSV
-              </Button>
-            </CardContent></Card>
-          )}
-
-          <div className="space-y-2">
-            {e.filtered.map((a, rank) => {
-              const photo = (a[`linkedin_image`] as string) || (a[`photo_url`] as string) || "";
-              const headline = (a[`linkedin_headline`] as string) || a.title || "";
-              const company = a.company || (a[`linkedin_company`] as string) || "";
-              const location = a.location || (a[`linkedin_location`] as string) || "";
-              const name = a.name || (a[`linkedin_name`] as string) || a.email || "No name";
-              const issues = (a[`linkedin_issues`] as string) || "";
-              const isClean = issues === "clean";
-              const hasIssues = issues && !isClean;
-              const investigating = e.investigatingIds.has(a.applicant_id);
-              const category = a.attendee_type || "";
-
-              const investigations = Object.entries(a)
-                .filter(([k]) => k.startsWith("investigation_"))
-                .map(([k, v]) => ({
-                  id: k.replace("investigation_", ""),
-                  name: e.agents.find(ag => ag.id === k.replace("investigation_", ""))?.name || k,
-                  summary: String(v).split("\n")[0],
-                  full: String(v),
-                }));
-
-              return (
-                <Card key={a.applicant_id} className="hover:border-border/80 transition-all">
-                  <CardContent className="p-3">
-                    <div className="flex items-start gap-3">
-                      {/* Rank number */}
-                      <div className="flex flex-col items-center shrink-0 w-8 pt-1">
-                        <span className="text-lg font-bold tabular-nums text-muted-foreground/40">
-                          {rank + 1}
-                        </span>
-                      </div>
-
-                      {/* Photo */}
-                      <div className="shrink-0 cursor-pointer" onClick={() => setSelectedApplicantId(a.applicant_id)}>
-                        {photo ? <img src={photo} alt="" className="size-10 rounded-full object-cover" />
-                          : <div className="size-10 rounded-full bg-muted flex items-center justify-center text-xs font-semibold text-muted-foreground/40">{name.charAt(0).toUpperCase()}</div>}
-                      </div>
-
-                      {/* Info */}
-                      <div className="flex-1 min-w-0 space-y-1.5">
-                        <div className="flex items-center gap-2 cursor-pointer" onClick={() => setSelectedApplicantId(a.applicant_id)}>
-                          <span className="text-sm font-medium truncate">{name}</span>
-                          {category && <Badge variant="outline" className="text-[9px] h-4 shrink-0">{a.attendee_type_detail || category}</Badge>}
-                        </div>
-                        {headline && <p className="text-[11px] text-muted-foreground truncate">{headline}</p>}
-
-                        {(company || location) && (
-                          <div className="flex gap-2.5 text-[10px] text-muted-foreground">
-                            {company && <span className="flex items-center gap-0.5 truncate"><Building2 className="size-2.5" />{company}</span>}
-                            {location && <span className="flex items-center gap-0.5 truncate"><MapPin className="size-2.5" />{location}</span>}
-                          </div>
-                        )}
-
-                        {a.ai_reasoning && (
-                          <p className="text-[10px] text-muted-foreground/60 line-clamp-2 flex items-start gap-1">
-                            <Sparkles className="size-2.5 mt-0.5 shrink-0 text-gold" />
-                            {String(a.ai_reasoning).includes(" | ") ? String(a.ai_reasoning).split(" | ")[0].replace(/^.*?\]:\s*/, "") : a.ai_reasoning}
-                          </p>
-                        )}
-
-                        {investigations.length > 0 && (
-                          <div className="space-y-1">
-                            {investigations.map(inv => (
-                              <Collapsible key={inv.id}>
-                                <CollapsibleTrigger className="flex items-center gap-1 w-full text-left">
-                                  <Badge variant="outline" className="text-[9px] h-4 gap-0.5 shrink-0">{inv.name}</Badge>
-                                  <span className="text-[10px] text-muted-foreground truncate">{inv.summary}</span>
-                                </CollapsibleTrigger>
-                                <CollapsibleContent>
-                                  <div className="mt-1 rounded bg-muted/50 p-2 text-[10px] text-muted-foreground leading-relaxed whitespace-pre-wrap max-h-[150px] overflow-y-auto">{inv.full}</div>
-                                </CollapsibleContent>
-                              </Collapsible>
-                            ))}
-                          </div>
-                        )}
-
-                        <div className="flex items-center gap-2">
-                          {isClean && <Badge variant="secondary" className="text-emerald-500 bg-emerald-500/10 text-[9px] h-4"><CircleCheck className="size-2.5 mr-0.5" />Verified</Badge>}
-                          {hasIssues && <span className="flex items-center gap-0.5 text-[9px] text-amber-500"><AlertTriangle className="size-2.5" />{issues.split("; ").map(i => i.replace("missing_", "No ").replace(/_/g, " ")).join(" / ")}</span>}
-                        </div>
-                      </div>
-
-                      {/* Actions */}
-                      <div className="flex flex-col items-end gap-1 shrink-0" onClick={ev => ev.stopPropagation()}>
-                        <div className="flex items-center gap-0.5">
-                          {a.linkedin_url && <a href={a.linkedin_url} target="_blank" rel="noopener noreferrer" className="p-1 text-blue-500 hover:text-blue-400"><Linkedin className="size-3" /></a>}
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <button className="p-1 text-muted-foreground hover:text-gold" disabled={investigating}>
-                                {investigating ? <Loader2 className="size-3 animate-spin" /> : <ScanSearch className="size-3" />}
-                              </button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-[200px]">
-                              {e.agents.map(ag => (
-                                <DropdownMenuItem key={ag.id} onClick={() => e.runInvestigation(a.applicant_id, ag.id)}>
-                                  <div><div className="text-xs font-medium">{ag.name}</div><div className="text-[10px] text-muted-foreground">{ag.description}</div></div>
-                                </DropdownMenuItem>
-                              ))}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                        {/* AI recommendation */}
-                        {a.status !== "pending" && (
-                          <Badge variant="secondary" className={`text-[9px] mb-1 ${a.status === "accepted" ? "text-emerald-500 bg-emerald-500/10" : a.status === "rejected" ? "text-red-500 bg-red-500/10" : "text-amber-500 bg-amber-500/10"}`}>
-                            {a.status === "accepted" ? "Recommended" : a.status === "rejected" ? "Not Recommended" : "Maybe"}
-                          </Badge>
-                        )}
-                        {a.status === "pending" && (
-                          <Badge variant="secondary" className="text-[9px] mb-1 text-muted-foreground">Unranked</Badge>
-                        )}
-                        {/* User actions */}
-                        <div className="flex gap-0.5">
-                          <Button size="sm" variant="ghost" onClick={() => e.changeStatus(a.applicant_id, a.status === "accepted" ? "pending" : "accepted")}
-                            className={`h-6 px-1.5 text-[10px] ${a.status === "accepted" ? "text-emerald-500 bg-emerald-500/10" : "text-muted-foreground hover:text-emerald-500 hover:bg-emerald-500/10"}`}>
-                            <CheckCircle2 className="size-2.5" />
-                          </Button>
-                          <Button size="sm" variant="ghost" onClick={() => e.changeStatus(a.applicant_id, a.status === "rejected" ? "pending" : "rejected")}
-                            className={`h-6 px-1.5 text-[10px] ${a.status === "rejected" ? "text-red-500 bg-red-500/10" : "text-muted-foreground hover:text-red-500 hover:bg-red-500/10"}`}>
-                            <XCircle className="size-2.5" />
-                          </Button>
-                        </div>
-                      </div>
+      {sessions.length === 0 ? (
+        <Card className="border-dashed">
+          <CardContent className="flex flex-col items-center justify-center py-16">
+            <CalendarDays className="size-12 text-muted-foreground/30 mb-4" />
+            <p className="text-lg font-medium mb-1">No events yet</p>
+            <p className="text-sm text-muted-foreground mb-4">
+              Create an event or import from Luma to get started.
+            </p>
+            <Button onClick={() => setShowCreate(true)}>
+              <Plus className="size-4 mr-2" />
+              New Event
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid gap-3">
+          {sessions.map((s) => (
+            <Card
+              key={s.session_id}
+              className="cursor-pointer transition-all hover:shadow-md hover:border-primary/20 group"
+              onClick={() => router.push(`/events/${s.session_id}`)}
+            >
+              <CardContent className="flex items-center gap-4 py-4">
+                <div className="flex size-10 items-center justify-center rounded-lg bg-primary/5 text-primary shrink-0">
+                  <CalendarDays className="size-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium truncate group-hover:text-primary transition-colors">
+                    {s.name}
+                  </p>
+                  <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground">
+                    <span className="flex items-center gap-1">
+                      <Users className="size-3" />
+                      {s.applicant_count} guests
+                    </span>
+                    {s.source && (
+                      <Badge variant="secondary" className="text-[10px] h-5">
+                        {s.source}
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {s.last_analysis_results && (
+                    <div className="text-xs text-muted-foreground text-right">
+                      <span className="text-emerald-600 font-medium">{s.last_analysis_results.accepted}</span>
+                      {" / "}
+                      <span>{s.last_analysis_results.total}</span>
+                      <span className="ml-1">accepted</span>
                     </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-8 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive"
+                    onClick={(e) => handleDelete(s.session_id, e)}
+                  >
+                    <Trash2 className="size-4" />
+                  </Button>
+                  <ExternalLink className="size-4 text-muted-foreground opacity-0 group-hover:opacity-100" />
+                </div>
+              </CardContent>
+            </Card>
+          ))}
         </div>
       )}
 
-      {selectedApplicant && <ApplicantDetailSheet applicant={selectedApplicant} onStatusChange={(id, status) => e.changeStatus(id, status!)} onClose={() => setSelectedApplicantId(null)} />}
-
-      <Dialog open={showImport} onOpenChange={setShowImport}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader><DialogTitle>Import Guests</DialogTitle><DialogDescription>Upload a CSV.</DialogDescription></DialogHeader>
-          <CSVUploader onUploadSuccess={(count) => { e.refreshAll(); e.loadSessions(); setShowImport(false); toast.success(`Imported ${count} guests`); }} sessionId={e.selectedSessionId || undefined} />
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader><DialogTitle>Delete Event</DialogTitle>
-            <DialogDescription>This will delete the event and all {e.total} guests permanently.</DialogDescription></DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowDeleteConfirm(false)}>Cancel</Button>
-            <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
-              {deleting && <Loader2 className="size-3 mr-1.5 animate-spin" />}Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader><DialogTitle>New Event</DialogTitle></DialogHeader>
-          <Input placeholder="Event name" value={newName} onChange={ev => setNewName(ev.target.value)} onKeyDown={ev => { if (ev.key === "Enter") handleCreate(); }} />
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
-            <Button onClick={handleCreate} disabled={!newName.trim() || creating} className="bg-gold hover:bg-gold/90 text-gold-foreground">
-              {creating && <Loader2 className="size-3 mr-1.5 animate-spin" />}Create
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>New Event</DialogTitle>
+            <DialogDescription>
+              Create a blank event or import guests from a Luma link.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div className="space-y-2">
+              <Label>Event Name</Label>
+              <Input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder="e.g. Demo Day 2026"
+              />
+            </div>
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t" />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-background px-2 text-muted-foreground">
+                  or import from Luma
+                </span>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1.5">
+                <Link2 className="size-3.5" />
+                Luma Event URL
+              </Label>
+              <Input
+                value={lumaUrl}
+                onChange={(e) => setLumaUrl(e.target.value)}
+                placeholder="https://lu.ma/your-event"
+              />
+            </div>
+            <Button
+              onClick={handleCreate}
+              disabled={creating || (!newName.trim() && !lumaUrl.trim())}
+              className="w-full"
+            >
+              {creating && <Loader2 className="size-4 mr-2 animate-spin" />}
+              {lumaUrl.trim() ? "Import from Luma" : "Create Event"}
             </Button>
-          </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

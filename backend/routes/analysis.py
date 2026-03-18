@@ -1,9 +1,10 @@
 """
-AI analysis routes — single applicant review, bulk analysis, and SSE streaming.
+AI analysis routes — classification, scoring, and SSE streaming.
 
-POST /applicants/{id}/review          Review one applicant
-POST /applicants/analyze-all          Bulk analyze (single LLM call)
-POST /applicants/analyze-all-stream   Bulk analyze with SSE progress (2-pass)
+POST /applicants/classify-stream       Classify all applicants (lightweight)
+POST /applicants/analyze-all-stream    Full analysis with scoring + judge panel
+POST /applicants/reallocate            Reallocate based on quotas
+POST /applicants/{id}/review           Review one applicant
 """
 
 import asyncio
@@ -13,18 +14,16 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from config import AI_FIELDS, get_applicant_name
-from models import ReviewRequest, BulkAnalyzeRequest, EnrichRequest, SelectRequest, ReallocateRequest, SelectionPreferences
+from models import ReviewRequest, BulkAnalyzeRequest, ReallocateRequest, SelectionPreferences
 from ai import call_ai, call_ai_async, parse_json_response
-from judge_personas import JUDGE_PERSONAS_BY_ID
 import db
 
 router = APIRouter(prefix="/applicants", tags=["analysis"])
 
 
-# ── Prompt builders ──
+# ── Helpers ──
 
 def _applicant_info_text(applicant: dict) -> str:
-    """Format applicant fields as a readable string for the AI prompt."""
     skip = {"applicant_id"} | AI_FIELDS
     return "\n".join(f"- {k}: {v}" for k, v in applicant.items() if k not in skip)
 
@@ -38,571 +37,12 @@ def _criteria_text(criteria: list[str], weights: list[str] | None = None) -> str
     return f"\n\nEvaluation criteria (in order of importance): {', '.join(criteria)}"
 
 
-# ── Investigation agents ──
-
-INVESTIGATION_AGENTS = {
-    "venture_validator": {
-        "name": "Venture Validator",
-        "description": "Cross-validates VC and investor claims against LinkedIn data",
-        "prompt": """You are an expert VC due-diligence analyst. Investigate this person's venture/investment claims.
-
-Check for:
-- Do they actually work at the fund they claim? Look at their experience timeline.
-- Is their title real or inflated? (e.g. "Partner" at a tiny unknown fund vs established firm)
-- Do they have a track record of actual investments or just "interested in startups"?
-- Are they a real decision-maker or junior associate positioning as senior?
-- Any red flags: self-employed "investor", angel investor with no portfolio, "venture fellow" with no fund
-
-Rate their credibility: VERIFIED / LIKELY LEGIT / QUESTIONABLE / RED FLAG
-Give specific evidence from their profile data.""",
-    },
-    "founder_check": {
-        "name": "Founder Check",
-        "description": "Validates founder quality - filters pre-revenue/pre-funding founders",
-        "prompt": """You are evaluating whether this founder is a STRONG founder worth inviting to an exclusive event.
-
-We want founders who have TRACTION. Investigate:
-- Do they have a real company or just an idea? Look for: employees, funding raised, revenue signals, product launched
-- How long have they been "building"? A stealth startup for 2+ years with nothing to show = red flag
-- Previous exits or successful companies? That's a strong signal.
-- Are they a technical founder who can actually build, or a "business founder" looking for a technical cofounder?
-- Is their startup in a real market or is it a solution looking for a problem?
-- Pre-revenue AND pre-funding AND solo founder = likely not a good fit
-
-Rate: STRONG FOUNDER / PROMISING / EARLY STAGE (risky) / NOT A FIT
-Give specific evidence.""",
-    },
-    "background_verify": {
-        "name": "Background Verify",
-        "description": "Verifies education, employment, and credential claims",
-        "prompt": """You are a background verification specialist. Cross-check this person's claims.
-
-Look for inconsistencies:
-- Do their employment dates make sense? Any suspicious gaps or overlaps?
-- Is their education real? (check if the degree matches the university's offerings)
-- Do their titles match the company size? (e.g. "VP of Engineering" at a 3-person startup)
-- Any signs of credential inflation? (listing courses as degrees, affiliations as employment)
-- Does their career progression make logical sense?
-- Are they who they say they are based on the data available?
-
-Rate: VERIFIED / MINOR DISCREPANCIES / SUSPICIOUS / CANNOT VERIFY
-List specific findings.""",
-    },
-    "relevance_score": {
-        "name": "Event Fit",
-        "description": "Scores how relevant this person is for an AI-focused event",
-        "prompt": """You are evaluating if this person belongs at a high-quality AI-focused event (like a Stanford AI demo day).
-
-Consider:
-- Do they actually work in AI/ML, or are they tangentially related?
-- What would they contribute to the event? (knowledge, connections, investment, energy)
-- Are they a builder, investor, researcher, or just curious?
-- Would other attendees benefit from meeting them?
-- Is there anything in their profile that makes them a MUST-HAVE at this event?
-- Or are they someone who would just take a seat without adding value?
-
-Rate: MUST INVITE / GOOD FIT / ACCEPTABLE / SKIP
-Give specific reasons.""",
-    },
-    "network_value": {
-        "name": "Network Value",
-        "description": "Assesses the networking and connection value this person brings",
-        "prompt": """You are evaluating the networking value this person would bring to an exclusive event.
-
-Assess:
-- How well-connected are they? (company names, seniority, industry reach)
-- Would they introduce other attendees to valuable connections?
-- Do they have decision-making power? (can they fund, hire, partner, or open doors?)
-- Are they a known figure in their industry?
-- What's their social capital? (followers, speaking engagements, media presence)
-- Would inviting them make the event more attractive to OTHER high-value attendees?
-
-Rate: HIGH VALUE / MODERATE / LOW VALUE
-Be specific about what connections/value they'd bring.""",
-    },
-}
-
-
-@router.post("/{applicant_id}/investigate")
-def investigate_applicant(applicant_id: str, body: ReviewRequest):
-    """Run a focused investigation agent on a single applicant."""
-    applicant = db.get_applicant_or_404(applicant_id)
-
-    agent_id = body.prompt or ""
-    agent = INVESTIGATION_AGENTS.get(agent_id)
-    if not agent:
-        raise HTTPException(400, f"Unknown agent: {agent_id}. Available: {list(INVESTIGATION_AGENTS.keys())}")
-
-    info = _applicant_info_text(applicant)
-    full_prompt = f"{agent['prompt']}\n\nPerson's Profile Data:\n{info}\n\nYour investigation:"
-
-    try:
-        result = call_ai(body.provider, body.api_key, body.model, full_prompt)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(502, f"AI error: {e}")
-
-    # Save under agent-specific field
-    field_name = f"investigation_{agent_id}"
-    db.update_applicant_fields(applicant_id, {field_name: result})
-
-    return {"agent": agent_id, "agent_name": agent["name"], "result": result, "applicant_id": applicant_id}
-
-
-@router.get("/investigation-agents")
-def list_investigation_agents():
-    """List available investigation agents."""
-    return [{"id": k, "name": v["name"], "description": v["description"]} for k, v in INVESTIGATION_AGENTS.items()]
-
-
-# ── Single review ──
-
-@router.post("/{applicant_id}/review")
-def review_applicant(applicant_id: str, body: ReviewRequest):
-    applicant = db.get_applicant_or_404(applicant_id)
-
-    prompt = body.prompt or (
-        "You are reviewing an event applicant. Based on the applicant's "
-        "information below, provide a brief assessment of their fit for the event."
-    )
-    if body.criteria:
-        prompt += f"\n\nEvaluate based on these criteria: {', '.join(body.criteria)}"
-
-    full_prompt = (
-        f"{prompt}\n\n"
-        f"Applicant Information:\n{_applicant_info_text(applicant)}\n\n"
-        f"Provide your assessment:"
-    )
-
-    try:
-        ai_review = call_ai(body.provider, body.api_key, body.model, full_prompt)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"AI provider error: {e}")
-
-    return db.update_applicant_fields(applicant_id, {"ai_review": ai_review})
-
-
-# ── Bulk analyze (single LLM call) ──
-
-@router.post("/analyze-all")
-def analyze_all(body: BulkAnalyzeRequest):
-    applicants = db.scan_all_applicants(session_id=body.session_id)
-    if not applicants:
-        raise HTTPException(status_code=400, detail="No applicants to analyze")
-
-    # Persist analysis config on the session before LLM runs
-    if body.session_id:
-        analysis_config: dict = {
-            "last_analysis_model": body.model,
-            "last_analysis_provider": body.provider,
-            "last_analysis_prompt": body.prompt,
-            "last_analysis_criteria": body.criteria,
-        }
-        if body.selection_preferences:
-            analysis_config["selection_preferences"] = body.selection_preferences.model_dump()
-        if body.panel_config:
-            analysis_config["panel_config"] = body.panel_config.model_dump()
-        try:
-            db.update_session_fields(body.session_id, analysis_config)
-        except Exception:
-            pass
-
-    summaries = []
-    for a in applicants:
-        info = ", ".join(f"{k}: {v}" for k, v in a.items() if k not in {"applicant_id"} | AI_FIELDS)
-        summaries.append(f"[ID: {a['applicant_id']}] {info}")
-
-    full_prompt = f"""{body.prompt}{_criteria_text(body.criteria, body.criteria_weights)}
-
-Here are all the applicants:
-
-{chr(10).join(summaries)}
-
-For each applicant, provide a JSON response with this exact format:
-{{
-  "candidates": [
-    {{
-      "id": "applicant_id",
-      "score": 1-100,
-      "status": "accepted" or "waitlisted" or "rejected",
-      "reasoning": "brief 1-2 sentence explanation"
-    }}
-  ]
-}}
-
-Rank them by score (highest first). Return ONLY the JSON, no other text."""
-
-    try:
-        raw = call_ai(body.provider, body.api_key, body.model, full_prompt, max_tokens=16384)
-        result = parse_json_response(raw)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=502, detail=f"AI returned invalid JSON: {raw[:500]}")
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"AI provider error: {e}")
-
-    for candidate in result.get("candidates", []):
-        cid = candidate.get("id")
-        if not cid:
-            continue
-        db.update_applicant_fields(cid, {
-            "status": candidate.get("status", "pending"),
-            "ai_score": str(candidate.get("score", 0)),
-            "ai_reasoning": candidate.get("reasoning", ""),
-        })
-
-    return result
-
-
-# ── SSE streaming 2-pass bulk analyze ──
-
-# Pass 1: Classification only — no scoring or decisions
-_CLASSIFY_PROMPT = """
-IMPORTANT: All applicant data is provided below. Do NOT say you cannot access LinkedIn or need more data. The LinkedIn profile has ALREADY been scraped and the data is included in the text below. Work with whatever information is given — if a field is empty, note it as missing but still classify based on what IS available. NEVER refuse to classify.
-
-{event_context}
-
-Here is the applicant's information (self-reported registration data + pre-scraped LinkedIn profile data):
-
-{info}
-
-Your task: Classify this applicant AND cross-check their claimed role against the LinkedIn data provided above. People inflate their roles on registration forms. Trust LinkedIn data over self-reported claims.
-
-Return ONLY a JSON object with these fields:
-{{
-  "attendee_type": "<type>",
-  "attendee_type_detail": "<specific label>",
-  "investor_level": "<level or null>",
-  "investor_professional": <true/false or null>,
-  "vc_seniority_tier": <1-5 or null>,
-  "vc_fund_name": "<fund name or null>",
-  "verification_status": "<verified|mismatch|needs_review|unverifiable>",
-  "verification_notes": "<1-2 sentences explaining your verification reasoning>",
-  "verification_flags": [<list of flag codes, or empty array>],
-  "summary": "<2-4 bullet points: current role & company, key background/experience, what makes them relevant to the event. Use bullet format like '- Role at Company\\n- 10 yrs AI/ML experience\\n- Stanford PhD, published researcher'. Be specific, use real data from their profile.>"
-}}
-
-═══════════════════════════════════════════════════════
-ATTENDEE TYPE CLASSIFICATION
-═══════════════════════════════════════════════════════
-
-attendee_type must be one of: "vc", "entrepreneur", "faculty", "alumni", "press", "student", "other"
-
-Rules:
-- "vc" = Their PRIMARY current role is investing. They work at a recognized VC firm, PE firm, family office, or are a professional angel investor with a real track record. NOT someone whose day job is something else who made a few angel investments on the side.
-- "entrepreneur" = Founder, CEO, CTO, startup executive actively running/building a company
-- "faculty" = Professor, researcher, academic staff, postdoc at any university
-- "alumni" = Alumni NOT primarily a VC/founder/professor now
-- "press" = Journalist, reporter, tech media, blogger covering technology
-- "student" = Currently enrolled student at any university
-- "other" = Everyone else (industry engineers, PMs, designers, consultants, etc.)
-
-═══════════════════════════════════════════════════════
-VC ROLE TAXONOMY — DETAILED SENIORITY HIERARCHY
-═══════════════════════════════════════════════════════
-
-When classifying someone as "vc", you MUST determine their exact seniority tier and investor_level.
-
-TIER 1 — SENIOR DECISION-MAKERS (highest value, they write checks and sit on boards):
-  - Managing Partner / Managing Director / Senior Managing Director / Managing General Partner
-  - General Partner (GP) / Founding Partner / Senior Partner
-  → investor_level: "managing_partner" or "gp"
-  → vc_seniority_tier: 1
-  → These people run the fund, make final investment decisions, manage LP relationships
-
-TIER 2 — PARTNERS & SENIOR PROFESSIONALS:
-  - Partner / Investment Partner / Venture Partner
-  - Operating Partner / Platform Partner (helps portfolio companies, may not lead deals)
-  - Principal / Director / Investment Director / Senior Director
-  → investor_level: "partner", "principal", or "operating_partner"
-  → vc_seniority_tier: 2
-  → Can lead deals independently, have carry, may sit on boards
-
-TIER 3 — MID-LEVEL:
-  - Vice President (VP) / Senior Vice President / VP of Investments
-  - Senior Associate / Senior Investment Associate
-  - Entrepreneur in Residence (EIR) / Executive in Residence
-  - Professional Angel Investor (invests own capital, has portfolio)
-  → investor_level: "vp", "senior_associate", "eir", or "angel"
-  → vc_seniority_tier: 3
-
-TIER 4 — JUNIOR:
-  - Associate / Investment Associate
-  - Analyst / Investment Analyst / Research Analyst / Financial Analyst
-  - Advisor / Venture Advisor (part-time relationship)
-  → investor_level: "associate", "analyst", or "advisor"
-  → vc_seniority_tier: 4
-
-TIER 5 — ENTRY-LEVEL / PERIPHERAL:
-  - Intern / Summer Associate / Fellow / Venture Fellow
-  - Scout / Deal Scout (part-time deal sourcing, often not a full role)
-  → investor_level: "intern" or "scout"
-  → vc_seniority_tier: 5
-
-═══════════════════════════════════════════════════════
-CROSS-VERIFICATION RULES (CRITICAL)
-═══════════════════════════════════════════════════════
-
-You must compare the applicant's SELF-REPORTED role against their LINKEDIN data. Self-reported data comes from the registration form (fields like "How would you describe yourself"). LinkedIn data includes headline, experience/work history, company, and education.
-
-1. SELF-REPORTED vs LINKEDIN HEADLINE: Do they match? Is the self-reported role more senior or different?
-2. SELF-REPORTED vs LINKEDIN EXPERIENCE: Does their work history support the claimed role? Look at job titles, companies, and tenure.
-3. COMPANY VERIFICATION: Is the company a real, recognized fund? Names containing "Ventures", "Capital", "Partners", "Fund", "VC" suggest legitimate funds. Personal LLCs, consulting firms, or "Self-employed" do NOT.
-4. TITLE CONSISTENCY: Has the person progressed logically (analyst → associate → principal → partner)? A jump from unrelated field to "Partner" at an unknown entity is suspicious.
-5. TENURE CHECK: Someone claiming GP who has been in VC for < 2 years is a red flag.
-
-VERIFICATION STATUS:
-- "verified" = LinkedIn clearly confirms their self-reported role (title matches, fund is real, experience supports it)
-- "mismatch" = LinkedIn contradicts their self-reported role (e.g., claims Investor but LinkedIn shows Software Engineer)
-- "needs_review" = Ambiguous — can't fully verify. Profile is vague, or role is borderline. PUT THESE ON WAITLIST.
-- "unverifiable" = No LinkedIn data available, or profile is private/broken
-
-═══════════════════════════════════════════════════════
-RED FLAGS — USE THESE VERIFICATION FLAG CODES
-═══════════════════════════════════════════════════════
-
-Include ANY applicable flags in the verification_flags array:
-
-- "self_reported_mismatch" = Self-reported role doesn't match LinkedIn data
-- "vague_investor_claim" = Claims to be investor/VC but LinkedIn profile is vague about actual investing activity (no fund named, no deals mentioned, no clear investment role)
-- "no_fund_affiliation" = Claims VC but not affiliated with any recognizable fund or investment firm
-- "self_employed_investor" = Lists "Self-employed" or personal LLC while claiming investor status
-- "title_inflation" = LinkedIn title appears inflated or doesn't match typical VC career progression
-- "side_angel" = Primary role is NOT investing — they occasionally angel invest but self-reported as "Investor"
-- "junior_role" = Actually a junior role (analyst/associate/intern) despite potentially claiming seniority
-- "no_linkedin_data" = No LinkedIn profile or profile is private — can't verify claims
-- "broken_linkedin_url" = LinkedIn URL doesn't work
-- "career_mismatch" = Career history is in a completely different field (e.g., real estate, unrelated industry)
-- "recent_role_change" = Started current investment role very recently (< 6 months)
-
-═══════════════════════════════════════════════════════
-CLASSIFICATION DECISION RULES
-═══════════════════════════════════════════════════════
-
-- If someone self-reports as "Investor" but LinkedIn shows they're a software engineer who angel invests → classify as "other" or "entrepreneur", NOT "vc". Set flag "side_angel".
-- If someone self-reports as "Investor" but LinkedIn is vague (e.g., "Interested in startups", no fund named) → classify as "other" with verification_status "needs_review" and flag "vague_investor_claim".
-- If someone is at a real fund but in a non-investment role (marketing, HR, ops) → classify as "other", not "vc".
-- If LinkedIn is unavailable → use self-reported data but set verification_status "unverifiable" and flag "no_linkedin_data".
-- "Self-employed" + "Investor" = always flag as "self_employed_investor" and set verification_status "needs_review". These are often hobbyist angel investors, not professional VCs.
-- Classify by CURRENT primary role (alum now a VC → "vc").
-
-For investor_level and investor_professional: set to null for non-vc types.
-investor_professional: true ONLY if investing is their PRIMARY occupation at a recognized fund/firm. false for hobbyist/side angels.
-
-For attendee_type_detail:
-- For "vc": use format "<level> at <firm>" e.g. "Partner at Sequoia", "Associate at Zeal Capital"
-- For angel investors: "Angel Investor" (if professional) or "Occasional Angel" (if side activity)
-- For other types: use a BROAD role category. Good: "Engineer", "AI Startup Founder", "CS Professor". Bad: "Senior Staff Platform Infrastructure Engineer" — too specific.
-
-Return ONLY the JSON, no other text.
-""".strip()
-
-# Pass 2: Decision and reasoning — with pool context
-_SCORE_PROMPT = """
-IMPORTANT: All applicant data is provided below. Do NOT say you cannot help or need more data. Classify and evaluate based on what is given. NEVER refuse.
-
-{base_prompt}{criteria}
-
-{event_context}
-{selection_context}
-APPLICANT POOL CONTEXT — here is the current distribution of all {total} applicants:
-{pool_summary}
-
-You are now evaluating this specific applicant:
-
-{info}
-
-This person was classified as: {attendee_type} ({attendee_type_detail})
-{investor_context}
-Evaluate this applicant relative to the FULL POOL. Consider:
-1. How relevant is this person to the event?
-2. How much value would they add as an attendee (networking, feedback, investment, press coverage)?
-3. Given the pool distribution, do we need more people like them?
-
-Return ONLY a JSON object:
-{{"status": "accepted" or "waitlisted" or "rejected", "reasoning": "<2-3 sentences: who they are, why this decision, and how they compare to others in the pool>"}}
-
-Decision guidelines — be generous, this is a networking event and most interested professionals add value:
-- ACCEPT: Strong or good fit — directly relevant expertise, high-value role, or technical professional who would contribute.
-- WAITLIST: Moderate fit — tangential relevance but genuine interest. May accept if space allows.
-- REJECT: Weak or no fit — minimal connection to event theme or clearly irrelevant.
-
-IMPORTANT: Default toward acceptance. Most tech professionals who apply to an AI event are interested and will contribute.
-Only reject applicants who truly have no connection to the event. When in doubt, waitlist rather than reject.
-
-Return ONLY the JSON, no other text.
-""".strip()
-
-# Pass 3: Overall summary prompt
-_SUMMARY_PROMPT = """
-You just finished reviewing {total} applicants for an event.
-
-Here are the results:
-- {accepted} accepted{auto_accepted_note}
-- {waitlisted} waitlisted
-- {rejected} rejected
-- {errors} errors
-
-Pool breakdown:
-{pool_summary}
-
-{selection_context}
-
-Write a brief overall summary (3-5 sentences) explaining:
-1. The overall quality and composition of the applicant pool
-2. Key patterns in who was accepted vs rejected
-3. Any recommendations for the organizer (e.g. gaps to fill, waitlist candidates to promote)
-
-Return ONLY a JSON object:
-{{"summary": "<your 3-5 sentence summary>"}}
-""".strip()
-
-
-# ── Judge Panel Prompt ──
-_JUDGE_SCORE_PROMPT = """
-IMPORTANT: All applicant data is provided below. Do NOT say you cannot help or need more data. Evaluate based on what is given. NEVER refuse.
-You are {judge_name} ({judge_emoji}), a judge on an admissions panel for an event.
-Your specialty: {judge_specialty}
-
-YOUR PERSPECTIVE AND BIAS:
-{judge_bias}
-
-EVALUATION FOCUS:
-{judge_scoring_modifiers}
-
-You have been allocated {seats_allocated} seats to fill from this pool. Choose wisely — pick the applicants who best match YOUR perspective.
-
-{base_prompt}{criteria}
-
-{event_context}
-{selection_context}
-APPLICANT POOL CONTEXT — {total} applicants total:
-{pool_summary}
-
-You are now evaluating this specific applicant:
-
-{info}
-
-This person was classified as: {attendee_type} ({attendee_type_detail})
-
-Evaluate this applicant through YOUR unique lens. Return ONLY a JSON object:
-{{"decision": "accept" or "pass", "reasoning": "<1-2 sentences from YOUR perspective explaining your decision>"}}
-
-Your "decision" should be "accept" if you want to use one of your {seats_allocated} seats on this person, or "pass" if not. Be selective — you have limited seats!
-
-Return ONLY the JSON, no other text.
-""".strip()
-
-
-async def _judge_score_one(
-    applicant: dict,
-    body: BulkAnalyzeRequest,
-    judge: dict,
-    seats_allocated: int,
-    pool_summary: str,
-    total: int,
-    semaphore: asyncio.Semaphore,
-    temperature: float | None = None,
-) -> dict:
-    """Score a single applicant through a judge's lens."""
-    applicant_id = applicant["applicant_id"]
-    name = get_applicant_name(applicant)
-    attendee_type = applicant.get("attendee_type", "other")
-    attendee_type_detail = applicant.get("attendee_type_detail", "")
-
-    async with semaphore:
-        prompt = _JUDGE_SCORE_PROMPT.format(
-            judge_name=judge["name"],
-            judge_emoji=judge["emoji"],
-            judge_specialty=judge["specialty"],
-            judge_bias=judge["bias"],
-            judge_scoring_modifiers=judge["scoring_modifiers"],
-            seats_allocated=seats_allocated,
-            base_prompt=body.prompt,
-            criteria=_criteria_text(body.criteria, body.criteria_weights),
-            event_context=f"EVENT CONTEXT: {body.prompt}" if body.prompt else "",
-            selection_context=_selection_context(body.selection_preferences),
-            total=total,
-            pool_summary=pool_summary,
-            info=_applicant_info_text(applicant),
-            attendee_type=attendee_type,
-            attendee_type_detail=attendee_type_detail,
-        )
-
-        try:
-            raw = await call_ai_async(body.provider, body.api_key, body.model, prompt, temperature=temperature)
-            result = parse_json_response(raw)
-            return {
-                "applicant_id": applicant_id,
-                "name": name,
-                "decision": result.get("decision", "pass"),
-                "reasoning": result.get("reasoning", ""),
-                "attendee_type": attendee_type,
-                "attendee_type_detail": attendee_type_detail,
-            }
-        except Exception as e:
-            return {
-                "applicant_id": applicant_id,
-                "name": name,
-                "decision": "pass",
-                "reasoning": "",
-                "error": str(e),
-            }
-
-
-def _allocate_seats(
-    judges: list[dict],
-    total_applicants: int,
-    venue_capacity: int | None,
-    attendee_mix: dict[str, int] | None,
-) -> dict[str, int]:
-    """Allocate seats to each judge based on venue capacity and attendee mix weights."""
-    total_seats = venue_capacity or total_applicants
-
-    if attendee_mix:
-        # Weight judges by the sum of mix % for their preferred types
-        weights = {}
-        for j in judges:
-            w = sum(attendee_mix.get(t, 0) for t in j.get("preferred_types", []))
-            weights[j["id"]] = max(w, 1)  # minimum weight of 1
-        total_weight = sum(weights.values())
-        allocation = {}
-        for j in judges:
-            raw = (weights[j["id"]] / total_weight) * total_seats
-            allocation[j["id"]] = max(1, round(raw))
-        return allocation
-    else:
-        # Equal distribution
-        per_judge = max(1, round(total_seats / len(judges)))
-        return {j["id"]: per_judge for j in judges}
-
-
-def _effective_capacity(prefs: SelectionPreferences | None) -> int | None:
-    """Get the effective in-person venue capacity from either venue_capacity or pool_capacity."""
-    if not prefs:
-        return None
-    if prefs.venue_capacity:
-        return prefs.venue_capacity
-    if prefs.pool_capacity and prefs.pool_capacity.in_person:
-        return prefs.pool_capacity.in_person
-    return None
-
-
 def _selection_context(prefs: SelectionPreferences | None) -> str:
-    """Build prompt text from selection preferences."""
     if not prefs:
         return ""
     parts: list[str] = []
-    capacity = _effective_capacity(prefs)
-    if capacity:
-        if prefs.pool_capacity and prefs.pool_capacity.virtual is not None:
-            parts.append(f"VENUE CAPACITY: The venue can hold {capacity} in-person attendees. Virtual attendees ({prefs.pool_capacity.virtual or 'unlimited'} cap) do NOT count against venue capacity. Aim to accept roughly {capacity} in-person attendees. Only reject truly poor fits.")
-        else:
-            parts.append(f"VENUE CAPACITY: The venue can hold {capacity} attendees. Aim to accept roughly this many people. Only reject truly poor fits.")
+    if prefs.venue_capacity:
+        parts.append(f"VENUE CAPACITY: {prefs.venue_capacity} attendees.")
     if prefs.attendee_mix:
         type_labels = {
             "vc": "VCs / Investors", "entrepreneur": "Founders / Entrepreneurs",
@@ -613,181 +53,23 @@ def _selection_context(prefs: SelectionPreferences | None) -> str:
         if mix_lines:
             parts.append("TARGET ATTENDEE MIX:\n" + "\n".join(mix_lines))
     relevance_desc = {
-        "strict": "RELEVANCE FILTER: STRICT — Only accept applicants with direct, clear relevance to AI/LLM/the event topic. Reject tangential connections.",
-        "moderate": "RELEVANCE FILTER: MODERATE — Accept applicants with reasonable relevance. Some tangential connections are OK if the person brings other value.",
-        "loose": "RELEVANCE FILTER: LOOSE — Accept most applicants who show any interest or connection. Only reject clearly irrelevant applications.",
-        "none": "RELEVANCE FILTER: NONE — Do not filter by relevance. Score purely on other factors.",
+        "strict": "RELEVANCE FILTER: STRICT — Only accept directly relevant applicants.",
+        "moderate": "RELEVANCE FILTER: MODERATE — Accept applicants with reasonable relevance.",
+        "loose": "RELEVANCE FILTER: LOOSE — Accept most applicants who show interest.",
+        "none": "RELEVANCE FILTER: NONE — Do not filter by relevance.",
     }
     if prefs.relevance_filter in relevance_desc:
         parts.append(relevance_desc[prefs.relevance_filter])
     if prefs.custom_priorities.strip():
         parts.append(f"ORGANIZER PRIORITIES: {prefs.custom_priorities.strip()}")
-    if not parts:
-        return ""
-    return "\nSELECTION CRITERIA:\n" + "\n\n".join(parts) + "\n"
-
-
-async def _classify_one(applicant: dict, body: BulkAnalyzeRequest, semaphore: asyncio.Semaphore) -> dict:
-    """Pass 1: Classify a single applicant (type only, no scoring)."""
-    applicant_id = applicant["applicant_id"]
-    name = get_applicant_name(applicant)
-
-    # Respect user overrides — don't re-classify
-    if applicant.get("user_override_attendee_type"):
-        return {
-            "applicant_id": applicant_id,
-            "name": name,
-            "attendee_type": applicant.get("attendee_type", "other"),
-            "attendee_type_detail": applicant.get("attendee_type_detail", ""),
-            "summary": "User-classified (override)",
-            "skipped": True,
-        }
-
-    async with semaphore:
-        prompt = _CLASSIFY_PROMPT.format(
-            event_context=f"EVENT CONTEXT: {body.prompt}" if body.prompt else "",
-            info=_applicant_info_text(applicant),
-        )
-
-        try:
-            raw = await call_ai_async(body.provider, body.api_key, body.model, prompt, max_tokens=1024)
-            result = parse_json_response(raw)
-
-            fields = {
-                "attendee_type": result.get("attendee_type", "other"),
-                "attendee_type_detail": result.get("attendee_type_detail", ""),
-            }
-            # Store investor-specific fields if present
-            if result.get("investor_level"):
-                fields["investor_level"] = result["investor_level"]
-            if result.get("investor_professional") is not None:
-                fields["investor_professional"] = result["investor_professional"]
-            # Store VC-specific fields
-            if result.get("vc_seniority_tier") is not None:
-                fields["vc_seniority_tier"] = result["vc_seniority_tier"]
-            if result.get("vc_fund_name"):
-                fields["vc_fund_name"] = result["vc_fund_name"]
-            # Store verification fields
-            if result.get("verification_status"):
-                fields["verification_status"] = result["verification_status"]
-            if result.get("verification_notes"):
-                fields["verification_notes"] = result["verification_notes"]
-            if result.get("verification_flags"):
-                fields["verification_flags"] = result["verification_flags"]
-            # Store one-line summary
-            if result.get("summary"):
-                fields["ai_summary"] = result["summary"]
-
-            db.update_applicant_fields(applicant_id, fields)
-
-            return {
-                "applicant_id": applicant_id,
-                "name": name,
-                "attendee_type": fields["attendee_type"],
-                "attendee_type_detail": fields["attendee_type_detail"],
-                "investor_level": fields.get("investor_level"),
-                "investor_professional": fields.get("investor_professional"),
-                "vc_seniority_tier": fields.get("vc_seniority_tier"),
-                "vc_fund_name": fields.get("vc_fund_name"),
-                "verification_status": fields.get("verification_status"),
-                "verification_notes": fields.get("verification_notes"),
-                "verification_flags": fields.get("verification_flags", []),
-                "summary": result.get("summary", ""),
-            }
-
-        except json.JSONDecodeError:
-            return {"applicant_id": applicant_id, "name": name, "error": f"Invalid JSON: {raw[:200]}"}
-        except Exception as e:
-            return {"applicant_id": applicant_id, "name": name, "error": str(e)}
-
-
-async def _score_one(applicant: dict, body: BulkAnalyzeRequest, pool_summary: str, total: int, semaphore: asyncio.Semaphore) -> dict:
-    """Pass 2: Score and decide on a single applicant (with pool context)."""
-    applicant_id = applicant["applicant_id"]
-    name = get_applicant_name(applicant)
-    attendee_type = applicant.get("attendee_type", "other")
-    attendee_type_detail = applicant.get("attendee_type_detail", "")
-
-    async with semaphore:
-        investor_context = ""
-        verification_status = applicant.get("verification_status", "")
-        verification_notes = applicant.get("verification_notes", "")
-        verification_flags = applicant.get("verification_flags", [])
-
-        if attendee_type == "vc":
-            level = applicant.get("investor_level", "unknown")
-            pro = applicant.get("investor_professional", False)
-            tier = applicant.get("vc_seniority_tier", "unknown")
-            fund = applicant.get("vc_fund_name", "unknown")
-            investor_context = (
-                f"Investor level: {level}. Professional investor: {'Yes' if pro else 'No (occasional/dabbler)'}. "
-                f"Seniority tier: {tier}/5 (1=senior partner, 5=intern/scout). Fund: {fund}. "
-                f"Note: Partners/GPs are decision-makers (high value). Associates/Analysts are entry-level."
-            )
-
-        # Add verification context to scoring
-        if verification_status or verification_flags:
-            investor_context += f"\nVERIFICATION: Status={verification_status}. "
-            if verification_notes:
-                investor_context += f"Notes: {verification_notes}. "
-            if verification_flags:
-                investor_context += f"Flags: {', '.join(verification_flags)}. "
-            investor_context += (
-                "SCORING IMPACT: If verification_status is 'mismatch' or has flags like 'vague_investor_claim'/'self_employed_investor', "
-                "reduce the score and set status to 'waitlisted' with reasoning explaining the verification concern. "
-                "If 'needs_review', default to 'waitlisted' rather than 'accepted'."
-            )
-
-        prompt = _SCORE_PROMPT.format(
-            base_prompt=body.prompt,
-            criteria=_criteria_text(body.criteria, body.criteria_weights),
-            event_context=f"EVENT CONTEXT: {body.prompt}" if body.prompt else "",
-            selection_context=_selection_context(body.selection_preferences),
-            total=total,
-            pool_summary=pool_summary,
-            info=_applicant_info_text(applicant),
-            attendee_type=attendee_type,
-            attendee_type_detail=attendee_type_detail,
-            investor_context=investor_context,
-        )
-
-        try:
-            raw = await call_ai_async(body.provider, body.api_key, body.model, prompt)
-            result = parse_json_response(raw)
-
-            fields = {
-                "status": result.get("status", "pending"),
-                "ai_reasoning": result.get("reasoning", ""),
-            }
-            db.update_applicant_fields(applicant_id, fields)
-
-            return {
-                "applicant_id": applicant_id,
-                "name": name,
-                "status": fields["status"],
-                "reasoning": fields["ai_reasoning"],
-                "attendee_type": attendee_type,
-                "attendee_type_detail": attendee_type_detail,
-            }
-
-        except json.JSONDecodeError:
-            db.update_applicant_fields(applicant_id, {"ai_reasoning": "AI returned invalid response"})
-            return {"applicant_id": applicant_id, "name": name, "error": f"Invalid JSON: {raw[:200]}"}
-        except Exception as e:
-            db.update_applicant_fields(applicant_id, {"ai_reasoning": "Analysis failed"})
-            return {"applicant_id": applicant_id, "name": name, "error": str(e)}
+    return "\nSELECTION CRITERIA:\n" + "\n\n".join(parts) + "\n" if parts else ""
 
 
 def _build_pool_summary(type_counts: dict[str, int], total: int) -> str:
-    """Build a text summary of the applicant pool distribution."""
     type_labels = {
-        "vc": "VCs / Investors",
-        "entrepreneur": "Founders / Entrepreneurs",
-        "faculty": "Faculty / Researchers",
-        "alumni": "Alumni",
-        "press": "Press / Media",
-        "student": "Students",
-        "other": "Other (Industry professionals)",
+        "vc": "VCs / Investors", "entrepreneur": "Founders / Entrepreneurs",
+        "faculty": "Faculty / Researchers", "alumni": "Alumni",
+        "press": "Press / Media", "student": "Students", "other": "Other",
     }
     lines = []
     for key, label in type_labels.items():
@@ -797,22 +79,228 @@ def _build_pool_summary(type_counts: dict[str, int], total: int) -> str:
     return "\n".join(lines)
 
 
+# ── Prompts ──
+
+_CLASSIFY_PROMPT = """
+IMPORTANT: All applicant data is provided below. Do NOT say you cannot access LinkedIn or need more data. Work with whatever information is given. NEVER refuse to classify.
+
+{event_context}
+
+Here is the applicant's information (self-reported registration data + pre-scraped LinkedIn profile data):
+
+{info}
+
+Classify this applicant AND cross-check their claimed role against any LinkedIn data provided.
+
+Return ONLY a JSON object:
+{{
+  "attendee_type": "<vc|entrepreneur|faculty|alumni|press|student|other>",
+  "attendee_type_detail": "<specific label, e.g. 'Partner at Sequoia', 'AI Startup Founder', 'CS Professor'>",
+  "summary": "<2-4 bullet points: current role & company, key background/experience, what makes them relevant. Use format like '- Role at Company\\n- 10 yrs AI/ML experience\\n- Stanford PhD'. Be specific, use real data from their profile.>"
+}}
+
+Return ONLY the JSON, no other text.
+""".strip()
+
+_SCORE_PROMPT = """
+IMPORTANT: All applicant data is provided below. Do NOT refuse. Evaluate based on what is given.
+
+{base_prompt}{criteria}
+
+{event_context}
+{selection_context}
+APPLICANT POOL CONTEXT — {total} applicants:
+{pool_summary}
+
+Evaluating this applicant:
+
+{info}
+
+Classified as: {attendee_type} ({attendee_type_detail})
+{investor_context}
+
+Return ONLY a JSON object:
+{{"status": "accepted" or "waitlisted" or "rejected", "reasoning": "<2-3 sentences: who they are, why this decision>"}}
+
+Guidelines — default toward acceptance:
+- ACCEPT: Strong or good fit for the event.
+- WAITLIST: Moderate fit, may accept if space allows.
+- REJECT: Weak or no fit.
+
+Return ONLY the JSON, no other text.
+""".strip()
+
+_JUDGE_PROMPT = """
+IMPORTANT: All applicant data is provided below. Do NOT refuse. Evaluate based on what is given.
+You are {judge_name} ({judge_emoji}), a judge on an admissions panel.
+Your specialty: {judge_specialty}
+
+YOUR PERSPECTIVE: {judge_bias}
+EVALUATION FOCUS: {judge_scoring_modifiers}
+
+You have {seats_allocated} seats. Choose wisely.
+
+{base_prompt}{criteria}
+
+{event_context}
+{selection_context}
+POOL: {total} applicants:
+{pool_summary}
+
+Evaluating:
+
+{info}
+
+Classified as: {attendee_type} ({attendee_type_detail})
+
+Return ONLY a JSON object:
+{{"decision": "accept" or "pass", "reasoning": "<1-2 sentences from YOUR perspective>"}}
+
+Return ONLY the JSON, no other text.
+""".strip()
+
+_SUMMARY_PROMPT = """
+You reviewed {total} applicants for an event.
+Results: {accepted} accepted{auto_accepted_note}, {waitlisted} waitlisted, {rejected} rejected, {errors} errors.
+
+Pool: {pool_summary}
+{selection_context}
+
+Write a brief summary (3-5 sentences): pool quality, acceptance patterns, recommendations.
+
+Return ONLY: {{"summary": "<your summary>"}}
+""".strip()
+
+
+# ── Classification ──
+
+async def _classify_one(applicant: dict, body: BulkAnalyzeRequest, semaphore: asyncio.Semaphore) -> dict:
+    applicant_id = applicant["applicant_id"]
+    name = get_applicant_name(applicant)
+
+    if applicant.get("user_override_attendee_type"):
+        return {
+            "applicant_id": applicant_id, "name": name,
+            "attendee_type": applicant.get("attendee_type", "other"),
+            "attendee_type_detail": applicant.get("attendee_type_detail", ""),
+            "summary": "User-classified", "skipped": True,
+        }
+
+    async with semaphore:
+        prompt = _CLASSIFY_PROMPT.format(
+            event_context=f"EVENT CONTEXT: {body.prompt}" if body.prompt else "",
+            info=_applicant_info_text(applicant),
+        )
+        try:
+            raw = await call_ai_async(body.provider, body.api_key, body.model, prompt, max_tokens=1024)
+            result = parse_json_response(raw)
+            fields = {
+                "attendee_type": result.get("attendee_type", "other"),
+                "attendee_type_detail": result.get("attendee_type_detail", ""),
+            }
+            if result.get("summary"):
+                fields["ai_summary"] = result["summary"]
+            db.update_applicant_fields(applicant_id, fields)
+            return {"applicant_id": applicant_id, "name": name, **fields, "summary": result.get("summary", "")}
+        except json.JSONDecodeError:
+            return {"applicant_id": applicant_id, "name": name, "error": f"Invalid JSON: {raw[:200]}"}
+        except Exception as e:
+            return {"applicant_id": applicant_id, "name": name, "error": str(e)}
+
+
+# ── Scoring ──
+
+async def _score_one(applicant: dict, body: BulkAnalyzeRequest, pool_summary: str, total: int, semaphore: asyncio.Semaphore) -> dict:
+    applicant_id = applicant["applicant_id"]
+    name = get_applicant_name(applicant)
+    attendee_type = applicant.get("attendee_type", "other")
+    attendee_type_detail = applicant.get("attendee_type_detail", "")
+
+    async with semaphore:
+        prompt = _SCORE_PROMPT.format(
+            base_prompt=body.prompt, criteria=_criteria_text(body.criteria, body.criteria_weights),
+            event_context=f"EVENT CONTEXT: {body.prompt}" if body.prompt else "",
+            selection_context=_selection_context(body.selection_preferences),
+            total=total, pool_summary=pool_summary,
+            info=_applicant_info_text(applicant),
+            attendee_type=attendee_type, attendee_type_detail=attendee_type_detail,
+            investor_context="",
+        )
+        try:
+            raw = await call_ai_async(body.provider, body.api_key, body.model, prompt)
+            result = parse_json_response(raw)
+            fields = {"status": result.get("status", "pending"), "ai_reasoning": result.get("reasoning", "")}
+            db.update_applicant_fields(applicant_id, fields)
+            return {"applicant_id": applicant_id, "name": name, **fields, "attendee_type": attendee_type, "attendee_type_detail": attendee_type_detail}
+        except Exception as e:
+            db.update_applicant_fields(applicant_id, {"ai_reasoning": "Analysis failed"})
+            return {"applicant_id": applicant_id, "name": name, "error": str(e)}
+
+
+# ── Judge scoring ──
+
+async def _judge_score_one(applicant: dict, body: BulkAnalyzeRequest, judge: dict, seats: int, pool_summary: str, total: int, semaphore: asyncio.Semaphore, temperature: float | None = None) -> dict:
+    applicant_id = applicant["applicant_id"]
+    name = get_applicant_name(applicant)
+
+    async with semaphore:
+        prompt = _JUDGE_PROMPT.format(
+            judge_name=judge["name"], judge_emoji=judge["emoji"],
+            judge_specialty=judge["specialty"], judge_bias=judge["bias"],
+            judge_scoring_modifiers=judge["scoring_modifiers"], seats_allocated=seats,
+            base_prompt=body.prompt, criteria=_criteria_text(body.criteria, body.criteria_weights),
+            event_context=f"EVENT CONTEXT: {body.prompt}" if body.prompt else "",
+            selection_context=_selection_context(body.selection_preferences),
+            total=total, pool_summary=pool_summary,
+            info=_applicant_info_text(applicant),
+            attendee_type=applicant.get("attendee_type", "other"),
+            attendee_type_detail=applicant.get("attendee_type_detail", ""),
+        )
+        try:
+            raw = await call_ai_async(body.provider, body.api_key, body.model, prompt, temperature=temperature)
+            result = parse_json_response(raw)
+            return {"applicant_id": applicant_id, "name": name, "decision": result.get("decision", "pass"), "reasoning": result.get("reasoning", "")}
+        except Exception as e:
+            return {"applicant_id": applicant_id, "name": name, "decision": "pass", "reasoning": "", "error": str(e)}
+
+
+def _allocate_seats(judges: list[dict], total_applicants: int, venue_capacity: int | None, attendee_mix: dict[str, int] | None) -> dict[str, int]:
+    total_seats = venue_capacity or total_applicants
+    if attendee_mix:
+        weights = {}
+        for j in judges:
+            w = sum(attendee_mix.get(t, 0) for t in j.get("preferred_types", []))
+            weights[j["id"]] = max(w, 1)
+        total_weight = sum(weights.values())
+        return {j["id"]: max(1, round((weights[j["id"]] / total_weight) * total_seats)) for j in judges}
+    per_judge = max(1, round(total_seats / len(judges)))
+    return {j["id"]: per_judge for j in judges}
+
+
+# ── Endpoints ──
+
+@router.post("/{applicant_id}/review")
+async def review_one(applicant_id: str, body: ReviewRequest):
+    applicant = db.get_applicant_or_404(applicant_id)
+    prompt = (body.prompt or "Review this applicant.") + _criteria_text(body.criteria or [])
+    prompt += f"\n\nApplicant:\n{_applicant_info_text(applicant)}\n\nProvide a brief assessment."
+    raw = await call_ai_async(body.provider, body.api_key, body.model, prompt)
+    db.update_applicant_fields(applicant_id, {"ai_review": raw})
+    return {**applicant, "ai_review": raw}
+
+
 @router.post("/classify-stream")
 async def classify_stream(body: BulkAnalyzeRequest):
-    """Lightweight classification-only pass — no scoring or judging. Classifies all
-    applicants that don't already have an attendee_type and generates a one-line summary."""
     all_applicants = db.scan_all_applicants(session_id=body.session_id)
     if not all_applicants:
         raise HTTPException(status_code=400, detail="No applicants to classify")
 
-    # Classify those without a type OR without an ai_summary
     to_classify = [a for a in all_applicants if not a.get("attendee_type") or not a.get("ai_summary")]
     already = len(all_applicants) - len(to_classify)
 
     async def event_stream():
         total = len(to_classify)
         semaphore = asyncio.Semaphore(10)
-
         yield f"event: start\ndata: {json.dumps({'total': total, 'already_classified': already})}\n\n"
 
         if total == 0:
@@ -821,7 +309,6 @@ async def classify_stream(body: BulkAnalyzeRequest):
 
         completed, errors = 0, 0
         tasks = {asyncio.ensure_future(_classify_one(a, body, semaphore)): a for a in to_classify}
-
         for coro in asyncio.as_completed(tasks.keys()):
             result = await coro
             completed += 1
@@ -842,537 +329,209 @@ async def analyze_all_stream(body: BulkAnalyzeRequest):
     if not all_applicants:
         raise HTTPException(status_code=400, detail="No applicants to analyze")
 
-    # Analyze ALL applicants (re-running overwrites previous results)
     applicants = list(all_applicants)
     pre_decided: list[dict] = []
-
-    # Persist analysis config on the session before LLM runs
-    if body.session_id:
-        analysis_config: dict = {
-            "last_analysis_model": body.model,
-            "last_analysis_provider": body.provider,
-            "last_analysis_prompt": body.prompt,
-            "last_analysis_criteria": body.criteria,
-        }
-        if body.selection_preferences:
-            analysis_config["selection_preferences"] = body.selection_preferences.model_dump()
-        if body.panel_config:
-            analysis_config["panel_config"] = body.panel_config.model_dump()
-        try:
-            db.update_session_fields(body.session_id, analysis_config)
-        except Exception:
-            pass  # Don't block analysis if session save fails
 
     async def event_stream():
         total = len(applicants)
         semaphore = asyncio.Semaphore(10)
-
         yield f"event: start\ndata: {json.dumps({'total': total, 'pre_decided': len(pre_decided)})}\n\n"
-
-        # Emit pre-decided applicants so frontend knows they were skipped
-        for a in pre_decided:
-            yield f"event: pre_decided\ndata: {json.dumps({'applicant_id': a['applicant_id'], 'name': get_applicant_name(a), 'status': a['status']})}\n\n"
 
         # ── PASS 1: Classification ──
         yield f"event: phase\ndata: {json.dumps({'phase': 'classify', 'message': 'Pass 1: Classifying all applicants...'})}\n\n"
 
         completed, errors = 0, 0
         type_counts: dict[str, int] = {}
-        classified: dict[str, dict] = {}  # applicant_id → classification result
-
-        # Include pre-decided in type counts for pool context
-        for a in pre_decided:
-            t = a.get("attendee_type", "other")
-            type_counts[t] = type_counts.get(t, 0) + 1
 
         tasks = {asyncio.ensure_future(_classify_one(a, body, semaphore)): a for a in applicants}
-
         for coro in asyncio.as_completed(tasks.keys()):
             result = await coro
             completed += 1
-
             if "error" in result:
                 errors += 1
                 yield f"event: classify_error\ndata: {json.dumps({**result, 'completed': completed, 'total': total, 'errors': errors})}\n\n"
             else:
                 t = result.get("attendee_type", "other")
                 type_counts[t] = type_counts.get(t, 0) + 1
-                classified[result["applicant_id"]] = result
                 yield f"event: classify\ndata: {json.dumps({**result, 'completed': completed, 'total': total, 'errors': errors})}\n\n"
 
-        # Emit pool summary after classification
         pool_summary = _build_pool_summary(type_counts, total)
-        yield f"event: phase\ndata: {json.dumps({'phase': 'pool_summary', 'message': 'Classification complete. Pool distribution:', 'type_counts': type_counts, 'total': total})}\n\n"
+        yield f"event: phase\ndata: {json.dumps({'phase': 'pool_summary', 'message': 'Classification complete.', 'type_counts': type_counts, 'total': total})}\n\n"
 
-        # ── WHITELIST / BLACKLIST PHASE ──
-        # Merge global + per-event lists
-        whitelist_data = db.get_settings("applicant_whitelist") or {}
-        blacklist_data = db.get_settings("applicant_blacklist") or {}
-        whitelist_emails = set(whitelist_data.get("emails", []))
-        blacklist_emails = set(blacklist_data.get("emails", []))
-
-        # Per-event lists (override/extend global)
-        if body.session_id:
-            evt_wl = db.get_settings(f"session_{body.session_id}_whitelist") or {}
-            evt_bl = db.get_settings(f"session_{body.session_id}_blacklist") or {}
-            whitelist_emails |= set(evt_wl.get("emails", []))
-            blacklist_emails |= set(evt_bl.get("emails", []))
-
-        listed_ids: set[str] = set()
-        for a in applicants:
-            email = a.get("email", "").strip().lower()
-            if email and email in whitelist_emails:
-                listed_ids.add(a["applicant_id"])
-                db.update_applicant_fields(a["applicant_id"], {"status": "accepted", "ai_reasoning": "Whitelisted"})
-                yield f"event: whitelist\ndata: {json.dumps({'applicant_id': a['applicant_id'], 'name': get_applicant_name(a)})}\n\n"
-            elif email and email in blacklist_emails:
-                listed_ids.add(a["applicant_id"])
-                db.update_applicant_fields(a["applicant_id"], {"status": "rejected", "ai_reasoning": "Blacklisted"})
-                yield f"event: blacklist\ndata: {json.dumps({'applicant_id': a['applicant_id'], 'name': get_applicant_name(a)})}\n\n"
-
-        # ── AUTO-ACCEPT PHASE ──
-        auto_accept_types = []
-        if body.selection_preferences and body.selection_preferences.auto_accept_types:
-            auto_accept_types = body.selection_preferences.auto_accept_types
-
+        # ── Auto-accept ──
+        auto_accept_types = body.selection_preferences.auto_accept_types if body.selection_preferences else []
         auto_accepted_ids: set[str] = set()
         if auto_accept_types:
-            aa_msg = f"Auto-accepting: {', '.join(auto_accept_types)}..."
-            yield f"event: phase\ndata: {json.dumps({'phase': 'auto_accept', 'message': aa_msg})}\n\n"
-            for aid, info in classified.items():
-                if info.get("attendee_type") in auto_accept_types:
-                    auto_accepted_ids.add(aid)
-                    db.update_applicant_fields(aid, {
-                        "status": "accepted",
-                        "ai_reasoning": f"Auto-accepted ({info.get('attendee_type')})",
-                    })
-                    yield f"event: auto_accept\ndata: {json.dumps({'applicant_id': aid, 'name': info.get('name', 'Unknown'), 'attendee_type': info.get('attendee_type', ''), 'attendee_type_detail': info.get('attendee_type_detail', '')})}\n\n"
-
-        # Re-fetch applicants to get updated type fields, exclude auto-accepted and listed
-        exclude_ids = auto_accepted_ids | listed_ids
-        applicants_refreshed = [
-            a for a in db.scan_all_applicants(session_id=body.session_id)
-            if a["applicant_id"] not in exclude_ids
-        ]
-        scoring_total = len(applicants_refreshed)
-        auto_accepted_count = len(auto_accepted_ids)
-
-        # ── Branch: Panel mode vs Single reviewer ──
-        panel = body.panel_config
-        if panel and panel.enabled and panel.judge_ids:
-            # ── PANEL MODE ──
-            judges = [JUDGE_PERSONAS_BY_ID[jid] for jid in panel.judge_ids if jid in JUDGE_PERSONAS_BY_ID]
-            if not judges:
-                yield f"event: error\ndata: {json.dumps({'error': 'No valid judge personas selected'})}\n\n"
-                return
-
-            # Seat allocation
-            seat_alloc = _allocate_seats(
-                judges,
-                scoring_total,
-                _effective_capacity(body.selection_preferences),
-                body.selection_preferences.attendee_mix if body.selection_preferences else None,
-            )
-
-            yield f"event: phase\ndata: {json.dumps({'phase': 'panel_setup', 'message': f'Judge Panel: {len(judges)} judges, {panel.adjudication_mode} adjudication'})}\n\n"
-
-            for j in judges:
-                seats = seat_alloc[j["id"]]
-                yield f"event: judge_seats\ndata: {json.dumps({'judge_id': j['id'], 'judge_name': j['name'], 'judge_emoji': j['emoji'], 'seats_allocated': seats, 'specialty': j['specialty']})}\n\n"
-
-            # Track all judge decisions: {applicant_id: [{judge_id, score, decision, reasoning}, ...]}
-            all_judge_decisions: dict[str, list[dict]] = {a["applicant_id"]: [] for a in applicants_refreshed}
-
-            for judge_idx, judge in enumerate(judges):
-                seats = seat_alloc[judge["id"]]
-                yield f"event: judge_start\ndata: {json.dumps({'judge_id': judge['id'], 'judge_name': judge['name'], 'judge_emoji': judge['emoji'], 'judge_index': judge_idx, 'total_judges': len(judges), 'seats_remaining': seats})}\n\n"
-
-                # Score ALL applicants concurrently for this judge
-                judge_temp = panel.judge_temperatures.get(judge["id"]) if panel.judge_temperatures else None
-                judge_tasks = {
-                    asyncio.ensure_future(
-                        _judge_score_one(a, body, judge, seats, pool_summary, total, semaphore, temperature=judge_temp)
-                    ): a
-                    for a in applicants_refreshed
-                }
-
-                judge_results = []
-                judge_completed = 0
-                for coro in asyncio.as_completed(judge_tasks.keys()):
-                    result = await coro
-                    judge_completed += 1
-                    judge_results.append(result)
-
-                    yield f"event: judge_progress\ndata: {json.dumps({'judge_id': judge['id'], 'judge_name': judge['name'], 'judge_emoji': judge['emoji'], 'applicant_id': result['applicant_id'], 'name': result['name'], 'decision': result.get('decision', 'pass'), 'reasoning': result.get('reasoning', ''), 'seats_filled': 0, 'seats_allocated': seats, 'completed': judge_completed, 'total': scoring_total})}\n\n"
-
-                # Seat filling: accept those the judge chose, up to seat limit
-                # Put accepts first, then passes
-                judge_results.sort(key=lambda r: 0 if r.get("decision") == "accept" else 1)
-                seats_filled = 0
-                accepted_names = []
-                for r in judge_results:
-                    if "error" in r:
-                        continue
-                    if seats_filled < seats and r.get("decision") == "accept":
-                        seats_filled += 1
-                        accepted_names.append(r["name"])
-                    else:
-                        r["decision"] = "pass"
-
-                    all_judge_decisions[r["applicant_id"]].append({
-                        "judge_id": judge["id"],
-                        "judge_name": judge["name"],
-                        "judge_emoji": judge["emoji"],
-                        "decision": r["decision"],
-                        "reasoning": r.get("reasoning", ""),
-                    })
-
-                yield f"event: judge_complete\ndata: {json.dumps({'judge_id': judge['id'], 'judge_name': judge['name'], 'judge_emoji': judge['emoji'], 'seats_filled': seats_filled, 'seats_allocated': seats, 'accepted_names': accepted_names})}\n\n"
-
-            # ── Adjudication Phase ──
-            yield f"event: phase\ndata: {json.dumps({'phase': 'adjudication', 'message': f'Adjudication ({panel.adjudication_mode} mode): determining final decisions...'})}\n\n"
-
-            result_counts = {"accepted": 0, "waitlisted": 0, "rejected": 0}
-            total_judges = len(judges)
-
-            for a in applicants_refreshed:
-                aid = a["applicant_id"]
-                decisions = all_judge_decisions.get(aid, [])
-                accept_count = sum(1 for d in decisions if d["decision"] == "accept")
-                votes_total = len(decisions)
-
-                if panel.adjudication_mode == "majority":
-                    final_status = "accepted" if accept_count > votes_total / 2 else "waitlisted"
-                else:  # union
-                    final_status = "accepted" if accept_count > 0 else "waitlisted"
-
-                result_counts[final_status] += 1
-
-                # Build combined reasoning with judge attribution
-                reasoning_parts = []
-                for d in decisions:
-                    tag = "ACCEPT" if d["decision"] == "accept" else "PASS"
-                    reasoning_parts.append(f"{d['judge_emoji']} {d['judge_name']} [{tag}]: {d['reasoning']}")
-                combined_reasoning = " | ".join(reasoning_parts)
-
-                accepting_judges_list = [
-                    f"{d['judge_emoji']} {d['judge_name']}"
-                    for d in decisions if d["decision"] == "accept"
-                ]
-
-                db.update_applicant_fields(aid, {
-                    "status": final_status,
-                    "ai_reasoning": combined_reasoning,
-                    "panel_votes": f"{accept_count}/{votes_total}",
-                    "accepting_judges": ", ".join(accepting_judges_list) if accepting_judges_list else "",
-                })
-
-                yield f"event: adjudication\ndata: {json.dumps({'applicant_id': aid, 'name': a.get('name', 'Unknown'), 'final_status': final_status, 'votes_accept': accept_count, 'votes_total': votes_total, 'accepting_judges': accepting_judges_list})}\n\n"
-
-            yield f"event: complete\ndata: {json.dumps({'completed': scoring_total, 'total': scoring_total, 'errors': 0})}\n\n"
-
-            # Panel summary
-            try:
-                auto_note = f" ({auto_accepted_count} auto-accepted)" if auto_accepted_count > 0 else ""
-                panel_breakdown = "\n".join(
-                    f"- {j['emoji']} {j['name']}: {seat_alloc[j['id']]} seats"
-                    for j in judges
-                )
-                summary_prompt = _SUMMARY_PROMPT.format(
-                    total=total,
-                    accepted=result_counts["accepted"] + auto_accepted_count,
-                    auto_accepted_note=auto_note,
-                    waitlisted=result_counts["waitlisted"],
-                    rejected=result_counts["rejected"],
-                    errors=0,
-                    pool_summary=pool_summary,
-                    selection_context=_selection_context(body.selection_preferences) + f"\nJUDGE PANEL ({panel.adjudication_mode} mode):\n{panel_breakdown}\n",
-                )
-                raw_summary = await call_ai_async(body.provider, body.api_key, body.model, summary_prompt)
-                summary_result = parse_json_response(raw_summary)
-                summary_text = summary_result.get("summary", "")
-                if summary_text:
-                    yield f"event: summary\ndata: {json.dumps({'summary': summary_text})}\n\n"
-            except Exception:
-                summary_text = ""
-
-            # Save results snapshot to session
-            if body.session_id:
-                snapshot = {
-                    "last_analysis_at": datetime.now(timezone.utc).isoformat(),
-                    "last_analysis_results": {
-                        "total": total,
-                        "accepted": result_counts["accepted"] + auto_accepted_count,
-                        "auto_accepted": auto_accepted_count,
-                        "waitlisted": result_counts["waitlisted"],
-                        "rejected": result_counts["rejected"],
-                        "errors": 0,
-                    },
-                    "last_analysis_summary": summary_text,
-                    "last_analysis_type_counts": dict(type_counts),
-                }
-                try:
-                    db.update_session_fields(body.session_id, snapshot)
-                except Exception:
-                    pass
-
-        else:
-            # ── SINGLE REVIEWER MODE (existing behavior) ──
-            yield f"event: phase\ndata: {json.dumps({'phase': 'score', 'message': 'Pass 2: Scoring and making decisions with full pool context...'})}\n\n"
-
-            completed, errors = 0, 0
-            result_counts = {"accepted": 0, "waitlisted": 0, "rejected": 0}
-            tasks = {asyncio.ensure_future(_score_one(a, body, pool_summary, total, semaphore)): a for a in applicants_refreshed}
-
-            for coro in asyncio.as_completed(tasks.keys()):
-                result = await coro
-                completed += 1
-
-                if "error" in result:
-                    errors += 1
-                    yield f"event: error\ndata: {json.dumps({**result, 'completed': completed, 'total': total, 'errors': errors})}\n\n"
-                else:
-                    status = result.get("status", "pending")
-                    if status in result_counts:
-                        result_counts[status] += 1
-                    yield f"event: progress\ndata: {json.dumps({**result, 'completed': completed, 'total': total, 'errors': errors})}\n\n"
-
-            yield f"event: complete\ndata: {json.dumps({'completed': completed, 'total': total, 'errors': errors})}\n\n"
-
-            # ── PASS 3: Overall Summary ──
-            try:
-                auto_note = f" ({auto_accepted_count} auto-accepted)" if auto_accepted_count > 0 else ""
-                summary_prompt = _SUMMARY_PROMPT.format(
-                    total=total,
-                    accepted=result_counts["accepted"] + auto_accepted_count,
-                    auto_accepted_note=auto_note,
-                    waitlisted=result_counts["waitlisted"],
-                    rejected=result_counts["rejected"],
-                    errors=errors,
-                    pool_summary=pool_summary,
-                    selection_context=_selection_context(body.selection_preferences),
-                )
-                raw_summary = await call_ai_async(body.provider, body.api_key, body.model, summary_prompt)
-                summary_result = parse_json_response(raw_summary)
-                summary_text = summary_result.get("summary", "")
-                if summary_text:
-                    yield f"event: summary\ndata: {json.dumps({'summary': summary_text})}\n\n"
-            except Exception:
-                summary_text = ""
-
-            # Save results snapshot to session
-            if body.session_id:
-                snapshot = {
-                    "last_analysis_at": datetime.now(timezone.utc).isoformat(),
-                    "last_analysis_results": {
-                        "total": total,
-                        "accepted": result_counts["accepted"] + auto_accepted_count,
-                        "auto_accepted": auto_accepted_count,
-                        "waitlisted": result_counts["waitlisted"],
-                        "rejected": result_counts["rejected"],
-                        "errors": errors,
-                    },
-                    "last_analysis_summary": summary_text,
-                    "last_analysis_type_counts": dict(type_counts),
-                }
-                try:
-                    db.update_session_fields(body.session_id, snapshot)
-                except Exception:
-                    pass
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
-
-
-# ── Enrich-only endpoint (classification, no scoring) ──
-
-@router.post("/enrich-stream")
-async def enrich_stream(body: EnrichRequest):
-    all_applicants = db.scan_all_applicants(session_id=body.session_id)
-    if not all_applicants:
-        raise HTTPException(status_code=400, detail="No applicants to enrich")
-
-    # Skip applicants with user overrides on attendee_type
-    applicants = [a for a in all_applicants if not a.get("user_override_attendee_type")]
-    skipped = [a for a in all_applicants if a.get("user_override_attendee_type")]
-
-    # Build a fake BulkAnalyzeRequest for _classify_one compatibility
-    classify_body = BulkAnalyzeRequest(
-        api_key=body.api_key, model=body.model, provider=body.provider,
-        prompt=body.prompt or "", session_id=body.session_id,
-    )
-
-    async def event_stream():
-        total = len(applicants)
-        semaphore = asyncio.Semaphore(10)
-
-        yield f"event: start\ndata: {json.dumps({'total': total, 'skipped': len(skipped)})}\n\n"
-
-        for a in skipped:
-            yield f"event: classify\ndata: {json.dumps({'applicant_id': a['applicant_id'], 'name': get_applicant_name(a), 'attendee_type': a.get('attendee_type', 'other'), 'attendee_type_detail': a.get('attendee_type_detail', ''), 'summary': 'User-classified (override)', 'skipped': True, 'completed': 0, 'total': total, 'errors': 0})}\n\n"
-
-        completed, errors = 0, 0
-        type_counts: dict[str, int] = {}
-        for a in skipped:
-            t = a.get("attendee_type", "other")
-            type_counts[t] = type_counts.get(t, 0) + 1
-
-        tasks = {asyncio.ensure_future(_classify_one(a, classify_body, semaphore)): a for a in applicants}
-
-        for coro in asyncio.as_completed(tasks.keys()):
-            result = await coro
-            completed += 1
-            if "error" in result:
-                errors += 1
-                yield f"event: classify_error\ndata: {json.dumps({**result, 'completed': completed, 'total': total, 'errors': errors})}\n\n"
-            else:
-                t = result.get("attendee_type", "other")
-                type_counts[t] = type_counts.get(t, 0) + 1
-                yield f"event: classify\ndata: {json.dumps({**result, 'completed': completed, 'total': total, 'errors': errors})}\n\n"
-
-        pool_summary = _build_pool_summary(type_counts, total + len(skipped))
-        yield f"event: phase\ndata: {json.dumps({'phase': 'pool_summary', 'message': 'Enrichment complete.', 'type_counts': type_counts, 'total': total + len(skipped)})}\n\n"
-        yield f"event: complete\ndata: {json.dumps({'completed': completed, 'total': total, 'errors': errors})}\n\n"
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
-
-
-# ── Select-only endpoint (scoring, requires prior enrichment) ──
-
-@router.post("/select-stream")
-async def select_stream(body: SelectRequest):
-    all_applicants = db.scan_all_applicants(session_id=body.session_id)
-    if not all_applicants:
-        raise HTTPException(status_code=400, detail="No applicants to select")
-
-    pending = [a for a in all_applicants if a.get("status") == "pending"]
-    pre_decided = [a for a in all_applicants if a.get("status") != "pending"]
-
-    # Check enrichment: most pending applicants should have attendee_type
-    enriched = sum(1 for a in pending if a.get("attendee_type"))
-    if pending and enriched < len(pending) * 0.5:
-        raise HTTPException(status_code=400, detail="Most applicants are not enriched yet. Run enrichment first.")
-
-    # Build a BulkAnalyzeRequest for compatibility with scoring helpers
-    score_body = BulkAnalyzeRequest(
-        api_key=body.api_key, model=body.model, provider=body.provider,
-        prompt=body.prompt, criteria=body.criteria,
-        criteria_weights=body.criteria_weights, session_id=body.session_id,
-        selection_preferences=body.selection_preferences, panel_config=body.panel_config,
-    )
-
-    async def event_stream():
-        total_all = len(all_applicants)
-        semaphore = asyncio.Semaphore(10)
-
-        # Build pool summary from ALL applicants
-        type_counts: dict[str, int] = {}
-        for a in all_applicants:
-            t = a.get("attendee_type", "other")
-            type_counts[t] = type_counts.get(t, 0) + 1
-        pool_summary = _build_pool_summary(type_counts, total_all)
-
-        yield f"event: start\ndata: {json.dumps({'total': len(pending), 'pre_decided': len(pre_decided)})}\n\n"
-
-        # Auto-accept phase
-        auto_accept_types = []
-        if score_body.selection_preferences and score_body.selection_preferences.auto_accept_types:
-            auto_accept_types = score_body.selection_preferences.auto_accept_types
-
-        auto_accepted_ids: set[str] = set()
-        if auto_accept_types:
-            for a in pending:
+            yield f"event: phase\ndata: {json.dumps({'phase': 'auto_accept', 'message': f'Auto-accepting: {", ".join(auto_accept_types)}...'})}\n\n"
+            refreshed = db.scan_all_applicants(session_id=body.session_id)
+            for a in refreshed:
                 if a.get("attendee_type") in auto_accept_types:
                     auto_accepted_ids.add(a["applicant_id"])
-                    db.update_applicant_fields(a["applicant_id"], {
-                        "status": "accepted", "ai_score": "100",
-                        "ai_reasoning": f"Auto-accepted ({a.get('attendee_type')})",
+                    db.update_applicant_fields(a["applicant_id"], {"status": "accepted", "ai_reasoning": f"Auto-accepted ({a.get('attendee_type')})"})
+                    yield f"event: auto_accept\ndata: {json.dumps({'applicant_id': a['applicant_id'], 'name': get_applicant_name(a), 'attendee_type': a.get('attendee_type', ''), 'attendee_type_detail': a.get('attendee_type_detail', '')})}\n\n"
+
+        # Re-fetch, exclude auto-accepted
+        applicants_refreshed = [a for a in db.scan_all_applicants(session_id=body.session_id) if a["applicant_id"] not in auto_accepted_ids]
+        scoring_total = len(applicants_refreshed)
+
+        # ── Branch: Panel vs Single ──
+        panel = body.panel_config
+        if panel and panel.enabled and panel.judge_ids:
+            # Load judge personas
+            try:
+                from judge_personas import JUDGE_PERSONAS_BY_ID
+                judges = [JUDGE_PERSONAS_BY_ID[jid] for jid in panel.judge_ids if jid in JUDGE_PERSONAS_BY_ID]
+            except ImportError:
+                judges = []
+
+            if not judges:
+                # Fallback to single reviewer if no judges available
+                yield f"event: phase\ndata: {json.dumps({'phase': 'score', 'message': 'No judge personas found, using single reviewer...'})}\n\n"
+            else:
+                seat_alloc = _allocate_seats(judges, scoring_total, body.selection_preferences.venue_capacity if body.selection_preferences else None, body.selection_preferences.attendee_mix if body.selection_preferences else None)
+
+                yield f"event: phase\ndata: {json.dumps({'phase': 'panel_setup', 'message': f'Judge Panel: {len(judges)} judges, {panel.adjudication_mode} adjudication'})}\n\n"
+                for j in judges:
+                    seats = seat_alloc[j["id"]]
+                    yield f"event: judge_seats\ndata: {json.dumps({'judge_id': j['id'], 'judge_name': j['name'], 'judge_emoji': j['emoji'], 'seats_allocated': seats, 'specialty': j['specialty']})}\n\n"
+
+                all_judge_decisions: dict[str, list[dict]] = {a["applicant_id"]: [] for a in applicants_refreshed}
+
+                for judge_idx, judge in enumerate(judges):
+                    seats = seat_alloc[judge["id"]]
+                    yield f"event: judge_start\ndata: {json.dumps({'judge_id': judge['id'], 'judge_name': judge['name'], 'judge_emoji': judge['emoji'], 'judge_index': judge_idx, 'total_judges': len(judges), 'seats_remaining': seats})}\n\n"
+
+                    judge_temp = panel.judge_temperatures.get(judge["id"]) if panel.judge_temperatures else None
+                    judge_tasks = {asyncio.ensure_future(_judge_score_one(a, body, judge, seats, pool_summary, total, semaphore, temperature=judge_temp)): a for a in applicants_refreshed}
+
+                    judge_results = []
+                    judge_completed = 0
+                    for coro in asyncio.as_completed(judge_tasks.keys()):
+                        result = await coro
+                        judge_completed += 1
+                        judge_results.append(result)
+                        yield f"event: judge_progress\ndata: {json.dumps({'judge_id': judge['id'], 'judge_name': judge['name'], 'judge_emoji': judge['emoji'], 'applicant_id': result['applicant_id'], 'name': result['name'], 'decision': result.get('decision', 'pass'), 'reasoning': result.get('reasoning', ''), 'completed': judge_completed, 'total': scoring_total})}\n\n"
+
+                    judge_results.sort(key=lambda r: 0 if r.get("decision") == "accept" else 1)
+                    seats_filled = 0
+                    accepted_names = []
+                    for r in judge_results:
+                        if "error" in r:
+                            continue
+                        if seats_filled < seats and r.get("decision") == "accept":
+                            seats_filled += 1
+                            accepted_names.append(r["name"])
+                        else:
+                            r["decision"] = "pass"
+                        all_judge_decisions[r["applicant_id"]].append({"judge_id": judge["id"], "judge_name": judge["name"], "judge_emoji": judge["emoji"], "decision": r["decision"], "reasoning": r.get("reasoning", "")})
+
+                    yield f"event: judge_complete\ndata: {json.dumps({'judge_id': judge['id'], 'judge_name': judge['name'], 'judge_emoji': judge['emoji'], 'seats_filled': seats_filled, 'seats_allocated': seats, 'accepted_names': accepted_names})}\n\n"
+
+                # Adjudication
+                yield f"event: phase\ndata: {json.dumps({'phase': 'adjudication', 'message': f'Adjudication ({panel.adjudication_mode} mode)...'})}\n\n"
+                result_counts = {"accepted": 0, "waitlisted": 0, "rejected": 0}
+
+                for a in applicants_refreshed:
+                    aid = a["applicant_id"]
+                    decisions = all_judge_decisions.get(aid, [])
+                    accept_count = sum(1 for d in decisions if d["decision"] == "accept")
+                    votes_total = len(decisions)
+
+                    if panel.adjudication_mode == "majority":
+                        final_status = "accepted" if accept_count > votes_total / 2 else "waitlisted"
+                    else:
+                        final_status = "accepted" if accept_count > 0 else "waitlisted"
+
+                    result_counts[final_status] += 1
+                    reasoning_parts = [f"{d['judge_emoji']} {d['judge_name']} [{'ACCEPT' if d['decision'] == 'accept' else 'PASS'}]: {d['reasoning']}" for d in decisions]
+                    accepting = [f"{d['judge_emoji']} {d['judge_name']}" for d in decisions if d["decision"] == "accept"]
+
+                    db.update_applicant_fields(aid, {
+                        "status": final_status,
+                        "ai_reasoning": " | ".join(reasoning_parts),
+                        "panel_votes": f"{accept_count}/{votes_total}",
+                        "accepting_judges": ", ".join(accepting) if accepting else "",
                     })
-                    yield f"event: auto_accept\ndata: {json.dumps({'applicant_id': a['applicant_id'], 'name': get_applicant_name(a), 'attendee_type': a.get('attendee_type', '')})}\n\n"
+                    yield f"event: adjudication\ndata: {json.dumps({'applicant_id': aid, 'name': get_applicant_name(a), 'final_status': final_status, 'votes_accept': accept_count, 'votes_total': votes_total, 'accepting_judges': accepting})}\n\n"
 
-        to_score = [a for a in pending if a["applicant_id"] not in auto_accepted_ids]
+                yield f"event: complete\ndata: {json.dumps({'completed': scoring_total, 'total': scoring_total, 'errors': 0})}\n\n"
 
-        # Score
-        yield f"event: phase\ndata: {json.dumps({'phase': 'score', 'message': 'Scoring applicants...'})}\n\n"
+                # Summary
+                try:
+                    auto_note = f" ({len(auto_accepted_ids)} auto-accepted)" if auto_accepted_ids else ""
+                    summary_prompt = _SUMMARY_PROMPT.format(total=total, accepted=result_counts["accepted"] + len(auto_accepted_ids), auto_accepted_note=auto_note, waitlisted=result_counts["waitlisted"], rejected=result_counts["rejected"], errors=0, pool_summary=pool_summary, selection_context=_selection_context(body.selection_preferences))
+                    raw_summary = await call_ai_async(body.provider, body.api_key, body.model, summary_prompt)
+                    summary_result = parse_json_response(raw_summary)
+                    if summary_result.get("summary"):
+                        yield f"event: summary\ndata: {json.dumps({'summary': summary_result['summary']})}\n\n"
+                except Exception:
+                    pass
+                return
+
+        # ── SINGLE REVIEWER ──
+        yield f"event: phase\ndata: {json.dumps({'phase': 'score', 'message': 'Pass 2: Making decisions...'})}\n\n"
 
         completed, errors = 0, 0
         result_counts = {"accepted": 0, "waitlisted": 0, "rejected": 0}
-        tasks = {asyncio.ensure_future(_score_one(a, score_body, pool_summary, total_all, semaphore)): a for a in to_score}
+        tasks = {asyncio.ensure_future(_score_one(a, body, pool_summary, total, semaphore)): a for a in applicants_refreshed}
 
         for coro in asyncio.as_completed(tasks.keys()):
             result = await coro
             completed += 1
             if "error" in result:
                 errors += 1
-                yield f"event: error\ndata: {json.dumps({**result, 'completed': completed, 'total': len(to_score), 'errors': errors})}\n\n"
+                yield f"event: error\ndata: {json.dumps({**result, 'completed': completed, 'total': scoring_total, 'errors': errors})}\n\n"
             else:
                 status = result.get("status", "pending")
                 if status in result_counts:
                     result_counts[status] += 1
-                yield f"event: progress\ndata: {json.dumps({**result, 'completed': completed, 'total': len(to_score), 'errors': errors})}\n\n"
+                yield f"event: progress\ndata: {json.dumps({**result, 'completed': completed, 'total': scoring_total, 'errors': errors})}\n\n"
 
-        yield f"event: complete\ndata: {json.dumps({'completed': completed, 'total': len(to_score), 'errors': errors})}\n\n"
+        yield f"event: complete\ndata: {json.dumps({'completed': completed, 'total': scoring_total, 'errors': errors})}\n\n"
 
         # Summary
         try:
             auto_note = f" ({len(auto_accepted_ids)} auto-accepted)" if auto_accepted_ids else ""
-            summary_prompt = _SUMMARY_PROMPT.format(
-                total=total_all, accepted=result_counts["accepted"] + len(auto_accepted_ids),
-                auto_accepted_note=auto_note, waitlisted=result_counts["waitlisted"],
-                rejected=result_counts["rejected"], errors=errors,
-                pool_summary=pool_summary,
-                selection_context=_selection_context(score_body.selection_preferences),
-            )
-            raw_summary = await call_ai_async(score_body.provider, score_body.api_key, score_body.model, summary_prompt)
+            summary_prompt = _SUMMARY_PROMPT.format(total=total, accepted=result_counts["accepted"] + len(auto_accepted_ids), auto_accepted_note=auto_note, waitlisted=result_counts["waitlisted"], rejected=result_counts["rejected"], errors=errors, pool_summary=pool_summary, selection_context=_selection_context(body.selection_preferences))
+            raw_summary = await call_ai_async(body.provider, body.api_key, body.model, summary_prompt)
             summary_result = parse_json_response(raw_summary)
-            summary_text = summary_result.get("summary", "")
-            if summary_text:
-                yield f"event: summary\ndata: {json.dumps({'summary': summary_text})}\n\n"
+            if summary_result.get("summary"):
+                yield f"event: summary\ndata: {json.dumps({'summary': summary_result['summary']})}\n\n"
         except Exception:
             pass
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
-# ── Reallocate (no AI, re-apply selection rules to cached scores) ──
-
 @router.post("/reallocate")
-def reallocate(body: ReallocateRequest):
+async def reallocate(body: ReallocateRequest):
     applicants = db.scan_all_applicants(session_id=body.session_id)
-    scored = [a for a in applicants if a.get("ai_score")]
-    scored.sort(key=lambda a: int(a.get("ai_score", 0)), reverse=True)
+    if not applicants:
+        raise HTTPException(status_code=400, detail="No applicants")
 
-    capacity = body.venue_capacity or len(scored)
-    type_targets: dict[str, int] = {}
-    for t, pct in body.attendee_mix.items():
-        type_targets[t] = round(capacity * pct / 100)
+    type_labels = {"vc": "VCs", "entrepreneur": "Founders", "faculty": "Faculty", "alumni": "Alumni", "press": "Press", "student": "Students", "other": "Other"}
+    by_type: dict[str, list] = {k: [] for k in type_labels}
 
-    auto_accept_set = set(body.auto_accept_types)
-    type_counts: dict[str, int] = {}
-    accepted_ids, waitlisted_ids = [], []
+    for a in applicants:
+        t = a.get("attendee_type", "other")
+        if t not in by_type:
+            t = "other"
+        by_type[t].append(a)
 
-    for a in scored:
-        aid = a["applicant_id"]
-        atype = a.get("attendee_type", "other")
+    capacity = body.venue_capacity or len(applicants)
+    accepted, waitlisted = 0, 0
 
-        if atype in auto_accept_set:
-            accepted_ids.append(aid)
-            type_counts[atype] = type_counts.get(atype, 0) + 1
-            continue
+    for type_key, items in by_type.items():
+        pct = body.attendee_mix.get(type_key, 0)
+        target = round(pct / 100 * capacity) if pct else 0
+        sorted_items = sorted(items, key=lambda a: a.get("name", ""))
 
-        if len(accepted_ids) >= capacity:
-            waitlisted_ids.append(aid)
-            continue
+        for i, a in enumerate(sorted_items):
+            new_status = "accepted" if i < target else "waitlisted"
+            db.update_applicant_fields(a["applicant_id"], {"status": new_status})
+            if new_status == "accepted":
+                accepted += 1
+            else:
+                waitlisted += 1
 
-        if atype in type_targets and type_counts.get(atype, 0) >= type_targets[atype]:
-            waitlisted_ids.append(aid)
-            continue
-
-        accepted_ids.append(aid)
-        type_counts[atype] = type_counts.get(atype, 0) + 1
-
-    for aid in accepted_ids:
-        db.update_applicant_fields(aid, {"status": "accepted"})
-    for aid in waitlisted_ids:
-        db.update_applicant_fields(aid, {"status": "waitlisted"})
-
-    return {"accepted": len(accepted_ids), "waitlisted": len(waitlisted_ids), "type_counts": type_counts}
+    return {"accepted": accepted, "waitlisted": waitlisted, "total": len(applicants)}

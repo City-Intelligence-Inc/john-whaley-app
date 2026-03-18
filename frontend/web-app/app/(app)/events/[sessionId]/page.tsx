@@ -1,40 +1,39 @@
 "use client";
 
 import { useState, useCallback, useMemo } from "react";
-import {
-  Upload,
-  Linkedin,
-  Loader2,
-  Brain,
-  Download,
-  CheckCircle2,
-  Clock,
-  XCircle,
-  Users,
-  CreditCard,
-  Search,
-  X,
-  ExternalLink,
-  Mail,
-  MapPin,
-  Building2,
-  GraduationCap,
-  Sparkles,
-  Minus,
-  Plus,
-  Zap,
-  Check,
-  Trash2,
-  ClipboardCopy,
-  FileDown,
-  ArrowRight,
-} from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import {
+  Upload,
+  Download,
+  Brain,
+  Search,
+  X,
+  Loader2,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  Users,
+  ClipboardCopy,
+  Check,
+  Sparkles,
+  Linkedin,
+  ExternalLink,
+  ArrowUpDown,
+  Trash2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import {
   Dialog,
   DialogContent,
@@ -42,51 +41,29 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Separator } from "@/components/ui/separator";
+import { Slider } from "@/components/ui/slider";
 import { useEvent } from "@/components/event-provider";
-import { ProfileSwipeView } from "@/components/profile-swipe-view";
-import { ApplicantDetailSheet } from "@/components/applicant-detail-sheet";
 import { CSVUploader } from "@/components/csv-uploader";
 import { api } from "@/lib/api";
 import type { Applicant } from "@/lib/api";
 import { ATTENDEE_TYPES } from "@/lib/constants";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Slider } from "@/components/ui/slider";
-
-/* ── helpers ── */
 
 function getName(a: Applicant): string {
-  return a.name || (a[`linkedin_name`] as string) || a.email || "No name";
+  return a.name || (a.linkedin_name as string) || a.email || "No name";
 }
 
-function statusColor(s: string) {
-  switch (s) {
-    case "accepted": return "text-emerald-500";
-    case "rejected": return "text-red-500";
-    case "waitlisted": return "text-amber-500";
-    default: return "text-muted-foreground";
-  }
+function getHeadline(a: Applicant): string {
+  return (a.linkedin_headline as string) || a.title || "";
 }
 
-function statusLabel(s: string) {
-  switch (s) {
-    case "accepted": return "Going";
-    case "rejected": return "Not Going";
-    case "waitlisted": return "Waitlisted";
-    default: return "Pending";
-  }
+function getPhoto(a: Applicant): string {
+  return (a.linkedin_image as string) || (a.photo_url as string) || "";
 }
 
-/* ── helpers for analysis tab ── */
-
-function getScore(a: Applicant): number {
-  if (!a.ai_score) return 0;
-  const n = Number(a.ai_score);
-  return isNaN(n) ? 0 : n;
+function getSummary(a: Applicant): string {
+  return (a.ai_summary as string) || (a.linkedin_summary as string) || "";
 }
 
 function getTypeColor(key: string): string {
@@ -97,545 +74,62 @@ function getTypeLabel(key: string): string {
   return ATTENDEE_TYPES.find((t) => t.key === key)?.label || key;
 }
 
-function getRejectionReason(a: Applicant): string {
-  if (a.status === "accepted") return "";
-  if (a.status === "rejected") return "Rejected";
-  if (a.status === "waitlisted") return "Waitlisted";
-  if (!a.ai_reasoning) return "Not analyzed";
-  return "Pending";
-}
-
-/* ── Analysis Results Tab ── */
-
-function AnalysisResultsTab({
-  applicants,
-  sessionId,
-  session,
-  onStatusChange,
-  onRefresh,
-  onRunAnalysis,
-}: {
-  applicants: Applicant[];
-  sessionId: string;
-  session: { name?: string } | null;
-  onStatusChange: (id: string, status: string) => void;
-  onRefresh: () => Promise<void>;
-  onRunAnalysis: () => void;
-}) {
-  const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
-  const [quotas, setQuotas] = useState<Record<string, number>>({});
-  const [saving, setSaving] = useState(false);
-  const [copiedEmails, setCopiedEmails] = useState(false);
-
-  // Group by category
-  const grouped = useMemo(() => {
-    const groups: Record<string, Applicant[]> = {};
-    for (const t of ATTENDEE_TYPES) groups[t.key] = [];
-    groups["unclassified"] = [];
-    for (const a of applicants) {
-      const type = a.attendee_type || "unclassified";
-      if (!groups[type]) groups[type] = [];
-      groups[type].push(a);
-    }
-    return groups;
-  }, [applicants]);
-
-  // Initialize quotas from current accepted counts
-  const currentAccepted = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const [key, items] of Object.entries(grouped)) {
-      counts[key] = items.filter((a) => a.status === "accepted").length;
-    }
-    return counts;
-  }, [grouped]);
-
-  // Keep dataset order but put accepted first
-  const sortedGroups = useMemo(() => {
-    const result: Record<string, Applicant[]> = {};
-    for (const [key, items] of Object.entries(grouped)) {
-      result[key] = [...items].sort((a, b) => {
-        const aAccepted = a.status === "accepted" ? 0 : 1;
-        const bAccepted = b.status === "accepted" ? 0 : 1;
-        return aAccepted - bAccepted;
-      });
-    }
-    return result;
-  }, [grouped]);
-
-  const totalAccepted = applicants.filter((a) => a.status === "accepted").length;
-  const totalAnalyzed = applicants.filter((a) => a.ai_score).length;
-  const hasAnalysis = totalAnalyzed > 0;
-
-  // Get effective quota (user-set or current accepted count)
-  const getQuota = (key: string) => quotas[key] ?? currentAccepted[key] ?? 0;
-
-  // Auto-apply quotas: accept top N by score in each category
-  const handleAutoApply = useCallback(async () => {
-    setSaving(true);
-    try {
-      const toAccept: string[] = [];
-      const toWaitlist: string[] = [];
-      for (const [key, items] of Object.entries(sortedGroups)) {
-        const target = getQuota(key);
-        items.forEach((a, idx) => {
-          if (idx < target) {
-            if (a.status !== "accepted") toAccept.push(a.applicant_id);
-          } else {
-            if (a.status === "accepted") toWaitlist.push(a.applicant_id);
-          }
-        });
-      }
-      if (toAccept.length > 0) await api.batchUpdateStatus(toAccept, "accepted");
-      if (toWaitlist.length > 0) await api.batchUpdateStatus(toWaitlist, "waitlisted");
-      toast.success(`Updated: ${toAccept.length} accepted, ${toWaitlist.length} waitlisted`);
-      await onRefresh();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to apply quotas");
-    } finally {
-      setSaving(false);
-    }
-  }, [sortedGroups, quotas, currentAccepted, onRefresh]);
-
-  // Export accepted as Luma-compatible CSV (name, email)
-  const handleExportAccepted = useCallback(() => {
-    const accepted = applicants.filter((a) => a.status === "accepted");
-    if (accepted.length === 0) { toast.error("No accepted guests to export"); return; }
-    const headers = ["name", "email", "company", "title", "attendee_type", "attendee_type_detail", "linkedin_url"];
-    const esc = (v: unknown) => { const s = String(v ?? ""); return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s; };
-    const rows = [headers.join(","), ...accepted.map((a) => headers.map((h) => esc(a[h])).join(","))];
-    const blob = new Blob([rows.join("\n")], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${(session?.name || "event").replace(/\s+/g, "-").toLowerCase()}-accepted-${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-    toast.success(`Exported ${accepted.length} accepted guests`);
-  }, [applicants, session]);
-
-  // Copy accepted emails to clipboard (for pasting into Luma)
-  const handleCopyEmails = useCallback(() => {
-    const accepted = applicants.filter((a) => a.status === "accepted");
-    const emails = accepted.map((a) => a.email).filter(Boolean);
-    if (emails.length === 0) { toast.error("No accepted guests with emails"); return; }
-    navigator.clipboard.writeText(emails.join("\n"));
-    setCopiedEmails(true);
-    toast.success(`Copied ${emails.length} emails to clipboard`);
-    setTimeout(() => setCopiedEmails(false), 2000);
-  }, [applicants]);
-
-  const categoryOrder = [...ATTENDEE_TYPES.map((t) => t.key), "unclassified"];
-
-  return (
-    <div className="space-y-6">
-      {/* Run analysis button */}
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm text-muted-foreground">
-            {hasAnalysis
-              ? `${totalAnalyzed} of ${applicants.length} guests analyzed. ${totalAccepted} accepted.`
-              : "Run the AI judge panel to score and classify all guests."}
-          </p>
-        </div>
-        <Button
-          onClick={onRunAnalysis}
-          disabled={applicants.length === 0}
-          variant={hasAnalysis ? "outline" : "default"}
-          className={hasAnalysis ? "border-border/50" : "bg-gold text-gold-foreground hover:bg-gold/90"}
-        >
-          <Brain className="size-4 mr-2" />
-          {hasAnalysis ? "Re-Run Analysis" : "Run Analysis"}
-        </Button>
-      </div>
-
-      {hasAnalysis && (
-        <>
-          {/* Category Summary Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-            {categoryOrder.map((key) => {
-              const items = grouped[key] || [];
-              if (items.length === 0) return null;
-              const accepted = items.filter((a) => a.status === "accepted").length;
-              const color = key === "unclassified" ? "#6b7280" : getTypeColor(key);
-              const label = key === "unclassified" ? "Unclassified" : getTypeLabel(key);
-              const isExpanded = expandedCategory === key;
-
-              return (
-                <button
-                  key={key}
-                  onClick={() => setExpandedCategory(isExpanded ? null : key)}
-                  className={`rounded-xl border p-4 text-left transition-all hover:border-border ${
-                    isExpanded
-                      ? "border-border bg-card ring-1"
-                      : "border-border/50 bg-card/50"
-                  }`}
-                  style={isExpanded ? { borderColor: color } : undefined}
-                >
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className="size-3 rounded-full shrink-0" style={{ backgroundColor: color }} />
-                    <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide truncate">{label}</span>
-                  </div>
-                  <div className="flex items-baseline gap-1.5">
-                    <span className="text-2xl font-bold" style={{ color }}>{accepted}</span>
-                    <span className="text-sm text-muted-foreground">/ {items.length}</span>
-                  </div>
-                  <p className="text-[10px] text-muted-foreground mt-1">
-                    {accepted === 0 ? "none accepted" : `${accepted} accepted`}
-                  </p>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Quota Controls */}
-          <Card className="border-border/50 bg-card/50">
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                  <Users className="size-4 text-gold" />
-                  Category Quotas
-                </CardTitle>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">
-                    Total: <span className="font-semibold text-foreground">{Object.entries(grouped).reduce((sum, [key, items]) => sum + Math.min(getQuota(key), items.length), 0)}</span>
-                  </span>
-                  <Button
-                    size="sm"
-                    className="h-7 text-xs bg-gold text-gold-foreground hover:bg-gold/90"
-                    onClick={handleAutoApply}
-                    disabled={saving}
-                  >
-                    {saving ? <Loader2 className="size-3 mr-1 animate-spin" /> : <Zap className="size-3 mr-1" />}
-                    Apply Quotas
-                  </Button>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {categoryOrder.map((key) => {
-                const items = grouped[key] || [];
-                if (items.length === 0) return null;
-                const color = key === "unclassified" ? "#6b7280" : getTypeColor(key);
-                const label = key === "unclassified" ? "Unclassified" : getTypeLabel(key);
-                const quota = getQuota(key);
-                const accepted = currentAccepted[key] || 0;
-
-                return (
-                  <div key={key} className="flex items-center gap-4">
-                    <div className="flex items-center gap-2 w-40 shrink-0">
-                      <div className="size-2.5 rounded-full" style={{ backgroundColor: color }} />
-                      <span className="text-xs font-medium truncate">{label}</span>
-                      <span className="text-[10px] text-muted-foreground">({items.length})</span>
-                    </div>
-                    <div className="flex-1">
-                      <Slider
-                        value={[quota]}
-                        min={0}
-                        max={items.length}
-                        step={1}
-                        onValueChange={([val]) => setQuotas((prev) => ({ ...prev, [key]: val }))}
-                        className="h-4"
-                      />
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button
-                        onClick={() => setQuotas((prev) => ({ ...prev, [key]: Math.max(0, quota - 1) }))}
-                        className="size-6 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                      >
-                        <Minus className="size-3" />
-                      </button>
-                      <span className="text-sm font-semibold tabular-nums w-8 text-center">{quota}</span>
-                      <button
-                        onClick={() => setQuotas((prev) => ({ ...prev, [key]: Math.min(items.length, quota + 1) }))}
-                        className="size-6 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                      >
-                        <Plus className="size-3" />
-                      </button>
-                    </div>
-                    {quota !== accepted && (
-                      <Badge variant="outline" className="text-[10px] bg-gold/10 text-gold border-gold/30 shrink-0">
-                        was {accepted}
-                      </Badge>
-                    )}
-                  </div>
-                );
-              })}
-            </CardContent>
-          </Card>
-
-          {/* ── Finalize & Export ── */}
-          <Card className="border-gold/20 bg-gradient-to-br from-gold/5 via-card to-card">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                <FileDown className="size-4 text-gold" />
-                Finalize & Export to Luma
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-start gap-8">
-                {/* Step indicators */}
-                <div className="space-y-4 text-sm">
-                  <div className="flex items-center gap-3">
-                    <div className={`size-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${totalAnalyzed > 0 ? "bg-emerald-500/20 text-emerald-400" : "bg-muted text-muted-foreground"}`}>
-                      {totalAnalyzed > 0 ? <Check className="size-3" /> : "1"}
-                    </div>
-                    <span className={totalAnalyzed > 0 ? "text-muted-foreground line-through" : "font-medium"}>Run AI analysis</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className={`size-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${totalAccepted > 0 ? "bg-emerald-500/20 text-emerald-400" : "bg-muted text-muted-foreground"}`}>
-                      {totalAccepted > 0 ? <Check className="size-3" /> : "2"}
-                    </div>
-                    <span className={totalAccepted > 0 ? "text-muted-foreground line-through" : "font-medium"}>Set quotas & apply ({totalAccepted} accepted)</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="size-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 bg-muted text-muted-foreground">3</div>
-                    <span className="font-medium">Export & paste into Luma</span>
-                  </div>
-                </div>
-              </div>
-
-              {totalAccepted > 0 && (
-                <div className="flex items-center gap-3 pt-2 border-t border-border/30">
-                  <Button
-                    onClick={handleExportAccepted}
-                    className="bg-gold text-gold-foreground hover:bg-gold/90"
-                    size="sm"
-                  >
-                    <Download className="size-4 mr-2" />
-                    Export {totalAccepted} Accepted (CSV)
-                  </Button>
-                  <Button
-                    onClick={handleCopyEmails}
-                    variant="outline"
-                    size="sm"
-                    className="border-border/50"
-                  >
-                    {copiedEmails ? <Check className="size-4 mr-2 text-emerald-400" /> : <ClipboardCopy className="size-4 mr-2" />}
-                    {copiedEmails ? "Copied!" : "Copy Emails"}
-                  </Button>
-                  <span className="text-xs text-muted-foreground ml-auto">
-                    Paste emails into Luma&apos;s guest list to approve
-                  </span>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Expanded Category Detail */}
-          {expandedCategory && (
-            <Card className="border-border/50">
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div
-                      className="size-3 rounded-full"
-                      style={{ backgroundColor: expandedCategory === "unclassified" ? "#6b7280" : getTypeColor(expandedCategory) }}
-                    />
-                    <CardTitle className="text-sm font-semibold">
-                      {expandedCategory === "unclassified" ? "Unclassified" : getTypeLabel(expandedCategory)}
-                    </CardTitle>
-                    <Badge variant="secondary" className="text-xs">
-                      {(grouped[expandedCategory] || []).length} total
-                    </Badge>
-                  </div>
-                  <button
-                    onClick={() => setExpandedCategory(null)}
-                    className="text-muted-foreground hover:text-foreground"
-                  >
-                    <X className="size-4" />
-                  </button>
-                </div>
-              </CardHeader>
-              <CardContent className="pt-0">
-                <div className="rounded-lg border border-border/30 divide-y divide-border/20">
-                  {(sortedGroups[expandedCategory] || []).map((a, idx) => {
-                    const isAccepted = a.status === "accepted";
-                    const isRejected = a.status === "rejected";
-                    const isWaitlisted = a.status === "waitlisted";
-                    const notIn = !isAccepted;
-                    const photo = (a[`linkedin_image`] as string) || (a[`photo_url`] as string) || "";
-                    const headline = (a[`linkedin_headline`] as string) || a.title || "";
-                    const rejectionReason = getRejectionReason(a);
-
-                    return (
-                      <div
-                        key={a.applicant_id}
-                        className={`flex items-center gap-3 px-3 py-2.5 transition-colors ${
-                          notIn ? "opacity-50" : "hover:bg-muted/30"
-                        }`}
-                      >
-                        {/* Rank */}
-                        <span className="text-xs font-mono text-muted-foreground w-6 text-right shrink-0">
-                          {idx + 1}
-                        </span>
-
-                        {/* Photo */}
-                        {photo ? (
-                          <img src={photo} alt="" className="size-8 rounded-lg object-cover shrink-0" />
-                        ) : (
-                          <div className="size-8 rounded-lg bg-muted flex items-center justify-center shrink-0 text-xs font-semibold text-muted-foreground">
-                            {getName(a).charAt(0).toUpperCase()}
-                          </div>
-                        )}
-
-                        {/* Name + headline + AI reasoning */}
-                        <div className="flex-1 min-w-0">
-                          <span className={`text-sm font-medium truncate block ${notIn ? "text-muted-foreground" : ""}`}>
-                            {getName(a)}
-                          </span>
-                          {headline && (
-                            <p className={`text-xs truncate ${notIn ? "text-muted-foreground/50" : "text-muted-foreground"}`}>
-                              {headline}
-                            </p>
-                          )}
-                          {a.ai_reasoning && (
-                            <p className="text-[10px] text-muted-foreground/60 truncate mt-0.5 max-w-md">
-                              {a.ai_reasoning.includes(" | ")
-                                ? (() => {
-                                    const parts = a.ai_reasoning.split(" | ");
-                                    const accepts = parts.filter((p: string) => p.includes("[ACCEPT]")).length;
-                                    const firstReason = parts[0]?.replace(/^.*?\]:\s*/, "") || "";
-                                    return `${accepts}/${parts.length} accepted — ${firstReason}`;
-                                  })()
-                                : a.ai_reasoning}
-                            </p>
-                          )}
-                        </div>
-
-                        {/* Status / rejection reason */}
-                        <div className="flex items-center gap-2 shrink-0">
-                          {isAccepted && (
-                            <Badge variant="outline" className="text-[10px] bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
-                              Accepted
-                            </Badge>
-                          )}
-                          {isRejected && (
-                            <span className="text-[10px] text-muted-foreground/60 max-w-[140px] truncate" title={rejectionReason}>
-                              {rejectionReason}
-                            </span>
-                          )}
-                          {isWaitlisted && (
-                            <span className="text-[10px] text-amber-500/60">Waitlisted</span>
-                          )}
-                          {a.status === "pending" && (
-                            <span className="text-[10px] text-muted-foreground/40">Pending</span>
-                          )}
-                        </div>
-
-                        {/* Quick accept/reject */}
-                        <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            onClick={() => onStatusChange(a.applicant_id, isAccepted ? "waitlisted" : "accepted")}
-                            className={`size-6 rounded flex items-center justify-center transition-colors ${
-                              isAccepted
-                                ? "bg-emerald-500/20 text-emerald-400"
-                                : "text-muted-foreground/40 hover:text-emerald-400 hover:bg-emerald-500/10"
-                            }`}
-                            title={isAccepted ? "Remove" : "Accept"}
-                          >
-                            <Check className="size-3" />
-                          </button>
-                          <button
-                            onClick={() => onStatusChange(a.applicant_id, isRejected ? "waitlisted" : "rejected")}
-                            className={`size-6 rounded flex items-center justify-center transition-colors ${
-                              isRejected
-                                ? "bg-red-500/20 text-red-400"
-                                : "text-muted-foreground/40 hover:text-red-400 hover:bg-red-500/10"
-                            }`}
-                            title={isRejected ? "Un-reject" : "Reject"}
-                          >
-                            <X className="size-3" />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-
-/* ── page ── */
-
 export default function EventWorkspacePage() {
   const router = useRouter();
   const {
-    sessionId, session, applicants, stats, loading, error,
+    sessionId, session, applicants, loading, error,
     refreshApplicants, refreshStats, refreshAll,
   } = useEvent();
 
-  const [tab, setTab] = useState<"guests" | "review" | "analysis">("guests");
-  const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
-  const [selectedApplicantId, setSelectedApplicantId] = useState<string | null>(null);
-  const [showImportDialog, setShowImportDialog] = useState(false);
-  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [showImport, setShowImport] = useState(false);
+  const [sortField, setSortField] = useState<"name" | "status" | "type" | "score">("name");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [copiedEmails, setCopiedEmails] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // Filter applicants by category for the review tab
-  const categoryFilteredApplicants = useMemo(() => {
-    if (categoryFilter === "all") return applicants;
-    if (categoryFilter === "unclassified") return applicants.filter((a) => !a.attendee_type);
-    return applicants.filter((a) => (a.attendee_type || "other") === categoryFilter);
-  }, [applicants, categoryFilter]);
-
-  // LinkedIn enrichment
-  const [liAtCookie, setLiAtCookie] = useState(() =>
-    typeof window !== "undefined" ? localStorage.getItem("li_at_cookie") || "" : ""
-  );
-  const [enriching, setEnriching] = useState(false);
-  const [showLiAtPopover, setShowLiAtPopover] = useState(false);
-
-  const selectedApplicant = useMemo(
-    () => selectedApplicantId ? applicants.find((a) => a.applicant_id === selectedApplicantId) || null : null,
-    [selectedApplicantId, applicants]
-  );
-
-  /* ── counts ── */
+  /* ── Counts ── */
   const accepted = applicants.filter((a) => a.status === "accepted").length;
   const pending = applicants.filter((a) => a.status === "pending").length;
   const rejected = applicants.filter((a) => a.status === "rejected").length;
   const waitlisted = applicants.filter((a) => a.status === "waitlisted").length;
   const total = applicants.length;
-  const barTotal = total || 1;
+  const analyzed = applicants.filter((a) => a.ai_reasoning).length;
 
-  /* ── handlers ── */
+  /* ── Sort & filter ── */
+  const filtered = useMemo(() => {
+    let list = applicants;
+    if (statusFilter !== "all") list = list.filter((a) => a.status === statusFilter);
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter((a) => {
+        const s = [a.name, a.email, a.company, a.title, a.linkedin_headline as string]
+          .filter(Boolean).join(" ").toLowerCase();
+        return s.includes(q);
+      });
+    }
+    return [...list].sort((a, b) => {
+      let cmp = 0;
+      if (sortField === "name") cmp = getName(a).localeCompare(getName(b));
+      else if (sortField === "status") cmp = a.status.localeCompare(b.status);
+      else if (sortField === "type") cmp = (a.attendee_type || "zzz").localeCompare(b.attendee_type || "zzz");
+      else if (sortField === "score") cmp = Number(b.ai_score || 0) - Number(a.ai_score || 0);
+      return sortDir === "desc" ? -cmp : cmp;
+    });
+  }, [applicants, statusFilter, search, sortField, sortDir]);
+
+  /* ── Handlers ── */
   const handleStatusChange = useCallback(async (id: string, status: string) => {
     try {
       await api.updateApplicant(id, { status });
       await Promise.all([refreshApplicants(), refreshStats()]);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to update status");
+      toast.error(err instanceof Error ? err.message : "Failed to update");
     }
   }, [refreshApplicants, refreshStats]);
 
-  const handleCategorize = useCallback(async (id: string, type: string) => {
-    try {
-      await api.updateApplicant(id, { extra: { attendee_type: type, user_override_attendee_type: true } });
-      await refreshApplicants();
-      toast.success("Category updated");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to update category");
-    }
-  }, [refreshApplicants]);
-
-  const handleBlacklist = useCallback(async (email: string) => {
-    try {
-      // Get current blacklist, add email, save
-      const current = await api.getBlacklist();
-      const emails = [...(current.emails || []), email.toLowerCase()];
-      await api.updateBlacklist([...new Set(emails)]);
-      toast.success(`${email} blacklisted — will be auto-rejected on future events`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to blacklist");
-    }
-  }, []);
-
-  const handleDeleteSession = useCallback(async () => {
+  const handleDelete = useCallback(async () => {
     if (!confirm("Delete this event and all its applicants? This cannot be undone.")) return;
     try {
       await api.deleteSession(sessionId);
@@ -646,63 +140,12 @@ export default function EventWorkspacePage() {
     }
   }, [sessionId, router]);
 
-  const handleUploadSuccess = useCallback(async (_count: number) => {
-    toast.success(`Imported ${_count} guests`);
-    await refreshAll();
-    setShowImportDialog(false);
-
-    // Auto-classify in background if API key is available
-    const apiKey = typeof window !== "undefined" ? localStorage.getItem("ai_api_key") || "" : "";
-    const provider = typeof window !== "undefined" ? localStorage.getItem("ai_provider") || "anthropic" : "anthropic";
-    const model = typeof window !== "undefined" ? localStorage.getItem("ai_model") || "claude-sonnet-4-20250514" : "claude-sonnet-4-20250514";
-    if (apiKey) {
-      const classifyToast = toast.loading("Classifying guests...");
-      try {
-        await api.classifyStream(
-          { api_key: apiKey, model, provider, session_id: sessionId },
-          {
-            onStart: (d) => toast.loading(`Classifying ${d.total} guests...`, { id: classifyToast }),
-            onClassify: (d) => toast.loading(`[${d.completed}/${d.total}] ${d.name || "..."}`, { id: classifyToast }),
-            onComplete: (d) => {
-              toast.success(`Classified ${d.completed} guests (${d.errors} errors)`, { id: classifyToast });
-              refreshApplicants();
-            },
-          }
-        );
-      } catch {
-        toast.dismiss(classifyToast);
-      }
-    }
-  }, [refreshAll, sessionId, refreshApplicants]);
-
-  const handleEnrichLinkedIn = useCallback(async () => {
-    if (liAtCookie.trim()) localStorage.setItem("li_at_cookie", liAtCookie);
-    setEnriching(true);
-    setShowLiAtPopover(false);
-    const toastId = toast.loading("Starting LinkedIn enrichment...");
-    try {
-      await api.enrichLinkedInStream(
-        { session_id: sessionId, li_at: liAtCookie.trim() || undefined },
-        {
-          onStart: (data) => toast.loading(`Scraping ${data.total} profiles...`, { id: toastId }),
-          onProgress: (data) => toast.loading(`[${data.completed}/${data.total}] ${data.name || "..."}`, { id: toastId }),
-          onError: (data) => toast.loading(`[${data.completed}/${data.total}] Error: ${data.name || ""}`, { id: toastId }),
-          onComplete: (data) => { toast.success(`Done: ${data.enriched} enriched`, { id: toastId }); refreshApplicants(); },
-        }
-      );
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Enrichment failed", { id: toastId });
-    } finally {
-      setEnriching(false);
-    }
-  }, [sessionId, liAtCookie, refreshApplicants]);
-
-  const handleExportCSV = useCallback(() => {
-    if (applicants.length === 0) return;
+  const handleExportAll = useCallback(() => {
+    if (!applicants.length) return;
     const skip = new Set(["applicant_id", "session_id"]);
     const keys = new Set<string>();
     for (const a of applicants) for (const k of Object.keys(a)) if (!skip.has(k)) keys.add(k);
-    const pri = ["name", "email", "status", "ai_score", "ai_reasoning", "company", "title", "location", "linkedin_url"];
+    const pri = ["name", "email", "status", "attendee_type", "attendee_type_detail", "ai_score", "ai_reasoning", "company", "title", "location", "linkedin_url"];
     const headers = [...pri.filter((k) => keys.has(k)), ...[...keys].filter((k) => !pri.includes(k)).sort()];
     const esc = (v: unknown) => { const s = String(v ?? ""); return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s; };
     const rows = [headers.join(","), ...applicants.map((a) => headers.map((h) => esc(a[h])).join(","))];
@@ -710,384 +153,519 @@ export default function EventWorkspacePage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `${(session?.name || "event").replace(/\s+/g, "-").toLowerCase()}-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.download = `${(session?.name || "event").replace(/\s+/g, "-").toLowerCase()}-all-${new Date().toISOString().slice(0, 10)}.csv`;
     link.click();
     URL.revokeObjectURL(url);
   }, [applicants, session]);
 
-  /* ── filtered guest list ── */
-  const filtered = useMemo(() => {
-    let list = applicants;
-    if (statusFilter !== "all") list = list.filter((a) => a.status === statusFilter);
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter((a) => {
-        const s = [a.name, a.email, a.company, a.title, a[`linkedin_headline`] as string].filter(Boolean).join(" ").toLowerCase();
-        return s.includes(q);
-      });
-    }
-    return list.sort((a, b) => (getName(a)).localeCompare(getName(b)));
-  }, [applicants, statusFilter, search]);
+  const handleExportAccepted = useCallback(() => {
+    const acc = applicants.filter((a) => a.status === "accepted");
+    if (!acc.length) { toast.error("No accepted guests"); return; }
+    const headers = ["name", "email", "company", "title", "attendee_type", "attendee_type_detail", "linkedin_url"];
+    const esc = (v: unknown) => { const s = String(v ?? ""); return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s; };
+    const rows = [headers.join(","), ...acc.map((a) => headers.map((h) => esc(a[h])).join(","))];
+    const blob = new Blob([rows.join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${(session?.name || "event").replace(/\s+/g, "-").toLowerCase()}-accepted-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${acc.length} accepted guests`);
+  }, [applicants, session]);
 
-  /* ── loading / error ── */
-  if (loading) return <div className="flex items-center justify-center py-20"><Loader2 className="size-6 animate-spin text-gold" /></div>;
+  const handleCopyEmails = useCallback(() => {
+    const emails = applicants.filter((a) => a.status === "accepted").map((a) => a.email).filter(Boolean);
+    if (!emails.length) { toast.error("No accepted emails"); return; }
+    navigator.clipboard.writeText(emails.join("\n"));
+    setCopiedEmails(true);
+    toast.success(`Copied ${emails.length} emails — paste into Luma`);
+    setTimeout(() => setCopiedEmails(false), 2000);
+  }, [applicants]);
+
+  const toggleSort = (field: typeof sortField) => {
+    if (sortField === field) setSortDir(sortDir === "asc" ? "desc" : "asc");
+    else { setSortField(field); setSortDir("asc"); }
+  };
+
+  const selectedApplicant = selectedId ? applicants.find((a) => a.applicant_id === selectedId) : null;
+
+  if (loading) return <div className="flex items-center justify-center py-20"><Loader2 className="size-6 animate-spin text-muted-foreground" /></div>;
   if (error) return <div className="flex flex-col items-center justify-center py-20"><p className="text-sm text-destructive mb-4">{error}</p><Button variant="outline" onClick={() => refreshAll()}>Retry</Button></div>;
 
   return (
-    <div className="space-y-6">
-      {/* ── Event Title ── */}
+    <div className="space-y-6 max-w-6xl">
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold tracking-tight text-foreground">
-          {session?.name || "Event"}
-        </h1>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={handleDeleteSession}
-          className="text-muted-foreground hover:text-red-500 hover:bg-red-500/10"
-        >
-          <Trash2 className="size-4 mr-1.5" />Delete
-        </Button>
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">{session?.name || "Event"}</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">{total} guests</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => router.push(`/events/${sessionId}/analyze`)}>
+            <Brain className="size-4 mr-2" />
+            {analyzed > 0 ? "Re-Analyze" : "Run Analysis"}
+          </Button>
+          <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" onClick={handleDelete}>
+            <Trash2 className="size-4" />
+          </Button>
+        </div>
       </div>
 
-      {/* ── Tabs ── */}
-      <div className="flex items-center gap-6 border-b border-border/50">
-        {(["guests", "review", "analysis"] as const).map((t) => (
+      {/* Stats cards */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        {[
+          { label: "Total", value: total, color: "text-foreground", filter: "all" },
+          { label: "Accepted", value: accepted, color: "text-emerald-600", filter: "accepted" },
+          { label: "Pending", value: pending, color: "text-blue-600", filter: "pending" },
+          { label: "Waitlisted", value: waitlisted, color: "text-amber-600", filter: "waitlisted" },
+          { label: "Rejected", value: rejected, color: "text-red-600", filter: "rejected" },
+        ].map((s) => (
           <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`pb-2.5 text-sm font-medium border-b-2 transition-colors ${
-              tab === t
-                ? "border-gold text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground"
+            key={s.label}
+            onClick={() => setStatusFilter(statusFilter === s.filter ? "all" : s.filter)}
+            className={`rounded-xl border p-4 text-left transition-all hover:shadow-sm ${
+              statusFilter === s.filter ? "border-primary shadow-sm bg-accent/50" : "border-border"
             }`}
           >
-            {t === "guests" ? "Guests" : t === "review" ? "Review" : "Analysis"}
+            <p className="text-xs font-medium text-muted-foreground">{s.label}</p>
+            <p className={`text-2xl font-bold tabular-nums ${s.color}`}>{s.value}</p>
           </button>
         ))}
       </div>
 
-      {/* ════════════════════════════════════════════ */}
-      {/*  GUESTS TAB                                  */}
-      {/* ════════════════════════════════════════════ */}
-      {tab === "guests" && (
-        <div className="space-y-6">
-          {/* At a Glance */}
-          <div className="space-y-3">
-            <h2 className="text-lg font-semibold">At a Glance</h2>
+      <Tabs defaultValue="guests">
+        <div className="flex items-center justify-between">
+          <TabsList>
+            <TabsTrigger value="guests">Guests</TabsTrigger>
+            <TabsTrigger value="export">Export</TabsTrigger>
+          </TabsList>
+          <div className="flex items-center gap-2">
+            <Button size="sm" onClick={() => setShowImport(true)}>
+              <Upload className="size-4 mr-2" />Import
+            </Button>
+          </div>
+        </div>
 
-            <div className="flex items-baseline gap-2">
-              <span className="text-4xl font-bold text-emerald-500">{accepted}</span>
-              <span className="text-lg text-muted-foreground">Going</span>
+        {/* ── Guests Tab ── */}
+        <TabsContent value="guests" className="mt-4 space-y-4">
+          {/* Search */}
+          <div className="flex items-center gap-3">
+            <div className="relative flex-1 max-w-sm">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+              <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search guests..." className="pl-9 h-9" />
+              {search && <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2"><X className="size-4 text-muted-foreground" /></button>}
             </div>
-
-            {/* Status bar */}
-            <div className="h-3 rounded-full overflow-hidden flex bg-muted">
-              {accepted > 0 && <div className="bg-emerald-500 transition-all" style={{ width: `${(accepted / barTotal) * 100}%` }} />}
-              {waitlisted > 0 && <div className="bg-amber-500 transition-all" style={{ width: `${(waitlisted / barTotal) * 100}%` }} />}
-              {pending > 0 && <div className="bg-blue-500 transition-all" style={{ width: `${(pending / barTotal) * 100}%` }} />}
-              {rejected > 0 && <div className="bg-red-500 transition-all" style={{ width: `${(rejected / barTotal) * 100}%` }} />}
-            </div>
-
-            <div className="flex items-center gap-4 text-sm flex-wrap">
-              {pending > 0 && <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-blue-500" />{pending} Pending</span>}
-              {waitlisted > 0 && <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-amber-500" />{waitlisted} Waitlisted</span>}
-              {rejected > 0 && <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-red-500" />{rejected} Not Going</span>}
-            </div>
+            <p className="text-xs text-muted-foreground">{filtered.length} results</p>
           </div>
 
-          {/* Action buttons */}
-          <div className="flex items-center gap-3 flex-wrap">
-            <Button onClick={() => setShowImportDialog(true)} className="bg-gold text-gold-foreground hover:bg-gold/90">
-              <Upload className="size-4 mr-2" />Import Guests
-            </Button>
-            <Button variant="outline" onClick={() => setTab("review")} className="border-border/50">
-              <CreditCard className="size-4 mr-2" />Review Guests
-            </Button>
-            <Button variant="outline" disabled={total === 0} onClick={handleExportCSV} className="border-border/50">
-              <Download className="size-4 mr-2" />Export All
-            </Button>
-            {accepted > 0 && (
-              <Button variant="outline" onClick={() => {
-                const acc = applicants.filter((a) => a.status === "accepted");
-                const emails = acc.map((a) => a.email).filter(Boolean);
-                navigator.clipboard.writeText(emails.join("\n"));
-                toast.success(`Copied ${emails.length} accepted emails to clipboard — paste into Luma`);
-              }} className="border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/10">
-                <ClipboardCopy className="size-4 mr-2" />Copy {accepted} Emails
-              </Button>
-            )}
-          </div>
-
-          {/* Guest List */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold">Guest List</h2>
-              <span className="text-xs text-muted-foreground">{filtered.length} guests</span>
-            </div>
-
-            {/* Search + filter */}
-            <div className="flex items-center gap-3">
-              <div className="relative flex-1 max-w-md">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-                <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search" className="pl-9 h-9" />
-                {search && <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"><X className="size-4" /></button>}
-              </div>
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="h-9 rounded-md border border-border/50 bg-background px-3 text-sm text-foreground"
-              >
-                <option value="all">All Guests</option>
-                <option value="accepted">Going</option>
-                <option value="pending">Pending</option>
-                <option value="waitlisted">Waitlisted</option>
-                <option value="rejected">Not Going</option>
-              </select>
-            </div>
-
-            {/* Empty state */}
-            {total === 0 && (
-              <div className="text-center py-16">
-                <Users className="size-12 text-muted-foreground/30 mx-auto mb-4" />
+          {/* Table */}
+          {total === 0 ? (
+            <Card className="border-dashed">
+              <CardContent className="flex flex-col items-center justify-center py-16">
+                <Users className="size-12 text-muted-foreground/30 mb-4" />
                 <p className="text-lg font-medium mb-1">No guests yet</p>
-                <p className="text-sm text-muted-foreground mb-4">Import a CSV to get started</p>
-                <Button onClick={() => setShowImportDialog(true)} className="bg-gold text-gold-foreground hover:bg-gold/90">
+                <p className="text-sm text-muted-foreground mb-4">Import a CSV or add guests from Luma</p>
+                <Button onClick={() => setShowImport(true)}>
                   <Upload className="size-4 mr-2" />Import Guests
                 </Button>
-              </div>
-            )}
-
-            {/* Guest cards */}
-            {total > 0 && (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                {filtered.map((a) => {
-                  const photo = (a[`linkedin_image`] as string) || (a[`photo_url`] as string) || "";
-                  const headline = (a[`linkedin_headline`] as string) || a.title || "";
-                  const about = (a[`linkedin_about`] as string) || "";
-                  const company = a.company || (a[`linkedin_company`] as string) || "";
-                  const location = a.location || (a[`linkedin_location`] as string) || "";
-                  const education = (a[`linkedin_education`] as string) || "";
-                  const isPending = a.status === "pending";
-                  const name = getName(a);
-
-                  return (
-                    <div
-                      key={a.applicant_id}
-                      className="rounded-xl border border-border/50 bg-card/50 hover:border-border transition-all overflow-hidden cursor-pointer group"
-                      onClick={() => setSelectedApplicantId(a.applicant_id)}
-                    >
-                      {/* Card header with photo */}
-                      <div className="p-4 pb-3">
-                        <div className="flex items-start gap-3">
-                          {photo ? (
-                            <img src={photo} alt="" className="size-14 rounded-xl object-cover shrink-0 ring-1 ring-border/50" />
-                          ) : (
-                            <div className="size-14 rounded-xl bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center shrink-0 text-xl font-bold text-muted-foreground/50">
-                              {name.charAt(0).toUpperCase()}
-                            </div>
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <h3 className="text-sm font-semibold truncate group-hover:text-gold transition-colors">{name}</h3>
-                            {headline && <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5 leading-relaxed">{headline}</p>}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Info chips */}
-                      {(company || location || education) && (
-                        <div className="px-4 pb-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-                          {company && <span className="flex items-center gap-1"><Building2 className="size-3" />{company}</span>}
-                          {location && <span className="flex items-center gap-1"><MapPin className="size-3" />{location}</span>}
-                          {education && <span className="flex items-center gap-1"><GraduationCap className="size-3" /><span className="truncate max-w-[150px]">{education.split("\n")[0]}</span></span>}
-                        </div>
-                      )}
-
-                      {/* AI summary */}
-                      {(() => {
-                        const summary = (a[`ai_summary`] as string) || (a[`linkedin_summary`] as string) || "";
-                        if (summary) {
-                          return (
-                            <div className="px-4 pb-2">
-                              <div className="rounded-lg bg-gold/5 border border-gold/10 px-2.5 py-1.5">
-                                <div className="text-[11px] text-muted-foreground leading-relaxed whitespace-pre-line line-clamp-4">
-                                  {summary}
-                                </div>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="rounded-lg border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[280px]">
+                      <button onClick={() => toggleSort("name")} className="flex items-center gap-1 hover:text-foreground">
+                        Guest <ArrowUpDown className="size-3" />
+                      </button>
+                    </TableHead>
+                    <TableHead>
+                      <button onClick={() => toggleSort("type")} className="flex items-center gap-1 hover:text-foreground">
+                        Category <ArrowUpDown className="size-3" />
+                      </button>
+                    </TableHead>
+                    <TableHead className="hidden lg:table-cell">AI Summary</TableHead>
+                    <TableHead>
+                      <button onClick={() => toggleSort("status")} className="flex items-center gap-1 hover:text-foreground">
+                        Status <ArrowUpDown className="size-3" />
+                      </button>
+                    </TableHead>
+                    <TableHead className="w-[140px] text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filtered.map((a) => {
+                    const photo = getPhoto(a);
+                    const headline = getHeadline(a);
+                    const summary = getSummary(a);
+                    return (
+                      <TableRow
+                        key={a.applicant_id}
+                        className="cursor-pointer hover:bg-muted/50"
+                        onClick={() => setSelectedId(a.applicant_id)}
+                      >
+                        <TableCell>
+                          <div className="flex items-center gap-3">
+                            {photo ? (
+                              <img src={photo} alt="" className="size-9 rounded-full object-cover shrink-0" />
+                            ) : (
+                              <div className="size-9 rounded-full bg-muted flex items-center justify-center shrink-0 text-sm font-medium text-muted-foreground">
+                                {getName(a).charAt(0).toUpperCase()}
                               </div>
+                            )}
+                            <div className="min-w-0">
+                              <p className="font-medium text-sm truncate">{getName(a)}</p>
+                              {headline && <p className="text-xs text-muted-foreground truncate max-w-[220px]">{headline}</p>}
                             </div>
-                          );
-                        }
-                        if (about) {
-                          return (
-                            <div className="px-4 pb-2">
-                              <p className="text-[11px] text-muted-foreground/70 line-clamp-2 leading-relaxed">{about}</p>
-                            </div>
-                          );
-                        }
-                        return null;
-                      })()}
-
-                      {/* Footer: status + actions */}
-                      <div className="px-4 py-2.5 border-t border-border/30 flex items-center justify-between" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center gap-2">
+                          </div>
+                        </TableCell>
+                        <TableCell>
                           {a.attendee_type && (
-                            <Badge variant="outline" className="text-[10px] h-5">{a.attendee_type_detail || a.attendee_type}</Badge>
+                            <Badge
+                              variant="outline"
+                              className="text-[11px] font-medium"
+                              style={{
+                                borderColor: getTypeColor(a.attendee_type) + "40",
+                                color: getTypeColor(a.attendee_type),
+                                backgroundColor: getTypeColor(a.attendee_type) + "10",
+                              }}
+                            >
+                              {a.attendee_type_detail || getTypeLabel(a.attendee_type)}
+                            </Badge>
                           )}
-                          {a.linkedin_url && (
-                            <a href={a.linkedin_url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-400">
-                              <Linkedin className="size-3.5" />
-                            </a>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          {isPending ? (
-                            <>
-                              <button onClick={() => handleStatusChange(a.applicant_id, "accepted")}
-                                className="h-7 px-2.5 rounded-md text-[11px] font-medium text-emerald-500 hover:bg-emerald-500/10 flex items-center gap-1 transition-colors">
-                                <CheckCircle2 className="size-3" />Approve
-                              </button>
-                              <button onClick={() => handleStatusChange(a.applicant_id, "rejected")}
-                                className="h-7 px-2.5 rounded-md text-[11px] font-medium text-red-500 hover:bg-red-500/10 flex items-center gap-1 transition-colors">
-                                <XCircle className="size-3" />Decline
-                              </button>
-                            </>
-                          ) : (
-                            <span className={`text-xs font-medium flex items-center gap-1 ${statusColor(a.status)}`}>
-                              <span className={`size-1.5 rounded-full ${a.status === "accepted" ? "bg-emerald-500" : a.status === "rejected" ? "bg-red-500" : a.status === "waitlisted" ? "bg-amber-500" : "bg-blue-500"}`} />
-                              {statusLabel(a.status)}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ════════════════════════════════════════════ */}
-      {/*  REVIEW TAB                                  */}
-      {/* ════════════════════════════════════════════ */}
-      {tab === "review" && (
-        <div className="space-y-4">
-          {/* Run Analysis button */}
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-muted-foreground">
-              {applicants.some((a) => a.ai_reasoning)
-                ? `${applicants.filter((a) => a.ai_reasoning).length} of ${applicants.length} analyzed`
-                : "Run AI analysis to classify and evaluate all guests"}
-            </p>
-            <Button
-              onClick={() => router.push(`/events/${sessionId}/analyze`)}
-              disabled={applicants.length === 0}
-              size="sm"
-              className="bg-gold text-gold-foreground hover:bg-gold/90"
-            >
-              <Brain className="size-4 mr-2" />
-              {applicants.some((a) => a.ai_reasoning) ? "Re-Analyze" : "Run Analysis"}
-            </Button>
-          </div>
-
-          {/* Category selector */}
-          <div className="space-y-2">
-            <p className="text-xs text-muted-foreground">Filter by category:</p>
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={() => setCategoryFilter("all")}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                  categoryFilter === "all"
-                    ? "bg-gold/15 text-gold border border-gold/30"
-                    : "bg-card border border-border text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                All ({applicants.length})
-              </button>
-              {ATTENDEE_TYPES.map((t) => {
-                const count = applicants.filter((a) => (a.attendee_type || "other") === t.key).length;
-                if (count === 0) return null;
-                return (
-                  <button
-                    key={t.key}
-                    onClick={() => setCategoryFilter(t.key)}
-                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                      categoryFilter === t.key
-                        ? "bg-gold/15 text-gold border border-gold/30"
-                        : "bg-card border border-border text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    <span className="inline-block size-2 rounded-full mr-1.5" style={{ backgroundColor: t.color }} />
-                    {t.label} ({count})
-                  </button>
-                );
-              })}
-              {(() => {
-                const unclassified = applicants.filter((a) => !a.attendee_type).length;
-                return unclassified > 0 ? (
-                  <button
-                    onClick={() => setCategoryFilter("unclassified")}
-                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                      categoryFilter === "unclassified"
-                        ? "bg-gold/15 text-gold border border-gold/30"
-                        : "bg-card border border-border text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    Unclassified ({unclassified})
-                  </button>
-                ) : null;
-              })()}
+                        </TableCell>
+                        <TableCell className="hidden lg:table-cell">
+                          {summary ? (
+                            <p className="text-xs text-muted-foreground line-clamp-2 max-w-xs">{summary}</p>
+                          ) : a.ai_reasoning ? (
+                            <p className="text-xs text-muted-foreground line-clamp-2 max-w-xs">
+                              {a.ai_reasoning.includes(" | ")
+                                ? a.ai_reasoning.split(" | ")[0]?.replace(/^.*?\]:\s*/, "")
+                                : a.ai_reasoning}
+                            </p>
+                          ) : null}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant={
+                              a.status === "accepted" ? "default" :
+                              a.status === "rejected" ? "destructive" :
+                              "secondary"
+                            }
+                            className="text-[11px]"
+                          >
+                            {a.status.charAt(0).toUpperCase() + a.status.slice(1)}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={() => handleStatusChange(a.applicant_id, a.status === "accepted" ? "pending" : "accepted")}
+                              className={`size-7 rounded-md flex items-center justify-center transition-colors ${
+                                a.status === "accepted"
+                                  ? "bg-emerald-100 text-emerald-700"
+                                  : "text-muted-foreground hover:text-emerald-600 hover:bg-emerald-50"
+                              }`}
+                              title={a.status === "accepted" ? "Undo accept" : "Accept"}
+                            >
+                              <CheckCircle2 className="size-4" />
+                            </button>
+                            <button
+                              onClick={() => handleStatusChange(a.applicant_id, a.status === "waitlisted" ? "pending" : "waitlisted")}
+                              className={`size-7 rounded-md flex items-center justify-center transition-colors ${
+                                a.status === "waitlisted"
+                                  ? "bg-amber-100 text-amber-700"
+                                  : "text-muted-foreground hover:text-amber-600 hover:bg-amber-50"
+                              }`}
+                              title={a.status === "waitlisted" ? "Undo waitlist" : "Waitlist"}
+                            >
+                              <Clock className="size-4" />
+                            </button>
+                            <button
+                              onClick={() => handleStatusChange(a.applicant_id, a.status === "rejected" ? "pending" : "rejected")}
+                              className={`size-7 rounded-md flex items-center justify-center transition-colors ${
+                                a.status === "rejected"
+                                  ? "bg-red-100 text-red-700"
+                                  : "text-muted-foreground hover:text-red-600 hover:bg-red-50"
+                              }`}
+                              title={a.status === "rejected" ? "Undo reject" : "Reject"}
+                            >
+                              <XCircle className="size-4" />
+                            </button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
             </div>
+          )}
+        </TabsContent>
+
+        {/* ── Export Tab ── */}
+        <TabsContent value="export" className="mt-4 space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Workflow</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center gap-4">
+                <div className={`size-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${analyzed > 0 ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"}`}>
+                  {analyzed > 0 ? <Check className="size-4" /> : "1"}
+                </div>
+                <div>
+                  <p className={`text-sm font-medium ${analyzed > 0 ? "line-through text-muted-foreground" : ""}`}>Run AI Analysis</p>
+                  <p className="text-xs text-muted-foreground">Classify and score all guests</p>
+                </div>
+                {analyzed === 0 && (
+                  <Button size="sm" variant="outline" className="ml-auto" onClick={() => router.push(`/events/${sessionId}/analyze`)}>
+                    <Brain className="size-4 mr-2" />Analyze
+                  </Button>
+                )}
+              </div>
+              <Separator />
+              <div className="flex items-center gap-4">
+                <div className={`size-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${accepted > 0 ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"}`}>
+                  {accepted > 0 ? <Check className="size-4" /> : "2"}
+                </div>
+                <div>
+                  <p className={`text-sm font-medium ${accepted > 0 ? "line-through text-muted-foreground" : ""}`}>Accept top guests</p>
+                  <p className="text-xs text-muted-foreground">
+                    {accepted > 0 ? `${accepted} accepted out of ${total}` : "Review and accept/reject guests"}
+                  </p>
+                </div>
+              </div>
+              <Separator />
+              <div className="flex items-center gap-4">
+                <div className="size-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 bg-muted text-muted-foreground">3</div>
+                <div>
+                  <p className="text-sm font-medium">Export & paste into Luma</p>
+                  <p className="text-xs text-muted-foreground">Download CSV or copy emails to clipboard</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="grid md:grid-cols-2 gap-4">
+            <Card>
+              <CardContent className="pt-6 space-y-4">
+                <div className="flex items-center gap-3">
+                  <div className="size-10 rounded-lg bg-emerald-50 flex items-center justify-center">
+                    <ClipboardCopy className="size-5 text-emerald-600" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-sm">Copy Accepted Emails</p>
+                    <p className="text-xs text-muted-foreground">Paste directly into Luma&apos;s guest list</p>
+                  </div>
+                </div>
+                <Button
+                  onClick={handleCopyEmails}
+                  disabled={accepted === 0}
+                  className="w-full"
+                  variant={copiedEmails ? "outline" : "default"}
+                >
+                  {copiedEmails ? <Check className="size-4 mr-2" /> : <ClipboardCopy className="size-4 mr-2" />}
+                  {copiedEmails ? "Copied!" : `Copy ${accepted} Emails`}
+                </Button>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6 space-y-4">
+                <div className="flex items-center gap-3">
+                  <div className="size-10 rounded-lg bg-blue-50 flex items-center justify-center">
+                    <Download className="size-5 text-blue-600" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-sm">Download CSV</p>
+                    <p className="text-xs text-muted-foreground">Full export with all fields</p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button onClick={handleExportAccepted} disabled={accepted === 0} variant="outline" className="flex-1" size="sm">
+                    Accepted Only ({accepted})
+                  </Button>
+                  <Button onClick={handleExportAll} disabled={total === 0} variant="outline" className="flex-1" size="sm">
+                    All Guests ({total})
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
           </div>
+        </TabsContent>
+      </Tabs>
 
-          <ProfileSwipeView
-            applicants={categoryFilteredApplicants}
-            statusFilter="all"
-            sessionId={sessionId}
-            onStatusChange={handleStatusChange}
-            onSelectApplicant={setSelectedApplicantId}
-            onCategorize={handleCategorize}
-            onBlacklist={handleBlacklist}
-          />
-        </div>
-      )}
-
-      {/* ════════════════════════════════════════════ */}
-      {/*  ANALYSIS TAB                                */}
-      {/* ════════════════════════════════════════════ */}
-      {tab === "analysis" && (
-        <AnalysisResultsTab
-          applicants={applicants}
-          sessionId={sessionId}
-          session={session}
-          onStatusChange={handleStatusChange}
-          onRefresh={refreshAll}
-          onRunAnalysis={() => router.push(`/events/${sessionId}/analyze`)}
-        />
-      )}
-
-      {/* ── Detail Sheet ── */}
+      {/* Detail sheet */}
       {selectedApplicant && (
-        <ApplicantDetailSheet
+        <DetailSheet
           applicant={selectedApplicant}
-          onStatusChange={(id, status) => handleStatusChange(id, status!)}
-          onClose={() => setSelectedApplicantId(null)}
+          onStatusChange={handleStatusChange}
+          onClose={() => setSelectedId(null)}
         />
       )}
 
-      {/* ── Import Dialog ── */}
-      <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>
+      {/* Import dialog */}
+      <Dialog open={showImport} onOpenChange={setShowImport}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Import Guests</DialogTitle>
-            <DialogDescription>
-              Upload a CSV export from Luma or any spreadsheet with guest data.
-            </DialogDescription>
+            <DialogDescription>Upload a CSV export from Luma or any spreadsheet.</DialogDescription>
           </DialogHeader>
-          <CSVUploader onUploadSuccess={handleUploadSuccess} sessionId={sessionId} />
+          <CSVUploader
+            onUploadSuccess={async (count) => {
+              toast.success(`Imported ${count} guests`);
+              await refreshAll();
+              setShowImport(false);
+            }}
+            sessionId={sessionId}
+          />
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/* ── Detail Sheet ── */
+
+function DetailSheet({
+  applicant,
+  onStatusChange,
+  onClose,
+}: {
+  applicant: Applicant;
+  onStatusChange: (id: string, status: string) => void;
+  onClose: () => void;
+}) {
+  const photo = getPhoto(applicant);
+  const headline = getHeadline(applicant);
+  const summary = getSummary(applicant);
+  const about = (applicant.about as string) || (applicant.linkedin_about as string) || "";
+  const experience = (applicant.experience as string) || (applicant.linkedin_experience as string) || "";
+  const education = (applicant.education as string) || (applicant.linkedin_education as string) || "";
+
+  return (
+    <div className="fixed inset-0 z-50 flex" onClick={onClose}>
+      <div className="flex-1" />
+      <div
+        className="w-full max-w-md bg-background border-l shadow-xl overflow-y-auto animate-in slide-in-from-right"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="p-6 space-y-6">
+          {/* Header */}
+          <div className="flex items-start gap-4">
+            {photo ? (
+              <img src={photo} alt="" className="size-16 rounded-xl object-cover shrink-0" />
+            ) : (
+              <div className="size-16 rounded-xl bg-muted flex items-center justify-center shrink-0 text-2xl font-bold text-muted-foreground">
+                {getName(applicant).charAt(0).toUpperCase()}
+              </div>
+            )}
+            <div className="flex-1 min-w-0">
+              <h2 className="text-lg font-bold">{getName(applicant)}</h2>
+              {headline && <p className="text-sm text-muted-foreground">{headline}</p>}
+              <div className="flex items-center gap-2 mt-2">
+                {applicant.attendee_type && (
+                  <Badge variant="outline" className="text-xs">
+                    {applicant.attendee_type_detail || applicant.attendee_type}
+                  </Badge>
+                )}
+                <Badge
+                  variant={applicant.status === "accepted" ? "default" : applicant.status === "rejected" ? "destructive" : "secondary"}
+                  className="text-xs"
+                >
+                  {applicant.status.charAt(0).toUpperCase() + applicant.status.slice(1)}
+                </Badge>
+              </div>
+            </div>
+            <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+              <X className="size-5" />
+            </button>
+          </div>
+
+          {/* Actions */}
+          <div className="flex gap-2">
+            <Button size="sm" variant={applicant.status === "accepted" ? "default" : "outline"} className="flex-1"
+              onClick={() => onStatusChange(applicant.applicant_id, "accepted")}>
+              <CheckCircle2 className="size-4 mr-1" />Accept
+            </Button>
+            <Button size="sm" variant={applicant.status === "waitlisted" ? "default" : "outline"} className="flex-1"
+              onClick={() => onStatusChange(applicant.applicant_id, "waitlisted")}>
+              <Clock className="size-4 mr-1" />Waitlist
+            </Button>
+            <Button size="sm" variant={applicant.status === "rejected" ? "destructive" : "outline"} className="flex-1"
+              onClick={() => onStatusChange(applicant.applicant_id, "rejected")}>
+              <XCircle className="size-4 mr-1" />Reject
+            </Button>
+          </div>
+
+          <Separator />
+
+          {/* Contact */}
+          <div className="space-y-2 text-sm">
+            {applicant.email && (
+              <a href={`mailto:${applicant.email}`} className="flex items-center gap-2 text-muted-foreground hover:text-foreground">
+                <span className="truncate">{applicant.email}</span>
+              </a>
+            )}
+            {applicant.linkedin_url && (
+              <a href={applicant.linkedin_url} target="_blank" rel="noopener noreferrer"
+                className="flex items-center gap-2 text-blue-600 hover:underline">
+                <Linkedin className="size-4" />LinkedIn<ExternalLink className="size-3" />
+              </a>
+            )}
+            {applicant.company && <p className="text-muted-foreground">{applicant.title ? `${applicant.title} @ ${applicant.company}` : applicant.company}</p>}
+            {applicant.location && <p className="text-muted-foreground">{applicant.location}</p>}
+          </div>
+
+          {/* AI Summary */}
+          {(summary || applicant.ai_reasoning) && (
+            <>
+              <Separator />
+              <div>
+                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <Sparkles className="size-3" />AI Summary
+                </h3>
+                <div className="rounded-lg bg-muted/50 p-3">
+                  <p className="text-sm leading-relaxed">
+                    {summary || applicant.ai_reasoning}
+                  </p>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* About / Experience / Education */}
+          {about && (
+            <>
+              <Separator />
+              <div>
+                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">About</h3>
+                <p className="text-sm leading-relaxed text-muted-foreground">{about}</p>
+              </div>
+            </>
+          )}
+          {experience && (
+            <>
+              <Separator />
+              <div>
+                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Experience</h3>
+                <p className="text-sm leading-relaxed text-muted-foreground whitespace-pre-line">{experience}</p>
+              </div>
+            </>
+          )}
+          {education && (
+            <>
+              <Separator />
+              <div>
+                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Education</h3>
+                <p className="text-sm leading-relaxed text-muted-foreground whitespace-pre-line">{education}</p>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

@@ -1,16 +1,15 @@
 "use client";
 
-import React from "react";
+import { use } from "react";
 import { EventProvider } from "@/components/event-provider";
 
 export default function EventLayout({
-  params,
   children,
+  params,
 }: {
-  params: Promise<{ sessionId: string }>;
   children: React.ReactNode;
+  params: Promise<{ sessionId: string }>;
 }) {
-  const { sessionId } = React.use(params);
-
+  const { sessionId } = use(params);
   return <EventProvider sessionId={sessionId}>{children}</EventProvider>;
 }

@@ -49,69 +49,57 @@
   --radius-4xl: calc(var(--radius) + 16px);
 }
 
-/* ── Selecta: Dark luxury theme (always dark) ── */
+/* ── Light theme (default — dashboard) ── */
 :root {
   --radius: 0.625rem;
 
-  /* Core — near-black with warm undertone */
-  --background: hsl(220 20% 6%);
-  --foreground: hsl(40 10% 92%);
+  --background: hsl(0 0% 100%);
+  --foreground: hsl(240 10% 3.9%);
 
-  /* Cards — slightly lighter dark */
-  --card: hsl(220 18% 10%);
-  --card-foreground: hsl(40 10% 92%);
+  --card: hsl(0 0% 100%);
+  --card-foreground: hsl(240 10% 3.9%);
 
-  /* Popovers */
-  --popover: hsl(220 18% 10%);
-  --popover-foreground: hsl(40 10% 92%);
+  --popover: hsl(0 0% 100%);
+  --popover-foreground: hsl(240 10% 3.9%);
 
-  /* Primary — gold/champagne */
-  --primary: hsl(43 55% 55%);
-  --primary-foreground: hsl(220 20% 6%);
+  --primary: hsl(240 5.9% 10%);
+  --primary-foreground: hsl(0 0% 98%);
 
-  /* Secondary — subtle dark surface */
-  --secondary: hsl(220 16% 14%);
-  --secondary-foreground: hsl(40 10% 85%);
+  --secondary: hsl(240 4.8% 95.9%);
+  --secondary-foreground: hsl(240 5.9% 10%);
 
-  /* Muted */
-  --muted: hsl(220 16% 14%);
-  --muted-foreground: hsl(220 10% 55%);
+  --muted: hsl(240 4.8% 95.9%);
+  --muted-foreground: hsl(240 3.8% 46.1%);
 
-  /* Accent — warm gold tint */
-  --accent: hsl(43 40% 18%);
-  --accent-foreground: hsl(43 55% 70%);
+  --accent: hsl(240 4.8% 95.9%);
+  --accent-foreground: hsl(240 5.9% 10%);
 
-  /* Destructive */
-  --destructive: hsl(0 72% 51%);
+  --destructive: hsl(0 84.2% 60.2%);
 
-  /* Borders — subtle warm */
-  --border: hsl(220 15% 18%);
-  --input: hsl(220 15% 18%);
-  --ring: hsl(43 55% 55%);
+  --border: hsl(240 5.9% 90%);
+  --input: hsl(240 5.9% 90%);
+  --ring: hsl(240 5.9% 10%);
 
-  /* Gold accent tokens */
-  --gold: hsl(43 55% 55%);
-  --gold-foreground: hsl(220 20% 6%);
+  --gold: hsl(43 74% 49%);
+  --gold-foreground: hsl(0 0% 100%);
 
-  /* Charts — warm luxury palette */
-  --chart-1: hsl(43 55% 55%);
-  --chart-2: hsl(200 60% 50%);
-  --chart-3: hsl(160 50% 45%);
-  --chart-4: hsl(280 45% 55%);
-  --chart-5: hsl(15 70% 55%);
+  --chart-1: hsl(12 76% 61%);
+  --chart-2: hsl(173 58% 39%);
+  --chart-3: hsl(197 37% 24%);
+  --chart-4: hsl(43 74% 66%);
+  --chart-5: hsl(27 87% 67%);
 
-  /* Sidebar — not used (top nav now) */
-  --sidebar: hsl(220 20% 8%);
-  --sidebar-foreground: hsl(40 10% 85%);
-  --sidebar-primary: hsl(43 55% 55%);
-  --sidebar-primary-foreground: hsl(220 20% 6%);
-  --sidebar-accent: hsl(220 16% 14%);
-  --sidebar-accent-foreground: hsl(40 10% 85%);
-  --sidebar-border: hsl(220 15% 18%);
-  --sidebar-ring: hsl(43 55% 55%);
+  --sidebar: hsl(0 0% 98%);
+  --sidebar-foreground: hsl(240 5.3% 26.1%);
+  --sidebar-primary: hsl(240 5.9% 10%);
+  --sidebar-primary-foreground: hsl(0 0% 98%);
+  --sidebar-accent: hsl(240 4.8% 95.9%);
+  --sidebar-accent-foreground: hsl(240 5.9% 10%);
+  --sidebar-border: hsl(220 13% 91%);
+  --sidebar-ring: hsl(217.2 91.2% 59.8%);
 }
 
-/* Override dark class to use same values (always dark) */
+/* ── Dark theme (landing page) ── */
 .dark {
   --background: hsl(220 20% 6%);
   --foreground: hsl(40 10% 92%);
