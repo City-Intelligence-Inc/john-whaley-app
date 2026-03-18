@@ -91,7 +91,21 @@ def get_blacklist():
 def update_blacklist(body: dict):
     emails = [e.strip().lower() for e in body.get("emails", []) if e.strip()]
     db.put_settings(BLACKLIST_KEY, {"emails": emails})
+    # Auto-reject any existing applicants that match the new blacklist
+    _auto_reject_blacklisted(emails)
     return {"emails": emails}
+
+
+def _auto_reject_blacklisted(bl_emails: list[str]):
+    """Reject all applicants whose email is in the blacklist."""
+    bl_set = set(e.lower().strip() for e in bl_emails)
+    if not bl_set:
+        return
+    all_applicants = db.scan_all_applicants()
+    for a in all_applicants:
+        email = (a.get("email") or "").lower().strip()
+        if email in bl_set and a.get("status") != "rejected":
+            db.update_applicant_fields(a["applicant_id"], {"status": "rejected", "blacklisted": True})
 
 
 # ── Custom Personas ──

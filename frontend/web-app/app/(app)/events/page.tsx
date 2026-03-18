@@ -1,18 +1,14 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState } from "react";
 import {
-  Upload, Linkedin, Loader2, Brain, Download, CheckCircle2, XCircle,
-  Users, Search, X, MapPin, Building2, Sparkles, Plus, ChevronDown,
-  Trash2, CircleCheck, AlertTriangle, ExternalLink, ScanSearch,
+  Upload, Loader2, Brain, Download, Users, Search, X, Plus, ChevronDown, Key, Eye, EyeOff,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
@@ -22,374 +18,187 @@ import {
 import { ProfileSwipeView } from "@/components/profile-swipe-view";
 import { ApplicantDetailSheet } from "@/components/applicant-detail-sheet";
 import { CSVUploader } from "@/components/csv-uploader";
-import { api } from "@/lib/api";
-import type { Session, Applicant } from "@/lib/api";
+import { useEventsPage } from "./_hooks/use-events-page";
+import { GuestCard } from "./_components/guest-card";
+import { BulkInvestigateDialog } from "./_components/bulk-investigate-dialog";
 
-function getName(a: Applicant): string {
-  return a.name || (a[`linkedin_name`] as string) || a.email || "No name";
-}
-
-export default function MainPage() {
-  const router = useRouter();
-
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [sessionsLoading, setSessionsLoading] = useState(true);
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
-  const [applicants, setApplicants] = useState<Applicant[]>([]);
-  const [eventLoading, setEventLoading] = useState(false);
+export default function EventsPage() {
+  const e = useEventsPage();
 
   const [tab, setTab] = useState<"guests" | "review">("guests");
-  const [search, setSearch] = useState("");
   const [selectedApplicantId, setSelectedApplicantId] = useState<string | null>(null);
-  const [showImportDialog, setShowImportDialog] = useState(false);
-  const [showCreateDialog, setShowCreateDialog] = useState(false);
-  const [newEventName, setNewEventName] = useState("");
+  const [showImport, setShowImport] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+  const [showBulk, setShowBulk] = useState(false);
+  const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
+  const [showKey, setShowKey] = useState(false);
 
-  // Investigation
-  const [investigateTarget, setInvestigateTarget] = useState<string | null>(null);
-  const [investigateResult, setInvestigateResult] = useState<{ agent: string; result: string } | null>(null);
-  const [investigating, setInvestigating] = useState(false);
-  const [agents] = useState([
-    { id: "founder_check", name: "Founder Check", description: "Validates founder quality and traction" },
-    { id: "venture_validator", name: "Venture Validator", description: "Cross-validates VC/investor claims" },
-    { id: "background_verify", name: "Background Verify", description: "Checks education, employment, credentials" },
-    { id: "relevance_score", name: "Event Fit", description: "Scores relevance for AI-focused events" },
-    { id: "network_value", name: "Network Value", description: "Assesses networking and connection value" },
-  ]);
+  const selectedApplicant = selectedApplicantId ? e.applicants.find(a => a.applicant_id === selectedApplicantId) || null : null;
 
-  /* ── Data loading ── */
-  const loadSessions = useCallback(async () => {
-    try {
-      const data = await api.listSessions();
-      setSessions(data);
-      if (data.length > 0 && !selectedSessionId) setSelectedSessionId(data[0].session_id);
-    } catch { toast.error("Failed to load events"); }
-    finally { setSessionsLoading(false); }
-  }, [selectedSessionId]);
-
-  useEffect(() => { loadSessions(); }, []);
-
-  const loadEvent = useCallback(async (sid: string) => {
-    setEventLoading(true);
-    try {
-      const [s, a] = await Promise.all([api.getSession(sid), api.listApplicants(sid)]);
-      setSession(s);
-      setApplicants(a);
-    } catch { toast.error("Failed to load event"); }
-    finally { setEventLoading(false); }
-  }, []);
-
-  useEffect(() => { if (selectedSessionId) loadEvent(selectedSessionId); }, [selectedSessionId, loadEvent]);
-
-  const refreshAll = useCallback(async () => {
-    if (selectedSessionId) await loadEvent(selectedSessionId);
-  }, [selectedSessionId, loadEvent]);
-
-  /* ── Counts ── */
-  const accepted = applicants.filter((a) => a.status === "accepted").length;
-  const pending = applicants.filter((a) => a.status === "pending").length;
-  const total = applicants.length;
-
-  const selectedApplicant = useMemo(
-    () => selectedApplicantId ? applicants.find((a) => a.applicant_id === selectedApplicantId) || null : null,
-    [selectedApplicantId, applicants]
-  );
-
-  /* ── Handlers ── */
-  const handleStatusChange = useCallback(async (id: string, status: string) => {
-    try { await api.updateApplicant(id, { status }); await refreshAll(); }
-    catch (err) { toast.error(err instanceof Error ? err.message : "Failed"); }
-  }, [refreshAll]);
-
-  const handleUploadSuccess = useCallback((_count: number) => {
-    refreshAll(); loadSessions(); setShowImportDialog(false);
-    toast.success(`Imported ${_count} guests`);
-  }, [refreshAll, loadSessions]);
-
-  const handleCreateEvent = useCallback(async () => {
-    if (!newEventName.trim()) return;
+  const handleCreate = async () => {
+    if (!newName.trim()) return;
     setCreating(true);
-    try {
-      const s = await api.createSession({ name: newEventName.trim(), source: "manual" });
-      setShowCreateDialog(false); setNewEventName("");
-      await loadSessions(); setSelectedSessionId(s.session_id);
-    } catch (err) { toast.error(err instanceof Error ? err.message : "Failed"); }
+    try { await e.createEvent(newName.trim()); setShowCreate(false); setNewName(""); }
+    catch { toast.error("Failed to create event"); }
     finally { setCreating(false); }
-  }, [newEventName, loadSessions]);
+  };
 
-  const handleExportCSV = useCallback(() => {
-    if (!applicants.length) return;
+  const handleExport = () => {
+    if (!e.applicants.length) return;
     const skip = new Set(["applicant_id", "session_id"]);
     const keys = new Set<string>();
-    for (const a of applicants) for (const k of Object.keys(a)) if (!skip.has(k)) keys.add(k);
-    const pri = ["name", "email", "status", "ai_score", "ai_reasoning", "company", "title", "location", "linkedin_url"];
-    const headers = [...pri.filter((k) => keys.has(k)), ...[...keys].filter((k) => !pri.includes(k)).sort()];
+    for (const a of e.applicants) for (const k of Object.keys(a)) if (!skip.has(k)) keys.add(k);
+    const pri = ["name", "email", "status", "ai_score", "ai_reasoning", "company", "title", "location"];
+    const headers = [...pri.filter(k => keys.has(k)), ...[...keys].filter(k => !pri.includes(k)).sort()];
     const esc = (v: unknown) => { const s = String(v ?? ""); return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s; };
-    const rows = [headers.join(","), ...applicants.map((a) => headers.map((h) => esc(a[h])).join(","))];
+    const rows = [headers.join(","), ...e.applicants.map(a => headers.map(h => esc(a[h])).join(","))];
     const blob = new Blob([rows.join("\n")], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a"); link.href = url;
-    link.download = `${(session?.name || "event").replace(/\s+/g, "-").toLowerCase()}.csv`;
+    link.download = `${(e.session?.name || "event").replace(/\s+/g, "-").toLowerCase()}.csv`;
     link.click(); URL.revokeObjectURL(url);
-  }, [applicants, session]);
+  };
 
-  const runInvestigation = useCallback(async (applicantId: string, agentId: string) => {
-    setInvestigating(true);
-    setInvestigateResult(null);
-    try {
-      const apiKey = typeof window !== "undefined" ? localStorage.getItem("ai_api_key") || "" : "";
-      const provider = typeof window !== "undefined" ? localStorage.getItem("ai_provider") || "openai" : "openai";
-      const model = typeof window !== "undefined" ? localStorage.getItem("ai_model") || "gpt-4o-mini" : "gpt-4o-mini";
-      if (!apiKey) { toast.error("Set your AI API key first (run Analysis once to save it)"); setInvestigating(false); return; }
-      const res = await api.investigateApplicant(applicantId, agentId, { api_key: apiKey, model, provider });
-      setInvestigateResult({ agent: res.agent_name, result: res.result });
-      await refreshAll();
-    } catch (err) { toast.error(err instanceof Error ? err.message : "Investigation failed"); }
-    finally { setInvestigating(false); }
-  }, [refreshAll]);
-
-  /* ── Filtered list ── */
-  const filtered = useMemo(() => {
-    let list = applicants;
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter((a) => [a.name, a.email, a.company, a.title, a[`linkedin_headline`] as string].filter(Boolean).join(" ").toLowerCase().includes(q));
-    }
-    return list.sort((a, b) => getName(a).localeCompare(getName(b)));
-  }, [applicants, search]);
-
-  /* ── Loading ── */
-  if (sessionsLoading) return <div className="flex items-center justify-center py-20"><Loader2 className="size-6 animate-spin text-gold" /></div>;
+  if (e.sessionsLoading) return <div className="flex items-center justify-center py-20"><Loader2 className="size-6 animate-spin text-gold" /></div>;
 
   return (
     <div className="space-y-5">
-      {/* ── Top bar: Event selector + actions ── */}
+      {/* ── Top Bar ── */}
       <div className="flex items-center gap-2 flex-wrap">
+        {/* Event selector */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" className="h-9 gap-2 min-w-[180px] justify-between">
-              <span className="truncate text-sm">{session?.name || "Select event"}</span>
+            <Button variant="outline" className="h-9 gap-2 min-w-[160px] justify-between">
+              <span className="truncate text-sm">{e.session?.name || "Select event"}</span>
               <ChevronDown className="size-3.5 text-muted-foreground shrink-0" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-[260px]">
-            {sessions.map((s) => (
-              <DropdownMenuItem key={s.session_id} onClick={() => setSelectedSessionId(s.session_id)}>
+            {e.sessions.map(s => (
+              <DropdownMenuItem key={s.session_id} onClick={() => e.setSelectedSessionId(s.session_id)}>
                 <span className="truncate flex-1">{s.name}</span>
                 <span className="text-xs text-muted-foreground ml-2">{s.applicant_count}</span>
               </DropdownMenuItem>
             ))}
-            {sessions.length > 0 && <DropdownMenuSeparator />}
-            <DropdownMenuItem onClick={() => setShowCreateDialog(true)}>
-              <Plus className="size-3.5 mr-2" />New Event
-            </DropdownMenuItem>
+            {e.sessions.length > 0 && <DropdownMenuSeparator />}
+            <DropdownMenuItem onClick={() => setShowCreate(true)}><Plus className="size-3.5 mr-2" />New Event</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {selectedSessionId && (
+        {e.selectedSessionId && (
           <>
-            <Button size="sm" onClick={() => setShowImportDialog(true)} className="bg-gold text-gold-foreground hover:bg-gold/90">
+            <Button size="sm" onClick={() => setShowImport(true)} className="bg-gold text-gold-foreground hover:bg-gold/90">
               <Upload className="size-3.5 mr-1.5" />Import
             </Button>
-            <Button size="sm" variant="outline" onClick={() => router.push(`/events/${selectedSessionId}/analyze`)} disabled={total === 0}>
-              <Brain className="size-3.5 mr-1.5" />Analyze
+            <Button size="sm" variant="outline" onClick={() => setShowBulk(true)} disabled={e.total === 0 || !e.apiKey}>
+              <Brain className="size-3.5 mr-1.5" />Analyze All
             </Button>
-            <Button size="sm" variant="outline" onClick={handleExportCSV} disabled={total === 0}>
+            <Button size="sm" variant="outline" onClick={handleExport} disabled={e.total === 0}>
               <Download className="size-3.5 mr-1.5" />Export
             </Button>
           </>
         )}
 
-        {/* Stats inline */}
-        {total > 0 && (
-          <div className="flex items-center gap-3 ml-auto text-xs text-muted-foreground">
-            <span>{total} total</span>
-            <span className="text-emerald-500">{accepted} going</span>
-            {pending > 0 && <span className="text-blue-500">{pending} pending</span>}
+        {/* API Key input */}
+        <div className="flex items-center gap-1 ml-auto">
+          <div className="relative">
+            <Key className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground" />
+            <Input
+              type={showKey ? "text" : "password"}
+              value={e.apiKey}
+              onChange={ev => e.setApiKey(ev.target.value)}
+              placeholder="AI API key"
+              className="h-8 w-[180px] pl-7 pr-8 text-xs font-mono"
+            />
+            <button onClick={() => setShowKey(!showKey)} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+              {showKey ? <EyeOff className="size-3" /> : <Eye className="size-3" />}
+            </button>
           </div>
-        )}
+          {e.total > 0 && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground ml-2">
+              <span>{e.total} guests</span>
+              <span className="text-emerald-500">{e.accepted} going</span>
+              {e.pending > 0 && <span className="text-blue-500">{e.pending} pending</span>}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ── No event ── */}
-      {!selectedSessionId && (
-        <Card className="py-16">
-          <CardContent className="flex flex-col items-center text-center">
-            <Users className="size-10 text-muted-foreground/30 mb-3" />
-            <p className="font-medium mb-1">No events yet</p>
-            <p className="text-sm text-muted-foreground mb-4">Create an event and import a guest list</p>
-            <Button size="sm" onClick={() => setShowCreateDialog(true)} className="bg-gold text-gold-foreground hover:bg-gold/90">
-              <Plus className="size-3.5 mr-1.5" />New Event
-            </Button>
-          </CardContent>
-        </Card>
+      {!e.selectedSessionId && (
+        <Card className="py-16"><CardContent className="flex flex-col items-center text-center">
+          <Users className="size-10 text-muted-foreground/30 mb-3" />
+          <p className="font-medium mb-1">No events yet</p>
+          <p className="text-sm text-muted-foreground mb-4">Create an event and import a guest list</p>
+          <Button size="sm" onClick={() => setShowCreate(true)} className="bg-gold text-gold-foreground hover:bg-gold/90">
+            <Plus className="size-3.5 mr-1.5" />New Event
+          </Button>
+        </CardContent></Card>
       )}
 
-      {/* ── Loading event ── */}
-      {selectedSessionId && eventLoading && (
+      {/* ── Loading ── */}
+      {e.selectedSessionId && e.eventLoading && (
         <div className="flex items-center justify-center py-16"><Loader2 className="size-5 animate-spin text-gold" /></div>
       )}
 
       {/* ── Workspace ── */}
-      {selectedSessionId && !eventLoading && (
+      {e.selectedSessionId && !e.eventLoading && (
         <>
           {/* Tabs */}
           <div className="flex items-center gap-4 border-b border-border/50">
-            {(["guests", "review"] as const).map((t) => (
+            {(["guests", "review"] as const).map(t => (
               <button key={t} onClick={() => setTab(t)}
-                className={`pb-2 text-sm font-medium border-b-2 transition-colors ${
-                  tab === t ? "border-gold text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
-                }`}>
-                {t === "guests" ? `Guests (${total})` : "Review"}
+                className={`pb-2 text-sm font-medium border-b-2 transition-colors ${tab === t ? "border-gold text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
+                {t === "guests" ? `Guests (${e.total})` : "Review"}
               </button>
             ))}
           </div>
 
-          {/* GUESTS TAB */}
+          {/* GUESTS */}
           {tab === "guests" && (
             <div className="space-y-4">
-              {/* Search */}
-              {total > 0 && (
+              {e.total > 0 && (
                 <div className="relative max-w-sm">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
-                  <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search guests..." className="pl-9 h-8 text-sm" />
-                  {search && <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"><X className="size-3.5" /></button>}
+                  <Input value={e.search} onChange={ev => e.setSearch(ev.target.value)} placeholder="Search guests..." className="pl-9 h-8 text-sm" />
+                  {e.search && <button onClick={() => e.setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"><X className="size-3.5" /></button>}
                 </div>
               )}
 
-              {/* Empty */}
-              {total === 0 && (
-                <Card className="py-12">
-                  <CardContent className="flex flex-col items-center text-center">
-                    <Upload className="size-8 text-muted-foreground/30 mb-3" />
-                    <p className="font-medium mb-1">No guests yet</p>
-                    <p className="text-sm text-muted-foreground mb-3">Import a CSV to get started</p>
-                    <Button size="sm" onClick={() => setShowImportDialog(true)} className="bg-gold text-gold-foreground hover:bg-gold/90">
-                      <Upload className="size-3.5 mr-1.5" />Import CSV
-                    </Button>
-                  </CardContent>
-                </Card>
+              {e.total === 0 && (
+                <Card className="py-12"><CardContent className="flex flex-col items-center text-center">
+                  <Upload className="size-8 text-muted-foreground/30 mb-3" />
+                  <p className="font-medium mb-1">No guests yet</p>
+                  <p className="text-sm text-muted-foreground mb-3">Import a CSV to get started</p>
+                  <Button size="sm" onClick={() => setShowImport(true)} className="bg-gold text-gold-foreground hover:bg-gold/90">
+                    <Upload className="size-3.5 mr-1.5" />Import CSV
+                  </Button>
+                </CardContent></Card>
               )}
 
-              {/* Guest list */}
-              {total > 0 && (
+              {e.total > 0 && (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                  {filtered.map((a) => {
-                    const photo = (a[`linkedin_image`] as string) || (a[`photo_url`] as string) || "";
-                    const headline = (a[`linkedin_headline`] as string) || a.title || "";
-                    const company = a.company || (a[`linkedin_company`] as string) || "";
-                    const location = a.location || (a[`linkedin_location`] as string) || "";
-                    const score = a.ai_score ? parseInt(a.ai_score) : 0;
-                    const isPending = a.status === "pending";
-                    const name = getName(a);
-                    const issues = (a[`linkedin_issues`] as string) || "";
-                    const isClean = issues === "clean";
-                    const hasIssues = issues && !isClean;
-
-                    return (
-                      <Card key={a.applicant_id} className="group hover:border-border/80 transition-all cursor-pointer"
-                        onClick={() => setSelectedApplicantId(a.applicant_id)}>
-                        <CardContent className="p-4 space-y-2">
-                          {/* Header */}
-                          <div className="flex items-center gap-3">
-                            {photo ? (
-                              <img src={photo} alt="" className="size-10 rounded-full object-cover shrink-0" />
-                            ) : (
-                              <div className="size-10 rounded-full bg-muted flex items-center justify-center shrink-0 text-sm font-semibold text-muted-foreground/40">
-                                {name.charAt(0).toUpperCase()}
-                              </div>
-                            )}
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-medium truncate">{name}</span>
-                                {score > 0 && (
-                                  <Badge variant="secondary" className={`text-[10px] px-1.5 py-0 ${score >= 70 ? "text-emerald-500" : score >= 40 ? "text-amber-500" : "text-red-500"}`}>{score}</Badge>
-                                )}
-                              </div>
-                              {headline && <p className="text-xs text-muted-foreground truncate">{headline}</p>}
-                            </div>
-                          </div>
-
-                          {/* Meta */}
-                          {(company || location) && (
-                            <div className="flex gap-3 text-[11px] text-muted-foreground">
-                              {company && <span className="flex items-center gap-1 truncate"><Building2 className="size-3 shrink-0" />{company}</span>}
-                              {location && <span className="flex items-center gap-1 truncate"><MapPin className="size-3 shrink-0" />{location}</span>}
-                            </div>
-                          )}
-
-                          {/* AI reasoning */}
-                          {a.ai_reasoning && (
-                            <p className="text-[11px] text-muted-foreground/70 line-clamp-2 flex items-start gap-1.5">
-                              <Sparkles className="size-3 mt-0.5 shrink-0 text-gold" />{a.ai_reasoning}
-                            </p>
-                          )}
-
-                          {/* Issues + Status */}
-                          <div className="flex items-center justify-between pt-1" onClick={(e) => e.stopPropagation()}>
-                            <div className="flex items-center gap-2">
-                              {isClean && <Badge variant="secondary" className="text-emerald-500 bg-emerald-500/10 text-[10px] h-5"><CircleCheck className="size-3 mr-0.5" />Verified</Badge>}
-                              {hasIssues && (
-                                <span className="flex items-center gap-1 text-[10px] text-amber-500">
-                                  <AlertTriangle className="size-3 shrink-0" />
-                                  {issues.split("; ").map(i => i.replace("missing_", "No ").replace(/_/g, " ")).join(" / ")}
-                                </span>
-                              )}
-                              {a.linkedin_url && (
-                                <a href={a.linkedin_url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-400">
-                                  <Linkedin className="size-3.5" />
-                                </a>
-                              )}
-                            </div>
-                            {/* Investigate */}
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button size="sm" variant="ghost" className="h-6 px-1.5 text-muted-foreground hover:text-gold">
-                                  <ScanSearch className="size-3.5" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="w-[200px]">
-                                {agents.map((ag) => (
-                                  <DropdownMenuItem key={ag.id} onClick={() => { setInvestigateTarget(a.applicant_id); runInvestigation(a.applicant_id, ag.id); }}>
-                                    <div>
-                                      <div className="text-xs font-medium">{ag.name}</div>
-                                      <div className="text-[10px] text-muted-foreground">{ag.description}</div>
-                                    </div>
-                                  </DropdownMenuItem>
-                                ))}
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                            {isPending ? (
-                              <div className="flex gap-1">
-                                <Button size="sm" variant="ghost" onClick={() => handleStatusChange(a.applicant_id, "accepted")}
-                                  className="h-6 px-2 text-[10px] text-emerald-500 hover:bg-emerald-500/10">
-                                  <CheckCircle2 className="size-3 mr-0.5" />Approve
-                                </Button>
-                                <Button size="sm" variant="ghost" onClick={() => handleStatusChange(a.applicant_id, "rejected")}
-                                  className="h-6 px-2 text-[10px] text-red-500 hover:bg-red-500/10">
-                                  <XCircle className="size-3 mr-0.5" />Decline
-                                </Button>
-                              </div>
-                            ) : (
-                              <Badge variant="secondary" className={`text-[10px] ${a.status === "accepted" ? "text-emerald-500" : a.status === "rejected" ? "text-red-500" : "text-amber-500"}`}>
-                                {a.status === "accepted" ? "Going" : a.status === "rejected" ? "Not Going" : a.status === "waitlisted" ? "Waitlisted" : "Pending"}
-                              </Badge>
-                            )}
-                          </div>
-                        </CardContent>
-                      </Card>
-                    );
-                  })}
+                  {e.filtered.map(a => (
+                    <GuestCard
+                      key={a.applicant_id}
+                      applicant={a}
+                      agents={e.agents}
+                      investigating={e.investigatingIds.has(a.applicant_id)}
+                      onStatusChange={e.changeStatus}
+                      onInvestigate={e.runInvestigation}
+                      onSelect={setSelectedApplicantId}
+                    />
+                  ))}
                 </div>
               )}
             </div>
           )}
 
-          {/* REVIEW TAB */}
-          {tab === "review" && selectedSessionId && (
-            <ProfileSwipeView applicants={applicants} statusFilter="all" sessionId={selectedSessionId}
-              onStatusChange={handleStatusChange} onSelectApplicant={setSelectedApplicantId} />
+          {/* REVIEW */}
+          {tab === "review" && e.selectedSessionId && (
+            <ProfileSwipeView applicants={e.applicants} statusFilter="all" sessionId={e.selectedSessionId}
+              onStatusChange={e.changeStatus} onSelectApplicant={setSelectedApplicantId} />
           )}
         </>
       )}
@@ -397,56 +206,34 @@ export default function MainPage() {
       {/* Detail Sheet */}
       {selectedApplicant && (
         <ApplicantDetailSheet applicant={selectedApplicant}
-          onStatusChange={(id, status) => handleStatusChange(id, status!)}
+          onStatusChange={(id, status) => e.changeStatus(id, status!)}
           onClose={() => setSelectedApplicantId(null)} />
       )}
 
-      {/* Import Dialog */}
-      <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>
+      {/* Bulk Investigate */}
+      <BulkInvestigateDialog open={showBulk} onOpenChange={setShowBulk} agents={e.agents}
+        applicantCount={e.total} onRun={e.runBulkInvestigation}
+        bulkInvestigating={e.bulkInvestigating} bulkProgress={e.bulkProgress} />
+
+      {/* Import */}
+      <Dialog open={showImport} onOpenChange={setShowImport}>
         <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Import Guests</DialogTitle>
-            <DialogDescription>Upload a CSV from Luma or any spreadsheet.</DialogDescription>
-          </DialogHeader>
-          <CSVUploader onUploadSuccess={handleUploadSuccess} sessionId={selectedSessionId || undefined} />
+          <DialogHeader><DialogTitle>Import Guests</DialogTitle>
+            <DialogDescription>Upload a CSV from Luma or any spreadsheet.</DialogDescription></DialogHeader>
+          <CSVUploader onUploadSuccess={(count) => { e.refreshAll(); e.loadSessions(); setShowImport(false); toast.success(`Imported ${count} guests`); }}
+            sessionId={e.selectedSessionId || undefined} />
         </DialogContent>
       </Dialog>
 
-      {/* Investigation Results Dialog */}
-      <Dialog open={investigating || !!investigateResult} onOpenChange={(open) => { if (!open) { setInvestigateResult(null); setInvestigateTarget(null); } }}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <ScanSearch className="size-4 text-gold" />
-              {investigating ? "Investigating..." : investigateResult?.agent || "Investigation"}
-            </DialogTitle>
-            {investigateTarget && (
-              <DialogDescription>
-                {applicants.find(a => a.applicant_id === investigateTarget)?.name || ""}
-              </DialogDescription>
-            )}
-          </DialogHeader>
-          {investigating ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="size-5 animate-spin text-gold" />
-            </div>
-          ) : investigateResult ? (
-            <div className="rounded-lg bg-muted/50 p-4 text-sm leading-relaxed max-h-[400px] overflow-y-auto whitespace-pre-wrap">
-              {investigateResult.result}
-            </div>
-          ) : null}
-        </DialogContent>
-      </Dialog>
-
-      {/* Create Event Dialog */}
-      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+      {/* Create Event */}
+      <Dialog open={showCreate} onOpenChange={setShowCreate}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader><DialogTitle>New Event</DialogTitle></DialogHeader>
-          <Input placeholder="Event name" value={newEventName} onChange={(e) => setNewEventName(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") handleCreateEvent(); }} />
+          <Input placeholder="Event name" value={newName} onChange={ev => setNewName(ev.target.value)}
+            onKeyDown={ev => { if (ev.key === "Enter") handleCreate(); }} />
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCreateDialog(false)}>Cancel</Button>
-            <Button onClick={handleCreateEvent} disabled={!newEventName.trim() || creating} className="bg-gold hover:bg-gold/90 text-gold-foreground">
+            <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
+            <Button onClick={handleCreate} disabled={!newName.trim() || creating} className="bg-gold hover:bg-gold/90 text-gold-foreground">
               {creating && <Loader2 className="size-3.5 mr-1.5 animate-spin" />}Create
             </Button>
           </DialogFooter>

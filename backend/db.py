@@ -111,11 +111,47 @@ def get_applicant_or_404(applicant_id: str) -> dict:
     return item
 
 
+def _is_blacklisted(email: str, linkedin_url: str = "", session_id: str = "") -> bool:
+    """Check if an email or LinkedIn URL is on the global or per-event blacklist."""
+    try:
+        # Global blacklist
+        bl = get_settings("blacklist")
+        bl_emails = set(e.lower().strip() for e in (bl.get("emails", []) if bl else []))
+        bl_urls: set[str] = set()
+
+        # Per-event blacklist
+        if session_id:
+            try:
+                ebl = get_settings(f"session_{session_id}_blacklist")
+                if ebl:
+                    bl_emails.update(e.lower().strip() for e in ebl.get("emails", []))
+                    bl_urls.update(u.lower().strip().rstrip("/") for u in ebl.get("linkedin_urls", []))
+            except Exception:
+                pass
+
+        if email and email.lower().strip() in bl_emails:
+            return True
+        if linkedin_url and linkedin_url.lower().strip().rstrip("/") in bl_urls:
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def create_applicant_item(fields: dict) -> dict:
-    """Insert a new applicant. Auto-generates ID if not present."""
+    """Insert a new applicant. Auto-generates ID if not present. Auto-rejects blacklisted."""
     if "applicant_id" not in fields:
         fields["applicant_id"] = str(uuid.uuid4())
     fields.setdefault("status", "pending")
+
+    # Auto-reject if blacklisted
+    email = fields.get("email", "")
+    linkedin = fields.get("linkedin_url", "")
+    session_id = fields.get("session_id", "")
+    if _is_blacklisted(email, linkedin, session_id):
+        fields["status"] = "rejected"
+        fields["blacklisted"] = True
+
     applicants_table.put_item(Item=fields)
     return fields
 
