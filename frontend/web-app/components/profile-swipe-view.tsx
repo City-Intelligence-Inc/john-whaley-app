@@ -72,9 +72,31 @@ export function ProfileSwipeView({
   onBlacklist,
 }: ProfileSwipeViewProps) {
   const [index, setIndex] = useState(0);
+  const [sortBy, setSortBy] = useState<"score" | "name" | "pending-first">("score");
 
   const filtered = applicants.filter((a) => statusFilter === "all" || a.status === statusFilter);
-  const sorted = [...filtered].sort((a, b) => getName(a).localeCompare(getName(b)));
+  const sorted = [...filtered].sort((a, b) => {
+    if (sortBy === "score") {
+      // Highest score first, then pending first, then alphabetical
+      const sa = Number(a.ai_score || a.investor_score || 0);
+      const sb = Number(b.ai_score || b.investor_score || 0);
+      if (sb !== sa) return sb - sa;
+      // Pending before decided
+      const statusOrder: Record<string, number> = { pending: 0, waitlisted: 1, accepted: 2, rejected: 3 };
+      const oa = statusOrder[a.status] ?? 0;
+      const ob = statusOrder[b.status] ?? 0;
+      if (oa !== ob) return oa - ob;
+      return getName(a).localeCompare(getName(b));
+    }
+    if (sortBy === "pending-first") {
+      const statusOrder: Record<string, number> = { pending: 0, waitlisted: 1, accepted: 2, rejected: 3 };
+      const oa = statusOrder[a.status] ?? 0;
+      const ob = statusOrder[b.status] ?? 0;
+      if (oa !== ob) return oa - ob;
+      return getName(a).localeCompare(getName(b));
+    }
+    return getName(a).localeCompare(getName(b));
+  });
   const current = sorted[index];
 
   // Counts for all applicants (not just filtered)
@@ -116,24 +138,42 @@ export function ProfileSwipeView({
   }
   if (!current) return null;
 
-  const photo = (current[`linkedin_image`] as string) || (current[`photo_url`] as string) || "";
+  const photo = (current[`linkedin_image`] as string) || (current[`linkedin_photo`] as string) || (current[`photo_url`] as string) || "";
   const headline = (current[`linkedin_headline`] as string) || current.title || "";
-  const about = (current[`linkedin_about`] as string) || "";
-  const experience = (current[`linkedin_experience`] as string) || "";
-  const education = (current[`linkedin_education`] as string) || "";
+  const about = (current[`about`] as string) || (current[`linkedin_about`] as string) || "";
+  const experience = (current[`experience`] as string) || (current[`linkedin_experience`] as string) || "";
+  const education = (current[`education`] as string) || (current[`linkedin_education`] as string) || "";
   const company = current.company || (current[`linkedin_company`] as string) || "";
   const location = current.location || (current[`linkedin_location`] as string) || "";
+  const summary = (current[`linkedin_summary`] as string) || "";
+  const investorScore = Number(current[`investor_score`] || current[`ai_score`] || 0);
+  const rank = index + 1;
+  const totalInCategory = sorted.length;
   const isUnclassified = !current.attendee_type;
 
   return (
     <div className="flex gap-6 items-start">
       {/* ── Main card area ── */}
       <div className="flex-1 flex flex-col items-center gap-3 max-w-2xl mx-auto">
-        {/* Progress */}
+        {/* Progress + Sort */}
         <div className="w-full flex items-center gap-3 text-xs text-muted-foreground">
           <span className="tabular-nums font-medium">{index + 1}/{sorted.length}</span>
           <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
             <div className="h-full bg-gold rounded-full transition-all" style={{ width: `${((index + 1) / sorted.length) * 100}%` }} />
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-muted-foreground/60">Sort:</span>
+            {(["score", "pending-first", "name"] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => { setSortBy(s); setIndex(0); }}
+                className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
+                  sortBy === s ? "bg-gold/15 text-gold" : "text-muted-foreground/60 hover:text-foreground"
+                }`}
+              >
+                {s === "score" ? "Rank" : s === "pending-first" ? "Pending" : "A-Z"}
+              </button>
+            ))}
           </div>
         </div>
 
