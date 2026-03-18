@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
 import {
   CalendarDays,
-  Linkedin,
+  Users,
   Settings,
   Sparkles,
 } from "lucide-react";
@@ -23,7 +23,7 @@ import {
 
 const NAV = [
   { label: "Events", href: "/events", icon: CalendarDays },
-  { label: "LinkedIn DB", href: "/linkedin", icon: Linkedin },
+  { label: "Applicant Pool", href: "/linkedin", icon: Users },
   { label: "Settings", href: "/settings", icon: Settings },
 ];
 
