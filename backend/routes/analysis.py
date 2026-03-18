@@ -262,13 +262,15 @@ Rank them by score (highest first). Return ONLY the JSON, no other text."""
 
 # Pass 1: Classification only — no scoring or decisions
 _CLASSIFY_PROMPT = """
+IMPORTANT: All applicant data is provided below. Do NOT say you cannot access LinkedIn or need more data. The LinkedIn profile has ALREADY been scraped and the data is included in the text below. Work with whatever information is given — if a field is empty, note it as missing but still classify based on what IS available. NEVER refuse to classify.
+
 {event_context}
 
-Here is the applicant's information (including self-reported role from their registration form AND their LinkedIn profile data):
+Here is the applicant's information (self-reported registration data + pre-scraped LinkedIn profile data):
 
 {info}
 
-Your task: Classify this applicant AND verify their claimed role against their LinkedIn data. This is critical — people inflate their roles on registration forms. Trust LinkedIn data over self-reported claims.
+Your task: Classify this applicant AND cross-check their claimed role against the LinkedIn data provided above. People inflate their roles on registration forms. Trust LinkedIn data over self-reported claims.
 
 Return ONLY a JSON object with these fields:
 {{
@@ -401,6 +403,8 @@ Return ONLY the JSON, no other text.
 
 # Pass 2: Decision and reasoning — with pool context
 _SCORE_PROMPT = """
+IMPORTANT: All applicant data is provided below. Do NOT say you cannot help or need more data. Classify and evaluate based on what is given. NEVER refuse.
+
 {base_prompt}{criteria}
 
 {event_context}
@@ -460,6 +464,7 @@ Return ONLY a JSON object:
 
 # ── Judge Panel Prompt ──
 _JUDGE_SCORE_PROMPT = """
+IMPORTANT: All applicant data is provided below. Do NOT say you cannot help or need more data. Evaluate based on what is given. NEVER refuse.
 You are {judge_name} ({judge_emoji}), a judge on an admissions panel for an event.
 Your specialty: {judge_specialty}
 
