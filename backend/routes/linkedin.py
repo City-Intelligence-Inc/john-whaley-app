@@ -1018,7 +1018,7 @@ async def stream_job(job_id: str):
 
 @router.post("/summarize-all")
 async def summarize_all_profiles(body: dict):
-    """Generate AI summaries for all profiles missing one. Saves to linkedin-scrapes."""
+    """Generate structured AI summaries for all profiles. Overwrites existing summaries."""
     from ai import call_ai
     from config import linkedin_scrapes_table
     import json
@@ -1026,18 +1026,20 @@ async def summarize_all_profiles(body: dict):
     api_key = body.get("api_key", "")
     model = body.get("model", "gpt-4o-mini")
     provider = body.get("provider", "openai")
+    overwrite = body.get("overwrite", True)
     if not api_key:
         raise HTTPException(400, "api_key required")
 
-    # Get all profiles
     response = linkedin_scrapes_table.scan()
     items = response.get("Items", [])
     while "LastEvaluatedKey" in response:
         response = linkedin_scrapes_table.scan(ExclusiveStartKey=response["LastEvaluatedKey"])
         items.extend(response.get("Items", []))
 
-    # Filter to those missing summary
-    to_summarize = [i for i in items if not i.get("ai_summary") and i.get("name")]
+    if overwrite:
+        to_summarize = [i for i in items if i.get("name")]
+    else:
+        to_summarize = [i for i in items if not i.get("ai_summary") and i.get("name")]
 
     async def event_stream():
         total = len(to_summarize)
@@ -1054,20 +1056,28 @@ async def summarize_all_profiles(body: dict):
             company = item.get("company", "")
             location = item.get("location", "")
 
-            prompt = f"""Write a 2-3 sentence professional summary for this person based on their LinkedIn data. Be specific and factual. Do NOT add opinions or speculation. Just summarize who they are and what they do.
+            prompt = f"""Analyze this person's LinkedIn profile for an AI-focused event (Stanford CS 224G Demo Day). Return a structured brief. Be SPECIFIC — use real names, titles, companies, numbers from the data. No fluff.
 
+FORMAT (use exactly these headers):
+ROLE: <current title @ company, 1 line>
+BACKGROUND: <1-2 key career highlights with specifics — years, companies, achievements>
+EVENT FIT: <1 sentence on why they're relevant or not to an AI/tech event>
+
+If data is missing, say "Limited data" for that section. Do NOT invent facts.
+
+PROFILE DATA:
 Name: {name}
 Headline: {headline}
 Company: {company}
 Location: {location}
-About: {about[:500]}
-Experience: {experience[:500]}
+About: {about[:600]}
+Experience: {experience[:600]}
 Education: {education[:300]}
 
-Return ONLY the summary text, nothing else."""
+Return ONLY the structured brief, nothing else."""
 
             try:
-                summary = call_ai(provider, api_key, model, prompt, max_tokens=200)
+                summary = call_ai(provider, api_key, model, prompt, max_tokens=250)
                 summary = summary.strip().strip('"')
 
                 linkedin_scrapes_table.update_item(
