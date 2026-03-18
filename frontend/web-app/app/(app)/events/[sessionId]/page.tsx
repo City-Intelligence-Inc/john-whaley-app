@@ -811,9 +811,27 @@ export default function EventWorkspacePage() {
       {/* ════════════════════════════════════════════ */}
       {tab === "review" && (
         <div className="space-y-4">
+          {/* Run Analysis button */}
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">
+              {applicants.some((a) => a.ai_reasoning)
+                ? `${applicants.filter((a) => a.ai_reasoning).length} of ${applicants.length} analyzed`
+                : "Run AI analysis to classify and evaluate all guests"}
+            </p>
+            <Button
+              onClick={() => router.push(`/events/${sessionId}/analyze`)}
+              disabled={applicants.length === 0}
+              size="sm"
+              className="bg-gold text-gold-foreground hover:bg-gold/90"
+            >
+              <Brain className="size-4 mr-2" />
+              {applicants.some((a) => a.ai_reasoning) ? "Re-Analyze" : "Run Analysis"}
+            </Button>
+          </div>
+
           {/* Category selector */}
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">Select a category to review:</p>
+            <p className="text-xs text-muted-foreground">Filter by category:</p>
             <div className="flex flex-wrap gap-2">
               <button
                 onClick={() => setCategoryFilter("all")}
