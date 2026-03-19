@@ -673,7 +673,6 @@ export default function EventWorkspacePage() {
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [attendanceFilter, setAttendanceFilter] = useState<"all" | "in_person" | "virtual">("all");
   const [showImport, setShowImport] = useState(false);
   const [sortField, setSortField] = useState<"name" | "status" | "type" | "score">("score");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -710,9 +709,6 @@ export default function EventWorkspacePage() {
         list = list.filter((a) => a.status === statusFilter);
       }
     }
-    if (attendanceFilter !== "all") {
-      list = list.filter((a) => (a.attendance_mode || "") === attendanceFilter);
-    }
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter((a) => {
@@ -733,7 +729,7 @@ export default function EventWorkspacePage() {
       }
       return sortDir === "desc" ? -cmp : cmp;
     });
-  }, [applicants, statusFilter, attendanceFilter, search, sortField, sortDir]);
+  }, [applicants, statusFilter, search, sortField, sortDir]);
 
   const handleDragEnd = useCallback(async (event: DragEndEvent) => {
     const { active, over } = event;
@@ -1004,30 +1000,6 @@ export default function EventWorkspacePage() {
         );
       })()}
 
-      {/* Attendance mode filter */}
-      {total > 0 && (() => {
-        const inPerson = applicants.filter((a) => a.attendance_mode === "in_person").length;
-        const virtual = applicants.filter((a) => a.attendance_mode === "virtual").length;
-        if (inPerson === 0 && virtual === 0) return null;
-        return (
-          <div className="flex items-center gap-2">
-            {[
-              { key: "all" as const, label: "All", count: total },
-              { key: "in_person" as const, label: "In Person", count: inPerson },
-              { key: "virtual" as const, label: "Virtual", count: virtual },
-            ].filter((f) => f.key === "all" || f.count > 0).map((f) => (
-              <button key={f.key}
-                onClick={() => setAttendanceFilter(attendanceFilter === f.key ? "all" : f.key)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border ${
-                  attendanceFilter === f.key ? "border-foreground/20 bg-accent" : "border-transparent hover:bg-muted text-muted-foreground"
-                }`}>
-                {f.label} <span className="tabular-nums ml-1">{f.count}</span>
-              </button>
-            ))}
-          </div>
-        );
-      })()}
-
       <Tabs defaultValue="guests">
         <div className="flex items-center justify-between">
           <TabsList>
@@ -1255,23 +1227,8 @@ export default function EventWorkspacePage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex items-center gap-4">
-                <div className={`size-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${analyzed > 0 ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"}`}>
-                  {analyzed > 0 ? <Check className="size-4" /> : "1"}
-                </div>
-                <div>
-                  <p className={`text-sm font-medium ${analyzed > 0 ? "line-through text-muted-foreground" : ""}`}>Run AI Analysis</p>
-                  <p className="text-xs text-muted-foreground">Classify and score all guests</p>
-                </div>
-                {analyzed === 0 && (
-                  <Button size="sm" variant="outline" className="ml-auto" onClick={() => router.push(`/events/${sessionId}/analyze`)}>
-                    <Brain className="size-4 mr-2" />Analyze
-                  </Button>
-                )}
-              </div>
-              <Separator />
-              <div className="flex items-center gap-4">
                 <div className={`size-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${accepted > 0 ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"}`}>
-                  {accepted > 0 ? <Check className="size-4" /> : "2"}
+                  {accepted > 0 ? <Check className="size-4" /> : "1"}
                 </div>
                 <div>
                   <p className={`text-sm font-medium ${accepted > 0 ? "line-through text-muted-foreground" : ""}`}>Accept top guests</p>
@@ -1282,7 +1239,7 @@ export default function EventWorkspacePage() {
               </div>
               <Separator />
               <div className="flex items-center gap-4">
-                <div className="size-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 bg-muted text-muted-foreground">3</div>
+                <div className="size-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 bg-muted text-muted-foreground">2</div>
                 <div>
                   <p className="text-sm font-medium">Export & paste into Luma</p>
                   <p className="text-xs text-muted-foreground">Download CSV or copy emails to clipboard</p>
