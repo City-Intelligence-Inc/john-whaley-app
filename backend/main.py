@@ -91,6 +91,20 @@ def applicant_stats_noauth(session_id: Optional[str] = None):
     return stats
 
 
+@app.get("/applicants/ranking-judges", tags=["analysis"])
+def ranking_judges_noauth():
+    from routes.analysis import RANKING_JUDGES
+    return [{"id": k, "name": v["name"], "description": v["description"]} for k, v in RANKING_JUDGES.items()]
+
+
+@app.post("/applicants/rank", tags=["analysis"])
+async def rank_applicants_noauth(body: dict):
+    from routes.analysis import rank_applicants as _rank
+    from models import ReviewRequest
+    req = ReviewRequest(**body)
+    return await _rank(req)
+
+
 @app.put("/applicants/{applicant_id}", tags=["applicants"])
 def update_applicant_noauth(applicant_id: str, body: dict):
     import db as _db
@@ -107,20 +121,6 @@ def batch_status_noauth(body: dict):
         _db.update_applicant_fields(aid, {"status": status})
         updated.append(aid)
     return {"updated": updated}
-
-
-@app.get("/applicants/ranking-judges", tags=["analysis"])
-def ranking_judges_noauth():
-    from routes.analysis import RANKING_JUDGES
-    return [{"id": k, "name": v["name"], "description": v["description"]} for k, v in RANKING_JUDGES.items()]
-
-
-@app.post("/applicants/rank", tags=["analysis"])
-async def rank_applicants_noauth(body: dict):
-    from routes.analysis import rank_applicants as _rank
-    from models import ReviewRequest
-    req = ReviewRequest(**body)
-    return await _rank(req)
 
 
 @app.get("/linkedin/database", tags=["linkedin"])
