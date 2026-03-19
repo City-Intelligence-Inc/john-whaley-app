@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import React, { useState, useCallback, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -392,8 +392,6 @@ function JudgesPanel({ applicants, sessionId, onRefresh }: {
   const [runningAll, setRunningAll] = useState(false);
   const [completedJudges, setCompletedJudges] = useState<Set<string>>(new Set());
   const [attendanceView, setAttendanceView] = useState<"all" | "in_person" | "virtual">("all");
-  const autoRanRef = useRef(false);
-
   // Load ranking judges on mount
   useEffect(() => {
     api.listRankingJudges().then(setRankingJudges).catch(() => {});
@@ -411,34 +409,6 @@ function JudgesPanel({ applicants, sessionId, onRefresh }: {
     }
     return results;
   }, [applicants, rankingJudges]);
-
-  // Auto-run judges that haven't been ranked yet
-  useEffect(() => {
-    if (autoRanRef.current || rankingJudges.length === 0 || applicants.length === 0) return;
-    const missing = rankingJudges.filter((j) => !judgeResults[j.id]);
-    if (missing.length === 0) return;
-    const apiKey = typeof window !== "undefined" ? localStorage.getItem("ai_api_key") || "" : "";
-    if (!apiKey) return;
-    autoRanRef.current = true;
-
-    (async () => {
-      setRunningAll(true);
-      for (const judge of missing) {
-        setRunningJudge(judge.id);
-        try {
-          const provider = localStorage.getItem("ai_provider") || "anthropic";
-          const model = localStorage.getItem("ai_model") || (provider === "anthropic" ? "claude-sonnet-4-20250514" : "gpt-4o");
-          await api.rankApplicants(judge.id, sessionId, { api_key: apiKey, model, provider });
-          setCompletedJudges((prev) => new Set(prev).add(judge.id));
-        } catch {
-          toast.error(`Failed to rank with ${judge.name}`);
-        }
-        setRunningJudge(null);
-      }
-      setRunningAll(false);
-      await onRefresh();
-    })();
-  }, [rankingJudges, judgeResults, applicants, sessionId, onRefresh]);
 
   const handleRunJudge = useCallback(async (judgeId: string) => {
     const apiKey = typeof window !== "undefined" ? localStorage.getItem("ai_api_key") || "" : "";

@@ -313,7 +313,7 @@ Summary: {summary}
     )
 
     try:
-        raw = call_ai(body.provider, body.api_key, body.model, full_prompt, max_tokens=4096)
+        raw = await call_ai_async(body.provider, body.api_key, body.model, full_prompt, max_tokens=32000)
         rankings = parse_json_response(raw)
     except Exception as e:
         raise HTTPException(502, f"AI ranking failed: {e}")
