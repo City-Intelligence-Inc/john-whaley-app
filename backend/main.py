@@ -109,6 +109,20 @@ def batch_status_noauth(body: dict):
     return {"updated": updated}
 
 
+@app.get("/applicants/ranking-judges", tags=["analysis"])
+def ranking_judges_noauth():
+    from routes.analysis import RANKING_JUDGES
+    return [{"id": k, "name": v["name"], "description": v["description"]} for k, v in RANKING_JUDGES.items()]
+
+
+@app.post("/applicants/rank", tags=["analysis"])
+async def rank_applicants_noauth(body: dict):
+    from routes.analysis import rank_applicants as _rank
+    from models import ReviewRequest
+    req = ReviewRequest(**body)
+    return await _rank(req)
+
+
 @app.get("/linkedin/database", tags=["linkedin"])
 def linkedin_database_noauth():
     from config import linkedin_scrapes_table
