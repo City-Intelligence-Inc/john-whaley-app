@@ -7,8 +7,8 @@ POST /rank/{session_id}  — Rank all applicants in a session
 
 import re
 from fastapi import APIRouter, HTTPException
-from ..db import scan_all_applicants, update_applicant_fields, get_session_or_404
-from ..config import VC_ROLE_TAXONOMY, VC_FUND_INDICATORS
+from db import scan_all_applicants, update_applicant_fields, get_session_or_404
+from config import VC_ROLE_TAXONOMY, VC_FUND_INDICATORS
 
 router = APIRouter(prefix="/rank", tags=["rank"])
 
