@@ -313,7 +313,8 @@ Summary: {summary}
     )
 
     try:
-        raw = await call_ai_async(body.provider, body.api_key, body.model, full_prompt, max_tokens=32000)
+        max_tok = 16000 if body.provider == "openai" else 32000
+        raw = await call_ai_async(body.provider, body.api_key, body.model, full_prompt, max_tokens=max_tok)
         rankings = parse_json_response(raw)
     except Exception as e:
         raise HTTPException(502, f"AI ranking failed: {e}")
