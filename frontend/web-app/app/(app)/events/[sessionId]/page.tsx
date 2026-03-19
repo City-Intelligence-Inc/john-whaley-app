@@ -36,6 +36,7 @@ import {
   Info,
   ChevronDown,
   ChevronUp,
+  Scale,
 } from "lucide-react";
 import {
   DndContext,
@@ -94,6 +95,7 @@ import { CSVUploader } from "@/components/csv-uploader";
 import { api } from "@/lib/api";
 import type { Applicant } from "@/lib/api";
 import { ATTENDEE_TYPES } from "@/lib/constants";
+import { JUDGE_PERSONAS } from "@/lib/judge-personas";
 
 function getName(a: Applicant): string {
   return a.name || (a.linkedin_name as string) || a.email || "No name";
@@ -376,6 +378,201 @@ function MixPanel({ applicants, onApply }: {
   );
 }
 
+/* ── Parse judge decisions from ai_reasoning ── */
+function parseJudgeDecisions(reasoning: string): { judgeId: string; judgeName: string; emoji: string; decision: "accept" | "pass"; reasoning: string }[] {
+  if (!reasoning) return [];
+  // Format: "{emoji} {JudgeName} [ACCEPT/PASS]: {reasoning} | ..."
+  return reasoning.split(" | ").map((part) => {
+    const match = part.match(/^(.+?)\s+\[(ACCEPT|PASS)\]:\s*(.*)$/);
+    if (!match) return null;
+    const fullName = match[1].trim();
+    const decision = match[2].toLowerCase() as "accept" | "pass";
+    const text = match[3].trim();
+    // Extract emoji (first char or first grapheme) and judge name
+    const segments = [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(fullName)];
+    const emoji = segments[0]?.segment || "";
+    const judgeName = segments.slice(1).map((s) => s.segment).join("").trim();
+    // Match to persona
+    const persona = JUDGE_PERSONAS.find((p) => p.name === judgeName || judgeName.includes(p.name.replace("The ", "")));
+    return { judgeId: persona?.id || judgeName, judgeName, emoji, decision, reasoning: text };
+  }).filter(Boolean) as { judgeId: string; judgeName: string; emoji: string; decision: "accept" | "pass"; reasoning: string }[];
+}
+
+/* ── Judges Panel ── */
+function JudgesPanel({ applicants }: { applicants: Applicant[] }) {
+  const [expandedJudge, setExpandedJudge] = useState<string | null>(null);
+  const [selectedApplicantId, setSelectedApplicantId] = useState<string | null>(null);
+
+  // Build per-judge data from applicants' ai_reasoning
+  const judgeData = useMemo(() => {
+    const judges: Record<string, {
+      id: string; name: string; emoji: string;
+      accepts: { applicant: Applicant; reasoning: string }[];
+      passes: { applicant: Applicant; reasoning: string }[];
+    }> = {};
+
+    for (const a of applicants) {
+      const reasoning = a.ai_reasoning || "";
+      if (!reasoning) continue;
+      const decisions = parseJudgeDecisions(reasoning);
+      for (const d of decisions) {
+        if (!judges[d.judgeId]) {
+          judges[d.judgeId] = { id: d.judgeId, name: d.judgeName, emoji: d.emoji, accepts: [], passes: [] };
+        }
+        const entry = { applicant: a, reasoning: d.reasoning };
+        if (d.decision === "accept") judges[d.judgeId].accepts.push(entry);
+        else judges[d.judgeId].passes.push(entry);
+      }
+    }
+    // Sort accepts by global_rank
+    for (const j of Object.values(judges)) {
+      j.accepts.sort((a, b) => Number(a.applicant.global_rank || a.applicant.rank || 999) - Number(b.applicant.global_rank || b.applicant.rank || 999));
+      j.passes.sort((a, b) => Number(a.applicant.global_rank || a.applicant.rank || 999) - Number(b.applicant.global_rank || b.applicant.rank || 999));
+    }
+    return Object.values(judges);
+  }, [applicants]);
+
+  // Find the selected applicant's reasoning popup
+  const selectedDetail = useMemo(() => {
+    if (!selectedApplicantId || !expandedJudge) return null;
+    const judge = judgeData.find((j) => j.id === expandedJudge);
+    if (!judge) return null;
+    const all = [...judge.accepts, ...judge.passes];
+    return all.find((e) => e.applicant.applicant_id === selectedApplicantId) || null;
+  }, [selectedApplicantId, expandedJudge, judgeData]);
+
+  if (judgeData.length === 0) {
+    return (
+      <Card className="border-dashed">
+        <CardContent className="flex flex-col items-center justify-center py-12">
+          <Scale className="size-10 text-muted-foreground/30 mb-3" />
+          <p className="text-sm font-medium mb-1">No judge data yet</p>
+          <p className="text-xs text-muted-foreground">Run AI analysis with a judge panel to see per-judge rankings here.</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">{judgeData.length} judges scored {applicants.filter((a) => a.ai_reasoning).length} guests</p>
+      </div>
+
+      {judgeData.map((judge) => {
+        const isExpanded = expandedJudge === judge.id;
+        const persona = JUDGE_PERSONAS.find((p) => p.name === judge.name || judge.name.includes(p.name.replace("The ", "")));
+        return (
+          <div key={judge.id} className="rounded-lg border overflow-hidden">
+            <button
+              onClick={() => setExpandedJudge(isExpanded ? null : judge.id)}
+              className="w-full p-3 flex items-center gap-3 hover:bg-muted/50 transition-colors text-left"
+            >
+              <span className="text-lg">{judge.emoji}</span>
+              <div className="flex-1 min-w-0">
+                <span className="text-sm font-medium">{judge.name}</span>
+                {persona && <span className="text-xs text-muted-foreground ml-2">{persona.specialty}</span>}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-xs font-medium text-emerald-600 tabular-nums">{judge.accepts.length} accepted</span>
+                <span className="text-xs text-muted-foreground tabular-nums">{judge.passes.length} passed</span>
+                {isExpanded ? <ChevronUp className="size-3.5 text-muted-foreground" /> : <ChevronDown className="size-3.5 text-muted-foreground" />}
+              </div>
+            </button>
+
+            {isExpanded && (
+              <div className="border-t">
+                {/* Accepted */}
+                {judge.accepts.length > 0 && (
+                  <div>
+                    <div className="px-3 py-1.5 bg-emerald-50 dark:bg-emerald-950/20 text-xs font-medium text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
+                      <CheckCircle2 className="size-3" />
+                      Accepted ({judge.accepts.length})
+                    </div>
+                    <div className="divide-y max-h-64 overflow-y-auto">
+                      {judge.accepts.map(({ applicant: a, reasoning }) => {
+                        const photo = getPhoto(a);
+                        return (
+                          <div key={a.applicant_id}
+                            className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted/30 cursor-pointer transition-colors"
+                            onClick={() => setSelectedApplicantId(selectedApplicantId === a.applicant_id ? null : a.applicant_id)}
+                          >
+                            {photo ? (
+                              <img src={photo} alt="" className="size-6 rounded-full object-cover shrink-0" />
+                            ) : (
+                              <div className="size-6 rounded-full bg-muted flex items-center justify-center shrink-0 text-[10px] font-medium text-muted-foreground">
+                                {getName(a).charAt(0).toUpperCase()}
+                              </div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <span className="text-xs font-medium truncate block">{getName(a)}</span>
+                              {selectedApplicantId === a.applicant_id && reasoning && (
+                                <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">{reasoning}</p>
+                              )}
+                            </div>
+                            {a.panel_votes && (
+                              <span className="text-[10px] font-mono text-muted-foreground shrink-0">{a.panel_votes}</span>
+                            )}
+                            {a.linkedin_url && (
+                              <a href={a.linkedin_url} target="_blank" rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="text-blue-500 hover:text-blue-600 shrink-0">
+                                <Linkedin className="size-3" />
+                              </a>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Passed */}
+                {judge.passes.length > 0 && (
+                  <div>
+                    <div className="px-3 py-1.5 bg-muted/50 text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                      <XCircle className="size-3" />
+                      Passed ({judge.passes.length})
+                    </div>
+                    <div className="divide-y max-h-48 overflow-y-auto">
+                      {judge.passes.map(({ applicant: a, reasoning }) => {
+                        const photo = getPhoto(a);
+                        return (
+                          <div key={a.applicant_id}
+                            className="flex items-center gap-2 px-3 py-2 text-sm opacity-60 hover:opacity-100 hover:bg-muted/30 cursor-pointer transition-all"
+                            onClick={() => setSelectedApplicantId(selectedApplicantId === a.applicant_id ? null : a.applicant_id)}
+                          >
+                            {photo ? (
+                              <img src={photo} alt="" className="size-6 rounded-full object-cover shrink-0" />
+                            ) : (
+                              <div className="size-6 rounded-full bg-muted flex items-center justify-center shrink-0 text-[10px] font-medium text-muted-foreground">
+                                {getName(a).charAt(0).toUpperCase()}
+                              </div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <span className="text-xs font-medium truncate block">{getName(a)}</span>
+                              {selectedApplicantId === a.applicant_id && reasoning && (
+                                <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">{reasoning}</p>
+                              )}
+                            </div>
+                            {a.panel_votes && (
+                              <span className="text-[10px] font-mono text-muted-foreground shrink-0">{a.panel_votes}</span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function EventWorkspacePage() {
   const router = useRouter();
   const {
@@ -446,12 +643,16 @@ export default function EventWorkspacePage() {
   const handleDragEnd = useCallback(async (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
+    const oldIndex = filtered.findIndex((a) => a.applicant_id === active.id);
     const newIndex = filtered.findIndex((a) => a.applicant_id === over.id);
-    if (newIndex === -1) return;
-    const newRank = newIndex + 1;
+    if (oldIndex === -1 || newIndex === -1) return;
+    const reordered = arrayMove(filtered, oldIndex, newIndex);
     try {
-      await api.updateApplicant(String(active.id), { extra: { global_rank: newRank, rank: newRank } });
-      toast.success(`Moved to #${newRank}`);
+      const updates = reordered.map((a, i) =>
+        api.updateApplicant(a.applicant_id, { extra: { global_rank: i + 1, rank: i + 1 } })
+      );
+      await Promise.all(updates);
+      toast.success(`Moved to #${newIndex + 1}`);
       await refreshApplicants();
     } catch {
       toast.error("Failed to update rank");
@@ -709,6 +910,7 @@ export default function EventWorkspacePage() {
         <div className="flex items-center justify-between">
           <TabsList>
             <TabsTrigger value="guests">Guests</TabsTrigger>
+            <TabsTrigger value="judges">Judges</TabsTrigger>
             <TabsTrigger value="mix">Mix</TabsTrigger>
             <TabsTrigger value="export">Export</TabsTrigger>
           </TabsList>
@@ -902,6 +1104,11 @@ export default function EventWorkspacePage() {
             </DndContext>
             </>
           )}
+        </TabsContent>
+
+        {/* ── Judges Tab ── */}
+        <TabsContent value="judges" className="mt-4 space-y-4">
+          <JudgesPanel applicants={applicants} />
         </TabsContent>
 
         {/* ── Mix Tab ── */}

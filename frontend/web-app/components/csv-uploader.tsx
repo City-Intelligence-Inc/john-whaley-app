@@ -188,7 +188,7 @@ export function CSVUploader({ onUploadSuccess, sessionId }: {
               {uploading ? (
                 <><Loader2 className="size-4 mr-2 animate-spin" />Importing...</>
               ) : (
-                <><Check className="size-4 mr-2" />Import {totalRows} Guests</>
+                <><Check className="size-4 mr-2" />Import and Run Analysis</>
               )}
             </Button>
           </div>
