@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo, useEffect } from "react";
+import React, { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -246,7 +246,7 @@ function MixPanel({ applicants, onApply }: {
       {/* Target + actions */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <span className="text-sm text-muted-foreground">Target:</span>
+          <span className="text-sm text-muted-foreground">Venue Capacity:</span>
           <div className="flex items-center gap-1">
             {[100, 150, 200, 250].map((n) => (
               <button key={n} onClick={() => setTarget(n)}
@@ -379,22 +379,6 @@ function MixPanel({ applicants, onApply }: {
   );
 }
 
-/* ── Parse judge decisions from ai_reasoning ── */
-function parseJudgeDecisions(reasoning: string): { judgeName: string; emoji: string; decision: "accept" | "pass"; reasoning: string }[] {
-  if (!reasoning) return [];
-  return reasoning.split(" | ").map((part) => {
-    const match = part.match(/^(.+?)\s+\[(ACCEPT|PASS)\]:\s*(.*)$/);
-    if (!match) return null;
-    const fullName = match[1].trim();
-    const decision = match[2].toLowerCase() as "accept" | "pass";
-    const text = match[3].trim();
-    const segments = [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(fullName)];
-    const emoji = segments[0]?.segment || "";
-    const judgeName = segments.slice(1).map((s) => s.segment).join("").trim();
-    return { judgeName, emoji, decision, reasoning: text };
-  }).filter(Boolean) as { judgeName: string; emoji: string; decision: "accept" | "pass"; reasoning: string }[];
-}
-
 /* ── Judges Panel ── */
 function JudgesPanel({ applicants, sessionId, onRefresh }: {
   applicants: Applicant[];
@@ -404,65 +388,57 @@ function JudgesPanel({ applicants, sessionId, onRefresh }: {
   const [rankingJudges, setRankingJudges] = useState<{ id: string; name: string; description: string }[]>([]);
   const [runningJudge, setRunningJudge] = useState<string | null>(null);
   const [expandedJudge, setExpandedJudge] = useState<string | null>(null);
-  const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
   const [selectedApplicantId, setSelectedApplicantId] = useState<string | null>(null);
   const [runningAll, setRunningAll] = useState(false);
   const [completedJudges, setCompletedJudges] = useState<Set<string>>(new Set());
+  const [attendanceView, setAttendanceView] = useState<"all" | "in_person" | "virtual">("all");
+  const autoRanRef = useRef(false);
 
   // Load ranking judges on mount
   useEffect(() => {
     api.listRankingJudges().then(setRankingJudges).catch(() => {});
   }, []);
 
-  // Check which ranking judges have already been run (look for rank_{judgeId} fields)
+  // Check which ranking judges have results
   const judgeResults = useMemo(() => {
-    const results: Record<string, { ranked: Applicant[]; byCategory: Record<string, Applicant[]> }> = {};
+    const results: Record<string, Applicant[]> = {};
     for (const judge of rankingJudges) {
       const field = `rank_${judge.id}`;
-      const rankedApplicants = applicants
+      const ranked = applicants
         .filter((a) => a[field] != null && Number(a[field]) > 0)
         .sort((a, b) => Number(a[field]) - Number(b[field]));
-      if (rankedApplicants.length > 0) {
-        const byCategory: Record<string, Applicant[]> = {};
-        for (const a of rankedApplicants) {
-          const cat = a.attendee_type || "other";
-          if (!byCategory[cat]) byCategory[cat] = [];
-          byCategory[cat].push(a);
-        }
-        results[judge.id] = { ranked: rankedApplicants, byCategory };
-      }
+      if (ranked.length > 0) results[judge.id] = ranked;
     }
     return results;
   }, [applicants, rankingJudges]);
 
-  // Build persona judge data from ai_reasoning field
-  const personaData = useMemo(() => {
-    const judges: Record<string, {
-      name: string; emoji: string; persona: typeof JUDGE_PERSONAS[number] | undefined;
-      accepts: { applicant: Applicant; reasoning: string }[];
-      passes: { applicant: Applicant; reasoning: string }[];
-    }> = {};
-    for (const a of applicants) {
-      const reasoning = a.ai_reasoning || "";
-      if (!reasoning) continue;
-      const decisions = parseJudgeDecisions(reasoning);
-      for (const d of decisions) {
-        const key = d.judgeName;
-        if (!judges[key]) {
-          const persona = JUDGE_PERSONAS.find((p) => p.name === d.judgeName || d.judgeName.includes(p.name.replace("The ", "")));
-          judges[key] = { name: d.judgeName, emoji: d.emoji, persona, accepts: [], passes: [] };
+  // Auto-run judges that haven't been ranked yet
+  useEffect(() => {
+    if (autoRanRef.current || rankingJudges.length === 0 || applicants.length === 0) return;
+    const missing = rankingJudges.filter((j) => !judgeResults[j.id]);
+    if (missing.length === 0) return;
+    const apiKey = typeof window !== "undefined" ? localStorage.getItem("ai_api_key") || "" : "";
+    if (!apiKey) return;
+    autoRanRef.current = true;
+
+    (async () => {
+      setRunningAll(true);
+      for (const judge of missing) {
+        setRunningJudge(judge.id);
+        try {
+          const provider = localStorage.getItem("ai_provider") || "anthropic";
+          const model = localStorage.getItem("ai_model") || (provider === "anthropic" ? "claude-sonnet-4-20250514" : "gpt-4o");
+          await api.rankApplicants(judge.id, sessionId, { api_key: apiKey, model, provider });
+          setCompletedJudges((prev) => new Set(prev).add(judge.id));
+        } catch {
+          toast.error(`Failed to rank with ${judge.name}`);
         }
-        const entry = { applicant: a, reasoning: d.reasoning };
-        if (d.decision === "accept") judges[key].accepts.push(entry);
-        else judges[key].passes.push(entry);
+        setRunningJudge(null);
       }
-    }
-    for (const j of Object.values(judges)) {
-      j.accepts.sort((a, b) => Number(a.applicant.global_rank || a.applicant.rank || 999) - Number(b.applicant.global_rank || b.applicant.rank || 999));
-      j.passes.sort((a, b) => Number(a.applicant.global_rank || a.applicant.rank || 999) - Number(b.applicant.global_rank || b.applicant.rank || 999));
-    }
-    return Object.values(judges);
-  }, [applicants]);
+      setRunningAll(false);
+      await onRefresh();
+    })();
+  }, [rankingJudges, judgeResults, applicants, sessionId, onRefresh]);
 
   const handleRunJudge = useCallback(async (judgeId: string) => {
     const apiKey = typeof window !== "undefined" ? localStorage.getItem("ai_api_key") || "" : "";
@@ -497,19 +473,176 @@ function JudgesPanel({ applicants, sessionId, onRefresh }: {
     setRunningAll(false);
   }, [rankingJudges, judgeResults, handleRunJudge]);
 
-  return (
-    <div className="space-y-6">
-      {/* ── Persona Judges (from AI analysis) ── */}
-      {personaData.length > 0 && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-medium">Panel Judges</h3>
-            <p className="text-xs text-muted-foreground">{applicants.filter((a) => a.panel_votes).length} guests scored</p>
-          </div>
+  // Attendance counts
+  const inPersonCount = applicants.filter((a) => a.attendance_mode === "in_person").length;
+  const virtualCount = applicants.filter((a) => a.attendance_mode === "virtual").length;
+  const hasAttendance = inPersonCount > 0 || virtualCount > 0;
 
+  // Filter by attendance
+  const filterByAttendance = useCallback((list: Applicant[]) => {
+    if (attendanceView === "all") return list;
+    return list.filter((a) => (a.attendance_mode || "") === attendanceView);
+  }, [attendanceView]);
+
+  // Parse persona decisions from ai_reasoning
+  const personaData = useMemo(() => {
+    const judges: Record<string, {
+      name: string; emoji: string; persona: typeof JUDGE_PERSONAS[number] | undefined;
+      accepts: { applicant: Applicant; reasoning: string }[];
+      passes: { applicant: Applicant; reasoning: string }[];
+    }> = {};
+    for (const a of applicants) {
+      const reasoning = a.ai_reasoning || "";
+      if (!reasoning || !reasoning.includes("[ACCEPT]") && !reasoning.includes("[PASS]")) continue;
+      const parts = reasoning.split(" | ");
+      for (const part of parts) {
+        const match = part.match(/^(.+?)\s+\[(ACCEPT|PASS)\]:\s*(.*)$/);
+        if (!match) continue;
+        const fullName = match[1].trim();
+        const decision = match[2].toLowerCase() as "accept" | "pass";
+        const text = match[3].trim();
+        const segments = [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(fullName)];
+        const emoji = segments[0]?.segment || "";
+        const judgeName = segments.slice(1).map((s) => s.segment).join("").trim();
+        if (!judges[judgeName]) {
+          const persona = JUDGE_PERSONAS.find((p) => p.name === judgeName || judgeName.includes(p.name.replace("The ", "")));
+          judges[judgeName] = { name: judgeName, emoji, persona, accepts: [], passes: [] };
+        }
+        const entry = { applicant: a, reasoning: text };
+        if (decision === "accept") judges[judgeName].accepts.push(entry);
+        else judges[judgeName].passes.push(entry);
+      }
+    }
+    return Object.values(judges);
+  }, [applicants]);
+
+  // Render an applicant row
+  const renderRow = (a: Applicant, rank: number | null, reasoning: string, badge?: string) => {
+    const photo = getPhoto(a);
+    const isSelected = selectedApplicantId === a.applicant_id;
+    const mode = a.attendance_mode as string;
+    return (
+      <div key={a.applicant_id}
+        className="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/30 cursor-pointer transition-colors"
+        onClick={() => setSelectedApplicantId(isSelected ? null : a.applicant_id)}>
+        {rank != null && <span className="text-[11px] font-mono font-bold text-muted-foreground w-7 text-right shrink-0">#{rank}</span>}
+        {photo ? (
+          <img src={photo} alt="" className="size-6 rounded-full object-cover shrink-0" />
+        ) : (
+          <div className="size-6 rounded-full bg-muted flex items-center justify-center shrink-0 text-[10px] font-medium text-muted-foreground">{getName(a).charAt(0).toUpperCase()}</div>
+        )}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-medium truncate">{getName(a)}</span>
+            {mode === "virtual" && <span className="text-[9px] px-1 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-400 shrink-0">Virtual</span>}
+            {mode === "in_person" && <span className="text-[9px] px-1 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400 shrink-0">In Person</span>}
+          </div>
+          <span className="text-[10px] text-muted-foreground truncate block">{a.attendee_type_detail || getHeadline(a) || ""}</span>
+          {isSelected && reasoning && <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed border-l-2 border-muted-foreground/20 pl-2">{reasoning}</p>}
+        </div>
+        {badge && <span className="text-[10px] font-mono text-muted-foreground shrink-0">{badge}</span>}
+        {a.attendee_type && <span className="size-2 rounded-full shrink-0" style={{ backgroundColor: getTypeColor(a.attendee_type) }} title={getTypeLabel(a.attendee_type)} />}
+        {a.linkedin_url && <a href={a.linkedin_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="text-blue-500 hover:text-blue-600 shrink-0"><Linkedin className="size-3" /></a>}
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <p className="text-sm font-medium">{applicants.length} guests</p>
+          <p className="text-xs text-muted-foreground">
+            {Object.keys(judgeResults).length}/{rankingJudges.length} ranking judges complete
+            {personaData.length > 0 && ` | ${personaData.length} panel judges`}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {hasAttendance && (
+            <div className="flex items-center rounded-lg border p-0.5">
+              {[
+                { key: "all" as const, label: "All", count: applicants.length },
+                { key: "in_person" as const, label: "In Person", count: inPersonCount },
+                { key: "virtual" as const, label: "Virtual", count: virtualCount },
+              ].filter((f) => f.key === "all" || f.count > 0).map((f) => (
+                <button key={f.key} onClick={() => setAttendanceView(f.key)}
+                  className={`px-2 py-1 rounded-md text-[11px] font-medium transition-colors ${attendanceView === f.key ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+                  {f.label} ({f.count})
+                </button>
+              ))}
+            </div>
+          )}
+          <Button size="sm" variant="outline" onClick={handleRunAll} disabled={runningAll || !!runningJudge}>
+            {runningAll ? <Loader2 className="size-4 mr-2 animate-spin" /> : <Scale className="size-4 mr-2" />}
+            {runningAll ? `${completedJudges.size}/${rankingJudges.length}...` : "Re-run All"}
+          </Button>
+        </div>
+      </div>
+
+      {/* ── Ranking Judges ── */}
+      {rankingJudges.map((judge) => {
+        const allRanked = judgeResults[judge.id] || [];
+        const ranked = filterByAttendance(allRanked);
+        const isExpanded = expandedJudge === judge.id;
+        const isRunning = runningJudge === judge.id;
+        const hasResults = allRanked.length > 0;
+        const rankField = `rank_${judge.id}`;
+        const reasoningField = `rank_${judge.id}_reasoning`;
+
+        return (
+          <div key={judge.id} className="rounded-lg border overflow-hidden">
+            <button
+              onClick={() => { if (hasResults) { setExpandedJudge(isExpanded ? null : judge.id); setSelectedApplicantId(null); } }}
+              className="w-full p-3 flex items-center gap-3 hover:bg-muted/50 transition-colors text-left"
+            >
+              <div className={`size-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0 ${hasResults ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400" : isRunning ? "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-400" : "bg-muted text-muted-foreground"}`}>
+                {isRunning ? <Loader2 className="size-4 animate-spin" /> : hasResults ? <Check className="size-4" /> : <Scale className="size-4" />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">{judge.name}</span>
+                  {hasResults && <span className="text-xs text-emerald-600 font-medium tabular-nums">{ranked.length} ranked</span>}
+                  {isRunning && <span className="text-xs text-blue-600 font-medium">Ranking...</span>}
+                </div>
+                <p className="text-xs text-muted-foreground truncate">{judge.description}</p>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                <Button size="sm" variant={hasResults ? "ghost" : "outline"} className="h-7 text-xs"
+                  onClick={() => handleRunJudge(judge.id)} disabled={isRunning || runningAll}>
+                  {isRunning ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+                  <span className="ml-1.5">{hasResults ? "Re-run" : "Run"}</span>
+                </Button>
+              </div>
+            </button>
+
+            {isExpanded && hasResults && (
+              <div className="border-t divide-y max-h-[500px] overflow-y-auto">
+                {ranked.map((a) => renderRow(
+                  a,
+                  Number(a[rankField] || 0),
+                  String(a[reasoningField] || ""),
+                  a.panel_votes || undefined,
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {/* ── Panel Judges (from AI analysis) ── */}
+      {personaData.length > 0 && (
+        <>
+          <Separator />
+          <h3 className="text-sm font-medium">Panel Judges</h3>
           {personaData.map((judge) => {
             const key = `persona_${judge.name}`;
             const isExpanded = expandedJudge === key;
+            const filteredAccepts = filterByAttendance(judge.accepts.map((e) => e.applicant));
+            const filteredPasses = filterByAttendance(judge.passes.map((e) => e.applicant));
+            const acceptsMap = new Map(judge.accepts.map((e) => [e.applicant.applicant_id, e.reasoning]));
+            const passesMap = new Map(judge.passes.map((e) => [e.applicant.applicant_id, e.reasoning]));
+
             return (
               <div key={key} className="rounded-lg border overflow-hidden">
                 <button
@@ -522,70 +655,31 @@ function JudgesPanel({ applicants, sessionId, onRefresh }: {
                     {judge.persona && <span className="text-xs text-muted-foreground ml-2">{judge.persona.specialty}</span>}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-xs font-medium text-emerald-600 tabular-nums">{judge.accepts.length} accepted</span>
-                    <span className="text-xs text-muted-foreground tabular-nums">{judge.passes.length} passed</span>
+                    <span className="text-xs font-medium text-emerald-600 tabular-nums">{filteredAccepts.length} accepted</span>
+                    <span className="text-xs text-muted-foreground tabular-nums">{filteredPasses.length} passed</span>
                     {isExpanded ? <ChevronUp className="size-3.5 text-muted-foreground" /> : <ChevronDown className="size-3.5 text-muted-foreground" />}
                   </div>
                 </button>
 
                 {isExpanded && (
                   <div className="border-t">
-                    {judge.accepts.length > 0 && (
+                    {filteredAccepts.length > 0 && (
                       <div>
                         <div className="px-3 py-1.5 bg-emerald-50 dark:bg-emerald-950/20 text-xs font-medium text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
-                          <CheckCircle2 className="size-3" />Accepted ({judge.accepts.length})
+                          <CheckCircle2 className="size-3" />Accepted ({filteredAccepts.length})
                         </div>
                         <div className="divide-y max-h-64 overflow-y-auto">
-                          {judge.accepts.map(({ applicant: a, reasoning }) => {
-                            const photo = getPhoto(a);
-                            const isSelected = selectedApplicantId === a.applicant_id;
-                            return (
-                              <div key={a.applicant_id}
-                                className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted/30 cursor-pointer transition-colors"
-                                onClick={() => setSelectedApplicantId(isSelected ? null : a.applicant_id)}>
-                                {photo ? (
-                                  <img src={photo} alt="" className="size-6 rounded-full object-cover shrink-0" />
-                                ) : (
-                                  <div className="size-6 rounded-full bg-muted flex items-center justify-center shrink-0 text-[10px] font-medium text-muted-foreground">{getName(a).charAt(0).toUpperCase()}</div>
-                                )}
-                                <div className="flex-1 min-w-0">
-                                  <span className="text-xs font-medium truncate block">{getName(a)}</span>
-                                  {isSelected && reasoning && <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed border-l-2 border-muted-foreground/20 pl-2">{reasoning}</p>}
-                                </div>
-                                {a.panel_votes && <span className="text-[10px] font-mono text-muted-foreground shrink-0">{a.panel_votes}</span>}
-                                {a.linkedin_url && <a href={a.linkedin_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="text-blue-500 hover:text-blue-600 shrink-0"><Linkedin className="size-3" /></a>}
-                              </div>
-                            );
-                          })}
+                          {filteredAccepts.map((a) => renderRow(a, null, acceptsMap.get(a.applicant_id) || "", a.panel_votes || undefined))}
                         </div>
                       </div>
                     )}
-                    {judge.passes.length > 0 && (
+                    {filteredPasses.length > 0 && (
                       <div>
                         <div className="px-3 py-1.5 bg-muted/50 text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-                          <XCircle className="size-3" />Passed ({judge.passes.length})
+                          <XCircle className="size-3" />Passed ({filteredPasses.length})
                         </div>
-                        <div className="divide-y max-h-48 overflow-y-auto">
-                          {judge.passes.map(({ applicant: a, reasoning }) => {
-                            const photo = getPhoto(a);
-                            const isSelected = selectedApplicantId === a.applicant_id;
-                            return (
-                              <div key={a.applicant_id}
-                                className="flex items-center gap-2 px-3 py-2 text-sm opacity-60 hover:opacity-100 hover:bg-muted/30 cursor-pointer transition-all"
-                                onClick={() => setSelectedApplicantId(isSelected ? null : a.applicant_id)}>
-                                {photo ? (
-                                  <img src={photo} alt="" className="size-6 rounded-full object-cover shrink-0" />
-                                ) : (
-                                  <div className="size-6 rounded-full bg-muted flex items-center justify-center shrink-0 text-[10px] font-medium text-muted-foreground">{getName(a).charAt(0).toUpperCase()}</div>
-                                )}
-                                <div className="flex-1 min-w-0">
-                                  <span className="text-xs font-medium truncate block">{getName(a)}</span>
-                                  {isSelected && reasoning && <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed border-l-2 border-muted-foreground/20 pl-2">{reasoning}</p>}
-                                </div>
-                                {a.panel_votes && <span className="text-[10px] font-mono text-muted-foreground shrink-0">{a.panel_votes}</span>}
-                              </div>
-                            );
-                          })}
+                        <div className="divide-y max-h-48 overflow-y-auto opacity-60">
+                          {filteredPasses.map((a) => renderRow(a, null, passesMap.get(a.applicant_id) || "", a.panel_votes || undefined))}
                         </div>
                       </div>
                     )}
@@ -594,115 +688,8 @@ function JudgesPanel({ applicants, sessionId, onRefresh }: {
               </div>
             );
           })}
-        </div>
+        </>
       )}
-
-      {/* ── Ranking Judges ── */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-sm font-medium">Ranking Judges</h3>
-            <p className="text-xs text-muted-foreground">{applicants.length} guests across {ATTENDEE_TYPES.filter((t) => applicants.some((a) => (a.attendee_type || "other") === t.key)).length} categories</p>
-          </div>
-          <Button size="sm" variant="outline" onClick={handleRunAll} disabled={runningAll || !!runningJudge}>
-            {runningAll ? <Loader2 className="size-4 mr-2 animate-spin" /> : <Scale className="size-4 mr-2" />}
-            {runningAll ? `Running (${completedJudges.size}/${rankingJudges.length})...` : "Run All Judges"}
-          </Button>
-        </div>
-
-        {rankingJudges.map((judge) => {
-          const result = judgeResults[judge.id];
-          const isExpanded = expandedJudge === `rank_${judge.id}`;
-          const isRunning = runningJudge === judge.id;
-          const hasResults = !!result;
-
-          return (
-            <div key={judge.id} className="rounded-lg border overflow-hidden">
-              <div className="p-3 flex items-center gap-3">
-                <div className={`size-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0 ${hasResults ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400" : "bg-muted text-muted-foreground"}`}>
-                  {hasResults ? <Check className="size-4" /> : <Scale className="size-4" />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium">{judge.name}</span>
-                    {hasResults && <span className="text-xs text-emerald-600 font-medium tabular-nums">{result.ranked.length} ranked</span>}
-                  </div>
-                  <p className="text-xs text-muted-foreground truncate">{judge.description}</p>
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  {hasResults && (
-                    <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { setExpandedJudge(isExpanded ? null : `rank_${judge.id}`); setExpandedCategory(null); }}>
-                      {isExpanded ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
-                      {isExpanded ? "Hide" : "View"}
-                    </Button>
-                  )}
-                  <Button size="sm" variant={hasResults ? "ghost" : "outline"} className="h-7 text-xs"
-                    onClick={() => handleRunJudge(judge.id)} disabled={isRunning || runningAll}>
-                    {isRunning ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
-                    <span className="ml-1.5">{hasResults ? "Re-run" : "Run"}</span>
-                  </Button>
-                </div>
-              </div>
-
-              {isExpanded && result && (
-                <div className="border-t">
-                  {ATTENDEE_TYPES.map((type) => {
-                    const items = result.byCategory[type.key];
-                    if (!items || items.length === 0) return null;
-                    const catKey = `rank_${judge.id}_${type.key}`;
-                    const isCatExpanded = expandedCategory === catKey;
-
-                    return (
-                      <div key={type.key} className="border-b last:border-b-0">
-                        <button
-                          onClick={() => setExpandedCategory(isCatExpanded ? null : catKey)}
-                          className="w-full px-3 py-2 flex items-center gap-2 hover:bg-muted/30 transition-colors text-left"
-                        >
-                          <span className="size-2 rounded-full shrink-0" style={{ backgroundColor: type.color }} />
-                          <span className="text-xs font-medium flex-1">{type.label}</span>
-                          <span className="text-xs text-muted-foreground tabular-nums">{items.length}</span>
-                          {isCatExpanded ? <ChevronUp className="size-3 text-muted-foreground" /> : <ChevronDown className="size-3 text-muted-foreground" />}
-                        </button>
-
-                        {isCatExpanded && (
-                          <div className="divide-y max-h-72 overflow-y-auto bg-muted/10">
-                            {items.map((a) => {
-                              const photo = getPhoto(a);
-                              const rankField = `rank_${judge.id}`;
-                              const reasoningField = `rank_${judge.id}_reasoning`;
-                              const judgeRank = Number(a[rankField] || 0);
-                              const judgeReasoning = String(a[reasoningField] || "");
-                              const isSelected = selectedApplicantId === a.applicant_id;
-                              return (
-                                <div key={a.applicant_id}
-                                  className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted/30 cursor-pointer transition-colors"
-                                  onClick={() => setSelectedApplicantId(isSelected ? null : a.applicant_id)}>
-                                  <span className="text-xs font-mono font-bold text-muted-foreground w-6 text-right shrink-0">#{judgeRank}</span>
-                                  {photo ? (
-                                    <img src={photo} alt="" className="size-6 rounded-full object-cover shrink-0" />
-                                  ) : (
-                                    <div className="size-6 rounded-full bg-muted flex items-center justify-center shrink-0 text-[10px] font-medium text-muted-foreground">{getName(a).charAt(0).toUpperCase()}</div>
-                                  )}
-                                  <div className="flex-1 min-w-0">
-                                    <span className="text-xs font-medium truncate block">{getName(a)}</span>
-                                    <span className="text-[10px] text-muted-foreground truncate block">{a.attendee_type_detail || getHeadline(a) || ""}</span>
-                                    {isSelected && judgeReasoning && <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed border-l-2 border-muted-foreground/20 pl-2">{judgeReasoning}</p>}
-                                  </div>
-                                  {a.linkedin_url && <a href={a.linkedin_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="text-blue-500 hover:text-blue-600 shrink-0"><Linkedin className="size-3" /></a>}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
     </div>
   );
 }
