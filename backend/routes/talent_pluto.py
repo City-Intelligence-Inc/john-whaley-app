@@ -118,15 +118,18 @@ async def score_candidates(body: ScoreRequest):
     candidates = body.candidates
     job_description = body.job_description
 
+    # Concurrency: 10 at a time (OpenAI rate limit safe)
+    BATCH_SIZE = 10
+
     async def generate():
         yield f"data: {json.dumps({'type': 'start', 'total': len(candidates)})}\n\n"
 
-        # Load LinkedIn DB
+        # Load LinkedIn DB (sync but fast — DynamoDB scan)
         linkedin_db, photo_db, name_db = _load_linkedin_db()
         yield f"data: {json.dumps({'type': 'enriched', 'count': len(linkedin_db)})}\n\n"
 
-        for i in range(0, len(candidates), 3):
-            batch = candidates[i:min(i+3, len(candidates))]
+        for i in range(0, len(candidates), BATCH_SIZE):
+            batch = candidates[i:min(i + BATCH_SIZE, len(candidates))]
             tasks = []
             for bi, c in enumerate(batch):
                 idx = i + bi
