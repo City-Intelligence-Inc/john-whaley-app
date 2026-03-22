@@ -11,8 +11,13 @@ import json, asyncio, os
 import db
 from config import settings_table, talent_pluto_table, linkedin_scrapes_table
 from ai import call_ai_async
+import stripe as stripe_lib
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+if STRIPE_SECRET_KEY:
+    stripe_lib.api_key = STRIPE_SECRET_KEY
 
 router = APIRouter(prefix="/talent-pluto", tags=["talent-pluto"])
 
@@ -457,3 +462,125 @@ def get_activity(limit: int = 50):
         return {"entries": item.get("entries", [])[:limit]}
     except Exception:
         return {"entries": []}
+
+
+# ── Subscriptions (Stripe) ──
+
+PLAN_LIMITS = {"free": 3, "pro": 25, "enterprise": 999999}
+
+def _get_sub(user_id: str) -> dict:
+    try:
+        item = settings_table.get_item(Key={"setting_id": f"sub-{user_id}"}).get("Item", {})
+        if item: return item
+    except Exception: pass
+    return {"setting_id": f"sub-{user_id}", "user_id": user_id, "plan": "free", "postings_used": 0, "status": "active"}
+
+def _save_sub(sub: dict):
+    sub["setting_id"] = f"sub-{sub['user_id']}"
+    settings_table.put_item(Item=sub)
+
+
+@router.get("/subscription")
+def get_subscription(user_id: str):
+    sub = _get_sub(user_id)
+    plan = sub.get("plan", "free")
+    return {
+        "user_id": user_id,
+        "plan": plan,
+        "postings_used": int(sub.get("postings_used", 0)),
+        "postings_limit": PLAN_LIMITS.get(plan, 3),
+        "stripe_customer_id": sub.get("stripe_customer_id", ""),
+        "status": sub.get("status", "active"),
+    }
+
+
+class UpdateSubRequest(BaseModel):
+    user_id: str
+    plan: str = "free"
+    stripe_customer_id: Optional[str] = None
+    stripe_subscription_id: Optional[str] = None
+    status: str = "active"
+
+@router.put("/subscription")
+def update_subscription(body: UpdateSubRequest):
+    sub = _get_sub(body.user_id)
+    sub["plan"] = body.plan
+    sub["status"] = body.status
+    if body.stripe_customer_id: sub["stripe_customer_id"] = body.stripe_customer_id
+    if body.stripe_subscription_id: sub["stripe_subscription_id"] = body.stripe_subscription_id
+    if body.plan != sub.get("plan"): sub["postings_used"] = 0  # reset on plan change
+    _save_sub(sub)
+    return {"ok": True, "plan": body.plan}
+
+
+@router.post("/subscription/use")
+def use_posting(user_id: str):
+    sub = _get_sub(user_id)
+    plan = sub.get("plan", "free")
+    limit = PLAN_LIMITS.get(plan, 3)
+    used = int(sub.get("postings_used", 0))
+    if used >= limit:
+        return {"allowed": False, "remaining": 0, "plan": plan, "limit": limit}
+    sub["postings_used"] = used + 1
+    _save_sub(sub)
+    return {"allowed": True, "remaining": limit - used - 1, "plan": plan, "limit": limit}
+
+
+class CheckoutRequest(BaseModel):
+    user_id: str
+    price_id: str
+    success_url: str = "https://talent-matcher-seven.vercel.app/settings?upgraded=true"
+    cancel_url: str = "https://talent-matcher-seven.vercel.app/settings"
+
+@router.post("/checkout")
+def create_checkout(body: CheckoutRequest):
+    if not STRIPE_SECRET_KEY:
+        return {"error": "Stripe not configured"}, 500
+    session = stripe_lib.checkout.Session.create(
+        mode="subscription",
+        payment_method_types=["card"],
+        line_items=[{"price": body.price_id, "quantity": 1}],
+        success_url=body.success_url,
+        cancel_url=body.cancel_url,
+        metadata={"userId": body.user_id},
+        client_reference_id=body.user_id,
+    )
+    return {"url": session.url, "session_id": session.id}
+
+
+from fastapi import Request
+
+@router.post("/webhook/stripe")
+async def stripe_webhook(request: Request):
+    body = await request.body()
+    sig = request.headers.get("stripe-signature", "")
+    if not STRIPE_WEBHOOK_SECRET:
+        return {"error": "Webhook secret not configured"}, 500
+    try:
+        event = stripe_lib.Webhook.construct_event(body, sig, STRIPE_WEBHOOK_SECRET)
+    except Exception:
+        return {"error": "Invalid signature"}, 400
+
+    if event["type"] == "checkout.session.completed":
+        session = event["data"]["object"]
+        uid = session.get("metadata", {}).get("userId") or session.get("client_reference_id")
+        if uid:
+            sub = _get_sub(uid)
+            sub["plan"] = "pro"
+            sub["stripe_customer_id"] = session.get("customer", "")
+            sub["stripe_subscription_id"] = session.get("subscription", "")
+            sub["status"] = "active"
+            sub["postings_used"] = 0
+            _save_sub(sub)
+
+    elif event["type"] == "customer.subscription.deleted":
+        subscription = event["data"]["object"]
+        uid = subscription.get("metadata", {}).get("userId", "")
+        if uid:
+            sub = _get_sub(uid)
+            sub["plan"] = "free"
+            sub["status"] = "cancelled"
+            sub["postings_used"] = 0
+            _save_sub(sub)
+
+    return {"received": True}
