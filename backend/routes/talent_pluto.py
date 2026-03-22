@@ -61,6 +61,7 @@ class ScoreRequest(BaseModel):
     candidates: list[dict]  # [{id, name, fullText, linkedinUrl?}]
     job_description: str
     api_key: str = ""
+    top_k: int = 100  # Max candidates to GPT-score
 
 class UpdateStageRequest(BaseModel):
     session_id: str
@@ -159,7 +160,7 @@ async def score_candidates(body: ScoreRequest):
 
     # Concurrency: 10 at a time (OpenAI rate limit safe)
     BATCH_SIZE = 10
-    TOP_K = 100  # Max candidates to GPT-score
+    TOP_K = body.top_k or 100
 
     async def generate():
         # Pre-filter with embeddings if > TOP_K candidates
