@@ -134,8 +134,11 @@ async def _embedding_prefilter(candidates: list[dict], job_description: str, api
         import openai as openai_lib
         client = openai_lib.AsyncOpenAI(api_key=api_key)
 
-        # HyDE: embed ideal candidate profile if provided, otherwise job description
-        embed_text = ideal_candidate[:2000] if ideal_candidate else job_description[:2000]
+        # HyDE: combine JD context + ideal candidate profile for best embedding
+        if ideal_candidate:
+            embed_text = f"{job_description[:800]}\n\nIdeal candidate profile: {ideal_candidate[:800]}"
+        else:
+            embed_text = job_description[:2000]
         jd_resp = await client.embeddings.create(model="text-embedding-3-small", input=[embed_text])
         jd_vec = jd_resp.data[0].embedding
 
