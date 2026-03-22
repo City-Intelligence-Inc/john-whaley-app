@@ -79,10 +79,11 @@ def _log_activity(action: str, metadata: dict):
         pass
 
 
-def _load_linkedin_db() -> tuple[dict[str, str], dict[str, str]]:
-    """Load all LinkedIn profiles. Returns (url->enrichment_text, url->photo_url)."""
+def _load_linkedin_db() -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
+    """Load all LinkedIn profiles. Returns (url->enrichment_text, url->photo_url, url->name)."""
     enrichments = {}
     photos = {}
+    names = {}
     try:
         resp = linkedin_scrapes_table.scan()
         items = resp.get("Items", [])
@@ -93,6 +94,7 @@ def _load_linkedin_db() -> tuple[dict[str, str], dict[str, str]]:
             url = (p.get("url") or "").rstrip("/").lower()
             if not url: continue
             if p.get("photo_url"): photos[url] = p["photo_url"]
+            if p.get("name"): names[url] = p["name"]
             parts = []
             if p.get("name"): parts.append(f"Name: {p['name']}")
             if p.get("headline"): parts.append(f"Headline: {p['headline']}")
@@ -105,7 +107,7 @@ def _load_linkedin_db() -> tuple[dict[str, str], dict[str, str]]:
                 enrichments[url] = "\n--- LinkedIn ---\n" + "\n".join(parts)
     except Exception:
         pass
-    return enrichments, photos
+    return enrichments, photos, names
 
 
 # ── Score endpoint (SSE, runs on App Runner = no timeout) ──
@@ -120,7 +122,7 @@ async def score_candidates(body: ScoreRequest):
         yield f"data: {json.dumps({'type': 'start', 'total': len(candidates)})}\n\n"
 
         # Load LinkedIn DB
-        linkedin_db, photo_db = _load_linkedin_db()
+        linkedin_db, photo_db, name_db = _load_linkedin_db()
         yield f"data: {json.dumps({'type': 'enriched', 'count': len(linkedin_db)})}\n\n"
 
         for i in range(0, len(candidates), 3):
@@ -128,7 +130,7 @@ async def score_candidates(body: ScoreRequest):
             tasks = []
             for bi, c in enumerate(batch):
                 idx = i + bi
-                tasks.append(_score_one(c, idx, job_description, linkedin_db, photo_db, api_key))
+                tasks.append(_score_one(c, idx, job_description, linkedin_db, photo_db, name_db, api_key))
 
             results = await asyncio.gather(*tasks, return_exceptions=True)
             for r in results:
@@ -138,7 +140,7 @@ async def score_candidates(body: ScoreRequest):
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
-async def _score_one(c: dict, idx: int, job_description: str, linkedin_db: dict, photo_db: dict, api_key: str) -> str:
+async def _score_one(c: dict, idx: int, job_description: str, linkedin_db: dict, photo_db: dict, name_db: dict, api_key: str) -> str:
     events = []
     name = c.get("name", f"Candidate {idx}")
 
@@ -152,13 +154,16 @@ async def _score_one(c: dict, idx: int, job_description: str, linkedin_db: dict,
     candidate_text = c.get("fullText", "")[:3000]
     enriched = False
 
-    # Enrich + find photo
+    # Enrich + find photo + resolve name
     linkedin_url = (c.get("linkedinUrl") or "").rstrip("/").lower()
     photo_url = photo_db.get(linkedin_url, "")
+    # Update name from DB if we have a better one
+    if linkedin_url and name_db.get(linkedin_url):
+        name = name_db[linkedin_url]
     if linkedin_url and linkedin_url in linkedin_db:
         candidate_text = candidate_text[:2200] + linkedin_db[linkedin_url]
         enriched = True
-        events.append(ev({"type": "log", "index": idx, "name": name, "step": "enrich", "detail": "LinkedIn profile found"}))
+        events.append(ev({"type": "log", "index": idx, "name": name, "step": "enrich", "detail": f"LinkedIn profile found — {name}"}))
     elif not linkedin_url:
         name_lower = name.lower()
         for url, data in linkedin_db.items():
@@ -166,7 +171,8 @@ async def _score_one(c: dict, idx: int, job_description: str, linkedin_db: dict,
                 candidate_text = candidate_text[:2200] + data
                 enriched = True
                 if not photo_url: photo_url = photo_db.get(url, "")
-                events.append(ev({"type": "log", "index": idx, "name": name, "step": "enrich", "detail": "Fuzzy matched LinkedIn profile"}))
+                if name_db.get(url): name = name_db[url]
+                events.append(ev({"type": "log", "index": idx, "name": name, "step": "enrich", "detail": f"Fuzzy matched — {name}"}))
                 break
 
     events.append(ev({"type": "log", "index": idx, "name": name, "step": "score", "detail": f"Sending {len(candidate_text)} chars to GPT-4o-mini{'(enriched)' if enriched else ''}"}))
