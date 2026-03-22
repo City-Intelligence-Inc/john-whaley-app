@@ -24,6 +24,7 @@ ACTIVITY_SETTING_ID = "talent-pluto-activity"
 # ── Models ──
 
 class ScoredCandidate(BaseModel):
+    model_config = {"extra": "allow"}
     id: str
     rank: int
     name: str
@@ -31,6 +32,10 @@ class ScoredCandidate(BaseModel):
     reasoning: str
     highlights: list[str] = []
     gaps: list[str] = []
+    photo_url: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    criteria: Optional[list] = None
+    evidence: Optional[dict] = None
 
 class CreateSessionRequest(BaseModel):
     role: str
