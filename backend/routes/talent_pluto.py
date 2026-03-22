@@ -537,17 +537,20 @@ class CheckoutRequest(BaseModel):
 @router.post("/checkout")
 def create_checkout(body: CheckoutRequest):
     if not STRIPE_SECRET_KEY:
-        return {"error": "Stripe not configured"}, 500
-    session = stripe_lib.checkout.Session.create(
-        mode="subscription",
-        payment_method_types=["card"],
-        line_items=[{"price": body.price_id, "quantity": 1}],
-        success_url=body.success_url,
-        cancel_url=body.cancel_url,
-        metadata={"userId": body.user_id},
-        client_reference_id=body.user_id,
-    )
-    return {"url": session.url, "session_id": session.id}
+        return {"error": "Stripe not configured — set STRIPE_SECRET_KEY env var"}
+    try:
+        session = stripe_lib.checkout.Session.create(
+            mode="subscription",
+            payment_method_types=["card"],
+            line_items=[{"price": body.price_id, "quantity": 1}],
+            success_url=body.success_url,
+            cancel_url=body.cancel_url,
+            metadata={"userId": body.user_id},
+            client_reference_id=body.user_id,
+        )
+        return {"url": session.url, "session_id": session.id}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 from fastapi import Request
