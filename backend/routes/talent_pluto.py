@@ -186,6 +186,51 @@ async def score_candidates(body: ScoreRequest):
 
         yield f"data: {json.dumps({'type': 'start', 'total': len(filtered), 'prefiltered_from': len(candidates)})}\n\n"
 
+        # Compute embedding similarity for all candidates (dot product / cosine)
+        similarity_map: dict[int, float] = {}
+        try:
+            import openai as openai_lib, math
+            client = openai_lib.AsyncOpenAI(api_key=api_key)
+
+            # Build JD embedding (HyDE: JD + ideal candidate)
+            ideal = body.ideal_candidate or ""
+            if ideal:
+                embed_text = f"{job_description[:800]}\n\nIdeal candidate: {ideal[:800]}"
+            else:
+                embed_text = job_description[:2000]
+
+            jd_resp = await client.embeddings.create(model="text-embedding-3-small", input=[embed_text])
+            jd_vec = jd_resp.data[0].embedding
+
+            # Embed all candidates in batches
+            all_texts = [c.get("fullText", "")[:500] for c in filtered]
+            all_vecs = []
+            for bi in range(0, len(all_texts), 100):
+                batch_texts = all_texts[bi:bi+100]
+                resp = await client.embeddings.create(model="text-embedding-3-small", input=batch_texts)
+                all_vecs.extend([d.embedding for d in resp.data])
+
+            # Cosine similarity (equivalent to dot product on normalized vectors)
+            def cosine(a, b):
+                dot = sum(x*y for x,y in zip(a,b))
+                na = math.sqrt(sum(x*x for x in a))
+                nb = math.sqrt(sum(x*x for x in b))
+                return dot / (na * nb) if na and nb else 0.0
+
+            for ci, vec in enumerate(all_vecs):
+                similarity_map[ci] = round(cosine(jd_vec, vec), 4)
+
+            # Log similarity stats
+            sims = list(similarity_map.values())
+            if sims:
+                avg_sim = sum(sims) / len(sims)
+                max_sim = max(sims)
+                min_sim = min(sims)
+                yield f"data: {json.dumps({'type': 'log', 'index': 0, 'name': 'System', 'step': 'embed', 'detail': f'Embedding similarity computed: avg={avg_sim:.3f}, max={max_sim:.3f}, min={min_sim:.3f}'})}\n\n"
+                yield f"data: {json.dumps({'type': 'similarity', 'count': len(sims), 'avg': round(avg_sim, 4), 'max': round(max_sim, 4), 'min': round(min_sim, 4)})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'log', 'index': 0, 'name': 'System', 'step': 'embed', 'detail': f'Embedding skipped: {str(e)[:60]}'})}\n\n"
+
         # Load LinkedIn DB
         linkedin_db, photo_db, name_db = _load_linkedin_db()
         yield f"data: {json.dumps({'type': 'enriched', 'ready': True})}\n\n"
@@ -193,7 +238,7 @@ async def score_candidates(body: ScoreRequest):
         scored_count = 0
         for i in range(0, len(filtered), BATCH_SIZE):
             batch = filtered[i:min(i + BATCH_SIZE, len(filtered))]
-            tasks = [_score_one(c, i + bi, job_description, linkedin_db, photo_db, name_db, api_key, body.ideal_candidate) for bi, c in enumerate(batch)]
+            tasks = [_score_one(c, i + bi, job_description, linkedin_db, photo_db, name_db, api_key, body.ideal_candidate, similarity_map.get(i + bi)) for bi, c in enumerate(batch)]
 
             results = await asyncio.gather(*tasks, return_exceptions=True)
             for r in results:
@@ -213,7 +258,7 @@ async def score_candidates(body: ScoreRequest):
     )
 
 
-async def _score_one(c: dict, idx: int, job_description: str, linkedin_db: dict, photo_db: dict, name_db: dict, api_key: str, ideal_candidate: str = "") -> str:
+async def _score_one(c: dict, idx: int, job_description: str, linkedin_db: dict, photo_db: dict, name_db: dict, api_key: str, ideal_candidate: str = "", similarity: float = None) -> str:
     events = []
     name = c.get("name", f"Candidate {idx}")
 
@@ -329,7 +374,10 @@ CANDIDATE: {candidate_text[:2000]}"""
                 cost = (tokens_used["prompt"] * 0.15 + tokens_used["completion"] * 0.60) / 1_000_000
 
                 events.append(ev({"type": "log", "index": idx, "name": name, "step": "result", "detail": f"Score: {score}/100 | {tokens_used['prompt']+tokens_used['completion']} tokens | ${cost:.4f}"}))
-                events.append(ev({"type": "scored", "index": idx, "id": c.get("id", ""), "name": name, "score": score, "reasoning": p.get("reasoning", ""), "highlights": p.get("highlights", []), "gaps": p.get("gaps", []), "photo_url": photo_url, "linkedin_url": linkedin_url or c.get("linkedinUrl", ""), "evidence": evidence, "criteria": criteria_list, "tokens": tokens_used, "cost": round(cost, 6)}))
+                scored_ev = {"type": "scored", "index": idx, "id": c.get("id", ""), "name": name, "score": score, "reasoning": p.get("reasoning", ""), "highlights": p.get("highlights", []), "gaps": p.get("gaps", []), "photo_url": photo_url, "linkedin_url": linkedin_url or c.get("linkedinUrl", ""), "evidence": evidence, "criteria": criteria_list, "tokens": tokens_used, "cost": round(cost, 6)}
+                if similarity is not None:
+                    scored_ev["similarity"] = similarity
+                events.append(ev(scored_ev))
                 return "".join(events)
             else:
                 events.append(ev({"type": "scored", "index": idx, "id": c.get("id", ""), "name": name, "score": 0, "reasoning": raw[:200], "highlights": [], "gaps": []}))
