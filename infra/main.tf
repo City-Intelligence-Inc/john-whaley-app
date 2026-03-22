@@ -74,6 +74,32 @@ resource "aws_dynamodb_table" "linkedin_scrapes" {
   }
 }
 
+resource "aws_dynamodb_table" "talent_pluto" {
+  name         = "talent-pluto-take-home"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "session_id"
+
+  attribute {
+    name = "session_id"
+    type = "S"
+  }
+
+  attribute {
+    name = "user_id"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name            = "user-index"
+    hash_key        = "user_id"
+    projection_type = "ALL"
+  }
+
+  tags = {
+    Project = "talent-pluto-take-home"
+  }
+}
+
 resource "aws_dynamodb_table" "settings" {
   name         = "john-whaley-settings"
   billing_mode = "PAY_PER_REQUEST"
@@ -169,6 +195,8 @@ resource "aws_iam_policy" "dynamodb_access" {
         aws_dynamodb_table.settings.arn,
         aws_dynamodb_table.sessions.arn,
         aws_dynamodb_table.linkedin_scrapes.arn,
+        aws_dynamodb_table.talent_pluto.arn,
+        "${aws_dynamodb_table.talent_pluto.arn}/index/*",
       ]
     }]
   })

@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 from boto3.dynamodb.conditions import Key as DDBKey
 from fastapi import HTTPException
-from config import applicants_table, sessions_table, settings_table, linkedin_scrapes_table, s3, S3_BUCKET
+from config import applicants_table, sessions_table, settings_table, linkedin_scrapes_table, talent_pluto_table, s3, S3_BUCKET
 
 
 # ── Generic helpers ──
@@ -24,6 +24,51 @@ def _build_update_expression(fields: dict) -> tuple[str, dict, dict]:
         values[f":{safe}"] = value
         names[f"#{safe}"] = key
     return "SET " + ", ".join(parts), values, names
+
+
+# ── Talent Pluto Take-Home operations ──
+
+def create_tp_session(fields: dict) -> dict:
+    fields["session_id"] = str(uuid.uuid4())
+    fields["created_at"] = datetime.now(timezone.utc).isoformat()
+    talent_pluto_table.put_item(Item=fields)
+    return fields
+
+
+def list_tp_sessions(user_id: str = None) -> list[dict]:
+    if user_id:
+        resp = talent_pluto_table.query(
+            IndexName="user-index",
+            KeyConditionExpression=DDBKey("user_id").eq(user_id),
+        )
+    else:
+        resp = talent_pluto_table.scan()
+    items = resp.get("Items", [])
+    return sorted(items, key=lambda x: x.get("created_at", ""), reverse=True)
+
+
+def get_tp_session(session_id: str) -> dict:
+    item = talent_pluto_table.get_item(Key={"session_id": session_id}).get("Item")
+    if not item:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return item
+
+
+def update_tp_session(session_id: str, fields: dict) -> dict:
+    get_tp_session(session_id)
+    expr, values, names = _build_update_expression(fields)
+    talent_pluto_table.update_item(
+        Key={"session_id": session_id},
+        UpdateExpression=expr,
+        ExpressionAttributeValues=values,
+        ExpressionAttributeNames=names,
+    )
+    return talent_pluto_table.get_item(Key={"session_id": session_id})["Item"]
+
+
+def delete_tp_session(session_id: str) -> None:
+    get_tp_session(session_id)
+    talent_pluto_table.delete_item(Key={"session_id": session_id})
 
 
 # ── Session operations ──

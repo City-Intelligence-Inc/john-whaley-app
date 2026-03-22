@@ -17,6 +17,7 @@ from routes.settings import router as settings_router
 from routes.sessions import router as sessions_router
 from routes.linkedin import router as linkedin_router
 from routes.rank import router as rank_router
+from routes.talent_pluto import router as talent_pluto_router
 
 app = FastAPI(title="Selecta API")
 
@@ -145,6 +146,7 @@ app.include_router(import_router)
 app.include_router(analysis_router)
 app.include_router(linkedin_router)
 app.include_router(rank_router)
+app.include_router(talent_pluto_router)
 
 
 # ── Public LinkedIn Lookup API ──
@@ -182,9 +184,15 @@ def public_linkedin_lookup(url: str):
     if not norm:
         return {"error": "Invalid LinkedIn URL", "url": url}
 
-    # 1. Check cache (try with and without trailing slash)
-    cached = _db.get_linkedin_scrape(norm) or _db.get_linkedin_scrape(norm.rstrip("/"))
-    if cached:
+    # 1. Check cache (try all URL variants, pick richest entry)
+    candidates = []
+    for u in [norm, norm.rstrip("/"), url, url.rstrip("/")]:
+        item = _db.get_linkedin_scrape(u)
+        if item:
+            candidates.append(item)
+    if candidates:
+        # Pick the entry with the most fields
+        cached = max(candidates, key=lambda x: len(x))
         profile = {k: cached.get(k) for k in _PROFILE_FIELDS if cached.get(k)}
         profile["url"] = norm
         profile["source"] = "cache"

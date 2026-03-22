@@ -12,6 +12,7 @@ applicants_table = dynamodb.Table("john-whaley-applicants")
 sessions_table = dynamodb.Table("john-whaley-sessions")
 settings_table = dynamodb.Table("john-whaley-settings")
 linkedin_scrapes_table = dynamodb.Table("linkedin-scrapes")
+talent_pluto_table = dynamodb.Table("talent-pluto-take-home")
 
 VALID_STATUSES = {"pending", "accepted", "rejected", "waitlisted"}
 
