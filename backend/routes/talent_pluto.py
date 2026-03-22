@@ -193,7 +193,7 @@ async def score_candidates(body: ScoreRequest):
         scored_count = 0
         for i in range(0, len(filtered), BATCH_SIZE):
             batch = filtered[i:min(i + BATCH_SIZE, len(filtered))]
-            tasks = [_score_one(c, i + bi, job_description, linkedin_db, photo_db, name_db, api_key) for bi, c in enumerate(batch)]
+            tasks = [_score_one(c, i + bi, job_description, linkedin_db, photo_db, name_db, api_key, body.ideal_candidate) for bi, c in enumerate(batch)]
 
             results = await asyncio.gather(*tasks, return_exceptions=True)
             for r in results:
@@ -213,7 +213,7 @@ async def score_candidates(body: ScoreRequest):
     )
 
 
-async def _score_one(c: dict, idx: int, job_description: str, linkedin_db: dict, photo_db: dict, name_db: dict, api_key: str) -> str:
+async def _score_one(c: dict, idx: int, job_description: str, linkedin_db: dict, photo_db: dict, name_db: dict, api_key: str, ideal_candidate: str = "") -> str:
     events = []
     name = c.get("name", f"Candidate {idx}")
 
@@ -281,6 +281,8 @@ async def _score_one(c: dict, idx: int, job_description: str, linkedin_db: dict,
         rubric_section = job_description[job_description.index("SCORING RUBRIC"):]
         rubric_section = rubric_section[:500]
 
+    ideal_section = ideal_candidate[:400] if ideal_candidate else ""
+
     prompt = f"""Score this candidate 0-100 for the role. Return ONLY valid JSON.
 
 {{"score":<0-100>,"reasoning":"<2 sentences>","highlights":["<str>"],"gaps":["<str>"],"criteria":[{{"name":"<str>","score":<n>,"max":<n>,"evidence":"<str>"}}]}}
@@ -290,7 +292,7 @@ Keep evidence short (under 15 words each). Keep reasoning under 40 words.
 {rubric_section if rubric_section else "Criteria: experience(25), industry(20), sales(20), stakeholders(15), culture(10), location(10)."}
 
 ROLE: {job_description[:800]}
-
+{f"IDEAL CANDIDATE: {ideal_section}" if ideal_section else ""}
 CANDIDATE: {candidate_text[:2000]}"""
 
     import re, openai as openai_lib
