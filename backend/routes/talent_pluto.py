@@ -233,20 +233,41 @@ ROLE: {job_description[:800]}
 
 CANDIDATE: {candidate_text[:2000]}"""
 
+    import re, openai as openai_lib
+
+    tokens_used = {"prompt": 0, "completion": 0}
+
     for attempt in range(3):
         try:
-            raw = await call_ai_async("openai", api_key, "gpt-4o-mini", prompt, max_tokens=500, temperature=0.3)
-            import re
+            client = openai_lib.AsyncOpenAI(api_key=api_key)
+            completion = await client.chat.completions.create(
+                model="gpt-4o-mini", max_tokens=500, temperature=0.3,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = completion.choices[0].message.content or ""
+            if completion.usage:
+                tokens_used["prompt"] = completion.usage.prompt_tokens
+                tokens_used["completion"] = completion.usage.completion_tokens
+
             m = re.search(r'\{[\s\S]*\}', raw)
             if m:
                 json_str = m.group(0)
-                # Fix common GPT JSON issues: trailing commas, unescaped newlines
                 json_str = re.sub(r',\s*}', '}', json_str)
                 json_str = re.sub(r',\s*]', ']', json_str)
                 p = json.loads(json_str)
                 score = max(0, min(100, round(p.get("score", 0))))
-                events.append(ev({"type": "log", "index": idx, "name": name, "step": "result", "detail": f"Score: {score}/100"}))
-                events.append(ev({"type": "scored", "index": idx, "id": c.get("id", ""), "name": name, "score": score, "reasoning": p.get("reasoning", ""), "highlights": p.get("highlights", []), "gaps": p.get("gaps", []), "photo_url": photo_url, "linkedin_url": linkedin_url or c.get("linkedinUrl", ""), "evidence": evidence, "criteria": p.get("criteria", [])}))
+
+                # Clamp each criterion score to its max weight
+                criteria_list = p.get("criteria", [])
+                for cr in criteria_list:
+                    if cr.get("max") and cr.get("score", 0) > cr["max"]:
+                        cr["score"] = cr["max"]
+
+                # Calculate cost (gpt-4o-mini: $0.15/1M input, $0.60/1M output)
+                cost = (tokens_used["prompt"] * 0.15 + tokens_used["completion"] * 0.60) / 1_000_000
+
+                events.append(ev({"type": "log", "index": idx, "name": name, "step": "result", "detail": f"Score: {score}/100 | {tokens_used['prompt']+tokens_used['completion']} tokens | ${cost:.4f}"}))
+                events.append(ev({"type": "scored", "index": idx, "id": c.get("id", ""), "name": name, "score": score, "reasoning": p.get("reasoning", ""), "highlights": p.get("highlights", []), "gaps": p.get("gaps", []), "photo_url": photo_url, "linkedin_url": linkedin_url or c.get("linkedinUrl", ""), "evidence": evidence, "criteria": criteria_list, "tokens": tokens_used, "cost": round(cost, 6)}))
                 return "".join(events)
             else:
                 events.append(ev({"type": "scored", "index": idx, "id": c.get("id", ""), "name": name, "score": 0, "reasoning": raw[:200], "highlights": [], "gaps": []}))
