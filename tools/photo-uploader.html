@@ -3,13 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Add Photos to Profiles</title>
+<title>Photo Uploader — All Profiles</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0a; color: #e0e0e0; }
 .bar { background: #111; border-bottom: 1px solid #222; padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 10; }
 .bar h1 { font-size: 16px; font-weight: 600; }
-.bar .stats { font-size: 13px; color: #888; display: flex; gap: 16px; }
+.bar .stats { font-size: 13px; color: #888; display: flex; gap: 16px; align-items: center; }
 .bar .stats .done { color: #4caf50; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; padding: 16px; }
 .card {
@@ -18,8 +18,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
   position: relative;
 }
 .card:hover { border-color: #444; }
-.card.active { border-color: #4fc3f7; }
 .card.saved { border-color: #4caf50; }
+.card.nolinkedin { border-color: #333; opacity: 0.4; }
 .card .avatar {
   width: 72px; height: 72px; border-radius: 50%; margin: 0 auto 8px;
   background: #1a1a1a; display: flex; align-items: center; justify-content: center;
@@ -36,6 +36,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .card .badge.s3 { background: #1b5e20; color: #a5d6a7; }
 .card .badge.cdn { background: #1a237e; color: #90caf9; }
 .card .badge.none { background: #333; color: #666; }
+.card .badge.nophoto { background: #4a1010; color: #e57373; }
 .modal {
   display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 20;
   align-items: center; justify-content: center;
@@ -61,8 +62,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .btn-save { background: #2e7d32; color: #fff; }
 .btn-save:hover { background: #388e3c; }
 .btn-save:disabled { opacity: 0.4; cursor: not-allowed; }
-.btn-cancel { background: #222; color: #888; margin-right: 8px; }
-.btn-open { background: #1a237e; color: #90caf9; margin-right: 8px; font-size: 12px; padding: 8px 14px; }
+.btn-cancel { background: #222; color: #888; }
+.btn-nophoto { background: #4a1010; color: #e57373; font-size: 12px; padding: 8px 14px; }
+.btn-nophoto:hover { background: #5a1515; }
+.btn-open { background: #1a237e; color: #90caf9; font-size: 12px; padding: 8px 14px; }
 .toast {
   position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
   background: #2e7d32; color: #fff; padding: 8px 20px; border-radius: 8px;
@@ -75,6 +78,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
   background: #1a1a1a; border: 1px solid #333; color: #ccc; padding: 4px 8px;
   border-radius: 6px; font-size: 12px; outline: none;
 }
+.topbtn { background:#1a237e;color:#90caf9;border:1px solid #333;border-radius:6px;padding:4px 12px;font-size:11px;cursor:pointer;font-weight:600; }
 </style>
 </head>
 <body>
@@ -85,17 +89,17 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
     <input id="search" placeholder="Search..." oninput="render()">
     <select id="filterMode" onchange="render()">
       <option value="all">All</option>
-      <option value="no-s3">Needs S3 photo</option>
-      <option value="no-photo">No photo at all</option>
+      <option value="needs-photo" selected>Needs photo</option>
       <option value="done">Done (S3)</option>
+      <option value="marked-no">Marked no photo</option>
     </select>
   </div>
   <div class="stats">
-    <span id="statTotal">0 total</span>
-    <span class="done" id="statDone">0 uploaded</span>
-    <span id="statCdn">0 CDN only</span>
-    <span id="statNone">0 no photo</span>
-    <button onclick="openMissingLinkedIns()" style="background:#1a237e;color:#90caf9;border:1px solid #333;border-radius:6px;padding:4px 12px;font-size:11px;cursor:pointer;font-weight:600;">Open LinkedIns without S3</button>
+    <span id="statTotal">loading...</span>
+    <span class="done" id="statDone">0 S3</span>
+    <span id="statNeeds">0 needs photo</span>
+    <span id="statMarked">0 no photo</span>
+    <button class="topbtn" onclick="openMissingLinkedIns()">Open next 10</button>
   </div>
 </div>
 
@@ -110,8 +114,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
       <span class="hint">Paste (Cmd+V), drag, or click to add photo</span>
     </div>
     <input type="file" id="mFile" accept="image/*" style="display:none">
-    <div style="display:flex;justify-content:center;gap:8px;margin-top:12px;">
+    <div style="display:flex;justify-content:center;gap:8px;margin-top:12px;flex-wrap:wrap;">
       <button class="btn btn-open" id="mOpen" onclick="window.open(activeUrl,'_blank')">Open LinkedIn</button>
+      <button class="btn btn-nophoto" onclick="markNoPhoto()">No Photo on LinkedIn</button>
       <button class="btn btn-cancel" onclick="closeModal()">Cancel</button>
       <button class="btn btn-save" id="mSave" onclick="savePhoto()" disabled>Save Photo</button>
     </div>
@@ -123,9 +128,12 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 <script>
 const API = 'https://aicm3pweed.us-east-1.awsapprunner.com';
 let profiles = [];
-let s3Photos = {};  // url -> s3 photo_url
+let s3Photos = {};
+let noPhotoSet = new Set(JSON.parse(localStorage.getItem('no_photo_profiles') || '[]'));
 let activeUrl = null;
 let activeB64 = null;
+
+const DEFAULT_PHOTO = '6a62a6a5-e5c7-45f0-b3a4-478dcdbe4f6f';
 
 function toast(msg, err) {
   const t = document.getElementById('toast');
@@ -151,13 +159,11 @@ function getS3Photo(url) {
   return null;
 }
 
-const DEFAULT_PHOTO = '6a62a6a5-e5c7-45f0-b3a4-478dcdbe4f6f-57179232';
-
 function photoStatus(p) {
+  if (noPhotoSet.has(normKey(p.url))) return 'nophoto';
   const s3 = getS3Photo(p.url);
   if (s3 && !s3.includes(DEFAULT_PHOTO)) return 's3';
   if (s3 && s3.includes(DEFAULT_PHOTO)) return 'default';
-  if (p.photo && p.photo.includes('licdn.com')) return 'cdn';
   return 'none';
 }
 
@@ -166,45 +172,46 @@ function render() {
   const filter = document.getElementById('filterMode').value;
   const grid = document.getElementById('grid');
 
-  let s3Count = 0, cdnCount = 0, noneCount = 0;
-  let html = '';
-
-  const order = { 'none': 0, 'default': 1, 'cdn': 2, 's3': 3 };
+  const order = { 'none': 0, 'default': 1, 'nophoto': 2, 's3': 3 };
   const sorted = [...profiles].sort((a, b) => (order[photoStatus(a)] || 0) - (order[photoStatus(b)] || 0));
+
+  let s3Count = 0, needsCount = 0, markedCount = 0;
+  let html = '';
 
   for (const p of sorted) {
     const st = photoStatus(p);
     if (st === 's3') s3Count++;
-    else if (st === 'cdn' || st === 'default') cdnCount++;
-    else noneCount++;
+    else if (st === 'nophoto') markedCount++;
+    else needsCount++;
 
-    if (filter === 'no-s3' && st === 's3') continue;
-    if (filter === 'no-photo' && st !== 'none' && st !== 'default') continue;
+    if (filter === 'needs-photo' && (st === 's3' || st === 'nophoto')) continue;
     if (filter === 'done' && st !== 's3') continue;
-    if (search && !p.name.toLowerCase().includes(search) && !p.headline.toLowerCase().includes(search)) continue;
+    if (filter === 'marked-no' && st !== 'nophoto') continue;
+    if (search && !(p.name || '').toLowerCase().includes(search) && !(p.headline || '').toLowerCase().includes(search)) continue;
 
     const url = p.url.replace(/\/$/, '');
-    const imgSrc = getS3Photo(url) || p.photo || '';
+    const imgSrc = (st === 's3') ? getS3Photo(url) : '';
     const avatar = imgSrc
       ? `<img src="${imgSrc}" onerror="this.parentElement.innerHTML='<span class=initials>${initials(p.name)}</span>'">`
       : `<span class="initials">${initials(p.name)}</span>`;
 
-    const badgeClass = st === 's3' ? 'badge s3' : st === 'default' ? 'badge none' : st === 'cdn' ? 'badge cdn' : 'badge none';
-    const badgeText = st === 's3' ? 'S3' : st === 'default' ? 'DEF' : st === 'cdn' ? 'CDN' : '--';
+    const badgeClass = st === 's3' ? 'badge s3' : st === 'nophoto' ? 'badge nophoto' : 'badge none';
+    const badgeText = st === 's3' ? 'S3' : st === 'nophoto' ? 'NONE' : '--';
+    const cardClass = st === 's3' ? 'saved' : st === 'nophoto' ? 'nolinkedin' : '';
 
-    html += `<div class="card ${st === 's3' ? 'saved' : ''}" data-url="${url.replace(/"/g,'&quot;')}">
+    html += `<div class="card ${cardClass}" data-url="${url.replace(/"/g,'&quot;')}">
       <span class="${badgeClass}">${badgeText}</span>
       <div class="avatar">${avatar}</div>
-      <div class="name">${p.name}</div>
-      <div class="hl">${p.headline}</div>
+      <div class="name">${p.name || 'Unknown'}</div>
+      <div class="hl">${p.headline || ''}</div>
     </div>`;
   }
 
   grid.innerHTML = html;
   document.getElementById('statTotal').textContent = `${profiles.length} total`;
-  document.getElementById('statDone').textContent = `${s3Count} uploaded`;
-  document.getElementById('statCdn').textContent = `${cdnCount} CDN only`;
-  document.getElementById('statNone').textContent = `${noneCount} no photo`;
+  document.getElementById('statDone').textContent = `${s3Count} S3`;
+  document.getElementById('statNeeds').textContent = `${needsCount} needs photo`;
+  document.getElementById('statMarked').textContent = `${markedCount} no photo`;
 }
 
 // Event delegation for card clicks
@@ -217,12 +224,12 @@ function openModal(url) {
   const k = normKey(url);
   const p = profiles.find(x => normKey(x.url) === k);
   if (!p) return;
-  activeUrl = p.url;  // always use the original CSV URL
+  activeUrl = p.url;
   activeB64 = null;
-  document.getElementById('mName').textContent = p.name;
-  document.getElementById('mHl').textContent = p.headline;
+  document.getElementById('mName').textContent = p.name || 'Unknown';
+  document.getElementById('mHl').textContent = p.headline || '';
 
-  const imgSrc = getS3Photo(url) || p.photo || '';
+  const imgSrc = getS3Photo(url) || '';
   document.getElementById('mPreview').innerHTML = imgSrc
     ? `<img src="${imgSrc}" onerror="this.remove()">`
     : '';
@@ -230,6 +237,7 @@ function openModal(url) {
   document.getElementById('mDrop').innerHTML = '<span class="hint">Paste (Cmd+V), drag, or click to add photo</span>';
   document.getElementById('mSave').disabled = true;
   document.getElementById('modal').classList.add('show');
+  window.open(p.url, '_blank');
 }
 
 function closeModal() {
@@ -252,13 +260,21 @@ function clearDropPhoto() {
   document.getElementById('mSave').disabled = true;
 }
 
+function markNoPhoto() {
+  if (!activeUrl) return;
+  noPhotoSet.add(normKey(activeUrl));
+  localStorage.setItem('no_photo_profiles', JSON.stringify([...noPhotoSet]));
+  toast('Marked — no photo on LinkedIn');
+  closeModal();
+  render();
+}
+
 async function savePhoto() {
   if (!activeUrl || !activeB64) { toast('No photo or URL', true); return; }
   const btn = document.getElementById('mSave');
   btn.disabled = true;
   btn.textContent = 'Saving...';
 
-  // Validate we have real image data
   if (!activeB64.startsWith('data:image/')) {
     toast('Invalid image data', true);
     btn.disabled = false;
@@ -266,32 +282,28 @@ async function savePhoto() {
     return;
   }
 
-  console.log('Saving photo for:', activeUrl, 'b64 length:', activeB64.length);
-
   try {
     const resp = await fetch(`${API}/api/v1/linkedin/photo`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url: activeUrl, photo_base64: activeB64 }),
     });
-    const text = await resp.text();
-    console.log('Response:', resp.status, text);
-    let data;
-    try { data = JSON.parse(text); } catch { toast('Bad response: ' + text.slice(0, 100), true); return; }
+    const data = await resp.json();
 
     if (data.photo_url) {
       s3Photos[data.url || activeUrl] = data.photo_url;
       s3Photos[activeUrl] = data.photo_url;
+      // Remove from no-photo set if it was there
+      noPhotoSet.delete(normKey(activeUrl));
+      localStorage.setItem('no_photo_profiles', JSON.stringify([...noPhotoSet]));
       toast('Saved!');
       closeModal();
       render();
     } else {
-      toast(data.error || 'Failed — check console', true);
-      console.error('Save error:', data);
+      toast(data.error || 'Failed', true);
     }
   } catch (e) {
     toast('Network error: ' + e.message, true);
-    console.error('Fetch error:', e);
   } finally {
     btn.disabled = false;
     btn.textContent = 'Save Photo';
@@ -339,62 +351,55 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeModal();
 });
 
-// Load profiles and check which already have S3 photos
-async function init() {
-  try {
-    const resp = await fetch(`${API}/linkedin/database`);
-    const data = await resp.json();
-    const dbMap = {};
-    for (const item of (data.items || [])) {
-      const url = item.url;
-      dbMap[url] = item;
-      if (item.photo_url && item.photo_url.includes('s3.amazonaws.com')) {
-        s3Photos[url] = item.photo_url;
-      }
-    }
-  } catch (e) {
-    console.error('Failed to load DB:', e);
-  }
-
-  profiles = PROFILES;
-  render();
-}
-
+// Open next 10 missing
 let openBatchIndex = 0;
 function openMissingLinkedIns() {
-  const toOpen = profiles.filter(p => { const s = photoStatus(p); return s !== 's3'; });
-  if (!toOpen.length) { toast('All photos are on S3!'); openBatchIndex = 0; return; }
+  const toOpen = profiles.filter(p => { const s = photoStatus(p); return s !== 's3' && s !== 'nophoto'; });
+  if (!toOpen.length) { toast('All done!'); openBatchIndex = 0; return; }
   const batch = toOpen.slice(openBatchIndex, openBatchIndex + 10);
-  if (!batch.length) { toast('Done — all batches opened. Click again to restart.'); openBatchIndex = 0; return; }
-  const batchNum = openBatchIndex/10 + 1;
-  const startTime = new Date();
-  console.log(`--- Batch ${batchNum} started at ${startTime.toLocaleTimeString()} (${batch.length} profiles) ---`);
+  if (!batch.length) { toast('All batches opened. Click again to restart.'); openBatchIndex = 0; return; }
+  console.log(`--- Batch ${openBatchIndex/10 + 1} (${batch.length} profiles) ---`);
   batch.forEach((p, i) => {
     console.log(`  ${openBatchIndex + i + 1}. ${p.name} — ${p.url}`);
     window.open(p.url, '_blank');
   });
-  // Write timestamp so CLI can read it
-  fetch(`${API}/api/v1/linkedin/photo`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url: '_timer_', photo_base64: '' }),
-  }).catch(() => {});
-  // Signal the watcher via a temp file
-  const signal = JSON.stringify({ batch: batchNum, time: startTime.toISOString(), count: batch.length, names: batch.map(p => p.name) });
-  localStorage.setItem('batch_start', signal);
-  // POST signal to backend (it'll 400 but that's fine — watcher reads the file instead)
-  try {
-    const xhr = new XMLHttpRequest();
-    xhr.open('PUT', `${API}/settings/batch-timer`, false);
-    xhr.setRequestHeader('Content-Type', 'application/json');
-    xhr.send(JSON.stringify({ setting_id: 'batch_timer', value: signal }));
-  } catch {}
-  console.log('Names to scrape:', batch.map(p => p.name).join(', '));
   openBatchIndex += 10;
   toast(`Opened ${Math.min(openBatchIndex, toOpen.length)}/${toOpen.length}`);
 }
 
-const PROFILES =[{"url": "https://www.linkedin.com/in/taronarshakian", "name": "Taron Arshakian", "headline": "Investment Banking Associate", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQECsom0lN6a4w/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1696137105456?e=1766620800&v=beta&t=dSdlXT3h-IP3B-GLYsyjm-1bgz1IV_gguuiwg42lMmM"}, {"url": "https://www.linkedin.com/in/christine-huerta-sthm", "name": "Christine Huerta", "headline": "GTM @ Camber", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQFV7eTF44Me1w/profile-displayphoto-shrink_800_800/B4EZVtDT6JHgAk-/0/1741291342590?e=1765411200&v=beta&t=YhTxOdCLWHFrkSP8wFpCeseqSDJ9gyPGWM92M3-BxWw"}, {"url": "https://www.linkedin.com/in/ben-gillin-0083b8152", "name": "Ben Gillin", "headline": "Client Services Associate at Masterworks | Denison University Graduate", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQGCNPyCyq412A/profile-displayphoto-shrink_800_800/B4EZaH1dhuGYAc-/0/1746035661264?e=1761177600&v=beta&t=YSKO1bJEjt8o72Dh3KN0sOgjST4RkSrUm_JTtHi1zc0"}, {"url": "https://www.linkedin.com/in/katherinestiplosek", "name": "Katherine Stiplosek", "headline": "Business Development @ Ramp", "photo": "https://media.licdn.com/dms/image/v2/D5603AQGZXhV17bxDmw/profile-displayphoto-crop_800_800/B56Zp0jSLWJ4AI-/0/1762891998337?e=1772064000&v=beta&t=g0WyfPh4zy-3WFSBEeiI5_IvpUYxaxVuU0opunlcaoo"}, {"url": "https://www.linkedin.com/in/jaredgornstein", "name": "Jared Gornstein", "headline": "Corporate Stock Benefit Consultant", "photo": "https://media.licdn.com/dms/image/v2/D5603AQFgob9x5WYq0A/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1708029362348?e=1771459200&v=beta&t=McjJcVeLdrLiwLXmhY4VS5oHE9efixTt6-c5EgyGjME"}, {"url": "https://www.linkedin.com/in/natalie-radu", "name": "Natalie Radu", "headline": "Sales Development Representative @ Pepper", "photo": "https://media.licdn.com/dms/image/v2/C4E03AQG6Dqyzsf-BFA/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1582071383192?e=1773273600&v=beta&t=1U5OWIygmOMsvaAi_WJLTWp0M7tbD3dQoIBDlQNeaoU"}, {"url": "https://www.linkedin.com/in/michaelhussjr", "name": "Michael Huss", "headline": "Sales | Alumni of Rutgers Business School - Leadership and Management, SCM", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQHPkhqSzdkMXQ/profile-displayphoto-shrink_800_800/B4EZbPt1VcHwAc-/0/1747241623842?e=1773878400&v=beta&t=mwnupesb6PLu2MUvKbqfcNZayU7ydiDZwi65A190txY"}, {"url": "https://www.linkedin.com/in/brandon-mcdonald-0b5380195", "name": "Brandon McDonald", "headline": "Strategy & Operations @ Rippling", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQFFKF8VScggng/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1726522206129?e=1773273600&v=beta&t=XZCnNGYQLrdHHckXddJ2cC5qhH9JmZinjyrgEICrQNA"}, {"url": "https://www.linkedin.com/in/ellie-skinner-10bb00245/", "name": "Ellie Skinner", "headline": "Growth Equity at LLR Partners", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQEJgLwgvICCxQ/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1718243512844?e=1769040000&v=beta&t=e19Cq48iIMlFBFGJxVhGp_Bq3u_LlbWq5rKerVMONrA"}, {"url": "https://www.linkedin.com/in/ACoAADd-mCIBe9QNickSx6EceR-6YAtpLot3_bA", "name": "Evangelia Skoumbakis", "headline": "A yes is earned through no | Exited Founder ", "photo": "https://media.licdn.com/dms/image/v2/D4D03AQFe-N5YRJjFHQ/profile-displayphoto-shrink_800_800/B4DZWALR36G4Ag-/0/1741612196747?e=1774483200&v=beta&t=s95jAB6f4HQ3-GXb6JCwJ_dVqjA_CyQTjXcA35lseu0"}, {"url": "https://www.linkedin.com/in/oscar-o-bradaigh", "name": "Oscar O'Bradaigh", "headline": "Account Specialist | Sales Development @ Intenseye", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQEPIDZg3xjikQ/profile-displayphoto-crop_800_800/B4EZuVGWJvI0AU-/0/1767733029866?e=1770854400&v=beta&t=d-lbc3ElIrbrah9K7X8_xP1vv-Fo3rUVURAZ_lQdAbw"}, {"url": "https://www.linkedin.com/in/emily%7Edominguez", "name": "Emily Dominguez", "headline": "CS + Bus @UMich | Prev SWE @Apple, Microsoft, & Alza, IB @MS", "photo": "https://media.licdn.com/dms/image/v2/D4D03AQG4OeNIR4MPDA/profile-displayphoto-crop_800_800/B4DZlWPfvXJAAI-/0/1758088527627?e=1766620800&v=beta&t=_BRIhbYjuV_Bj1REwLR8rpEw79WOKlxsGY8rbh_-cgs"}, {"url": "https://www.linkedin.com/in/seth-o%E2%80%99connor-b63879260", "name": "Seth O’Connor", "headline": "Growth @ Ramp", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQE4GzX9COZhrw/profile-displayphoto-shrink_400_400/profile-displayphoto-shrink_400_400/0/1706248937231?e=1764806400&v=beta&t=a-agUgFmJfmUDCKlGNTcIYax982pG7Jxbu_1C4bWIv8"}, {"url": "https://www.linkedin.com/in/clarinelerby/", "name": "Clarine Lerby", "headline": "Partnerships", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQGDdTix_Ad80Q/profile-displayphoto-crop_800_800/B4EZu_ijlRJIAI-/0/1768445066630?e=1770854400&v=beta&t=gs6y0usf7hLmnDYt297rT5oIDJC4K4JTPLmCLlGPsXM"}, {"url": "https://www.linkedin.com/in/thoma-palloj", "name": "Thoma Palloj", "headline": "Growth @ Finout | FinOps Certified Practitioner | Centralizing & Contextualizing Cloud Spend at Scale", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQGx9TcT-Vofvw/profile-displayphoto-crop_800_800/B4EZlyofRcIkAI-/0/1758564841143?e=1767225600&v=beta&t=6sS0br22CFw2hk-bfe6n7l8uGSoWHSGNzJJvsZYODzs"}, {"url": "https://www.linkedin.com/in/sarah-xu-603971174", "name": "Sarah Xu", "headline": "education + special projects @ clay | stanford alum", "photo": "https://media.licdn.com/dms/image/v2/D5603AQEPqyr_3xR4Tw/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1718350056049?e=1771459200&v=beta&t=iYFIPQXq6Zfp6ijM186P_RFGMknodswDSQEcmH-3NbQ"}, {"url": "https://www.linkedin.com/in/dean-zulkofske-b55578130", "name": "Dean Zulkofske", "headline": "GTM at Brex", "photo": "https://media.licdn.com/dms/image/v2/D5603AQGMXGJYYTr62g/profile-displayphoto-crop_800_800/B56ZiuCP8kHkAI-/0/1755266484179?e=1767830400&v=beta&t=TumP2tYEuWlwRynVFtWLL5hzQbaOHX1rq0z7Jsh9srg"}, {"url": "https://www.linkedin.com/in/disha-mohta-b688321a9", "name": "Disha Mohta", "headline": "Investment Banking Analyst at Morgan Stanley", "photo": "https://media.licdn.com/dms/image/v2/D5603AQFoVVDk7cCc-A/profile-displayphoto-shrink_800_800/B56Zb3gyafHoAg-/0/1747909291344?e=1766620800&v=beta&t=Mxx45fOE_-rbhocTxXpKIAHZZoIYMBpm3iklm7appIs"}, {"url": "https://www.linkedin.com/in/tyler-innes-a8b122182", "name": "Tyler Innes", "headline": "Sales • Account Manager • Business Owner", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQH_UTQZcLB9Qw/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1731020184179?e=1758153600&v=beta&t=bMS8Jq8u1bHV-D1Bn3Ekyy2yffgf2eaF4rPYBSiv9tU"}, {"url": "https://www.linkedin.com/in/gary-law-391851207", "name": "Gary Law", "headline": "Student at Columbia University", "photo": "https://media.licdn.com/dms/image/v2/D5603AQFPtHpLycTT8Q/profile-displayphoto-shrink_800_800/B56ZV3Zfd5HsAg-/0/1741464929094?e=1762992000&v=beta&t=oayIBVwsq06A7zKLNMSwDK8ckRVW_QDDoSjvllL1dUA"}, {"url": "https://www.linkedin.com/in/jason-taylor-7981b820b", "name": "Jason Taylor", "headline": "I do calisthenics stuff. I also do sales stuff.", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQFbhO8qgpAa2A/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1696465559737?e=1771459200&v=beta&t=8CqOp-rTRTNsh70hs_OVYZbatO65AHSq2m9eFkAUviw"}, {"url": "https://www.linkedin.com/in/sifathmannan", "name": "Sifath Mannan", "headline": "Founding GTM @ Rillet", "photo": "https://media.licdn.com/dms/image/v2/D5603AQHzIqHvZIMPpA/profile-displayphoto-crop_800_800/B56Zsubzr4HsAM-/0/1766010601533?e=1769040000&v=beta&t=X8m_c5KH-KwIYDzy_KjxeRRS_fHg_FVm784Pz5W554g"}, {"url": "https://www.linkedin.com/in/dhruv-c322", "name": "Dhruv Chokshi", "headline": "GTM @ Brex", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQHxknAMQoAKiA/profile-displayphoto-shrink_400_400/profile-displayphoto-shrink_400_400/0/1718312948168?e=1772668800&v=beta&t=ajby8LpYeCX2m_zryYxOG8dgV-nWhUQ7c7yo6MH7TdE"}, {"url": "https://www.linkedin.com/in/thomas-bonina-471241213", "name": "Thomas Bonina", "headline": "Aspiring Business Development Rep | Sales, Prospecting & Customer Conversations | Tech & SMB SaaS", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQHIC5t9-hx13Q/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1703321541321?e=1771459200&v=beta&t=iXO6-cMx_41rWjcYtYivQZ-oCpFK4NjNwskkm3S-9jc"}, {"url": "https://www.linkedin.com/in/jacob-tamkin", "name": "Jacob T.", "headline": "Growth @ Brex", "photo": null}, {"url": "https://www.linkedin.com/in/stacyboey", "name": "Stacy B.", "headline": "Business Developer @ pulsd", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQExScOZ4EyZqw/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1685152631380?e=1761782400&v=beta&t=wGMK_pZukDflcznt2M3ccYmGsc9Gq92N-WhE1lmZick"}, {"url": "https://www.linkedin.com/in/colin-knittel-2aa9371b6", "name": "Colin Knittel", "headline": "Investment Banking Analyst", "photo": "https://media.licdn.com/dms/image/v2/D5603AQGOZFLFWQNYYQ/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1713321703360?e=1766620800&v=beta&t=V8DpcCF1CMZqK1MfKTNFt0ctrku_xH56gKI2Nox7yQo"}, {"url": "https://www.linkedin.com/in/ericjeanos", "name": "Eric Jeanos", "headline": "Sales Professional", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQE5xfjsBvo84g/profile-displayphoto-crop_800_800/B4EZhZJcmfGUAI-/0/1753842306157?e=1764806400&v=beta&t=HvvaCrEfx4sXHrlStSfStM-CEY7yYYtewDHCBvlYQ2A"}, {"url": "https://www.linkedin.com/in/porges", "name": "Matt Porges", "headline": "Investments | Strategy | M&A | Insurance & Financial Services", "photo": "https://media.licdn.com/dms/image/v2/D5603AQHMWuAt_O5cjA/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1687809319833?e=1767225600&v=beta&t=V-_QWqm6NPYqmcMr4OQwr7IJmjTgxFQkrsI4uxXEEh8"}, {"url": "https://www.linkedin.com/in/jack-dufour-b792ab224", "name": "Jack DuFour", "headline": "Data Privacy | Ethyca", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQHzNCAQlQV9hg/profile-displayphoto-crop_800_800/B4EZgyzhtFHIAM-/0/1753199025475?e=1773878400&v=beta&t=QEnVxUhULA5o7WZ_e7pLsLAOK3aTnJAlMi2xS_I5HjY"}, {"url": "https://www.linkedin.com/in/noah-burns-9696331a7", "name": "Noah Burns", "headline": "Investment Banking Analyst", "photo": "https://media.licdn.com/dms/image/v2/D5603AQEQsuzKK30SnA/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1714447349579?e=1766620800&v=beta&t=RhamTUH09ooZJlDZF6eXiJZvEbK50KEsZfO4chh6vPc"}, {"url": "https://www.linkedin.com/in/ji-sung-lee", "name": "Ji Sung L.", "headline": "Provider Growth @ Tandem", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQHS3F5orkfYLg/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1723139396017?e=1768435200&v=beta&t=F2xNJ-PRXwahg-T45EFqn2yEVLAy23cnozyuX7lViIM"}, {"url": "https://www.linkedin.com/in/henrysmith1997", "name": "Henry Smith", "headline": "GTM Strategy", "photo": "https://media.licdn.com/dms/image/v2/C4E03AQE_nsJe1Dud_Q/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1631027401795?e=1762992000&v=beta&t=iw83cTXBCTwJ2VZF0Z2FVI6LLqY4kh0rAdJ5BWfKgSw"}, {"url": "https://www.linkedin.com/in/sudhir-chowdhry", "name": "Sudhir Chowdhry", "headline": "AI | Strategy | Business Development | Consulting", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQERq40PZNolvQ/profile-displayphoto-shrink_800_800/B4EZc0P6xOHQAc-/0/1748928277921?e=1767830400&v=beta&t=tu16bB-Mo0oW_lZV-QMrZawP_aMskdzMNo02whCqaLg"}, {"url": "https://www.linkedin.com/in/ethanfaber", "name": "Ethan Faber", "headline": "Growth @ Traba", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQGTAhtKyPJWVA/profile-displayphoto-shrink_800_800/B4EZm1MstKIQAc-/0/1759681629931?e=1773273600&v=beta&t=QUATzzy-4brxzwfcULh32_hku-j9YdHV9w7K3UGrOQ4"}, {"url": "https://www.linkedin.com/in/kylereinheimer", "name": "Kyle Reinheimer", "headline": "Partnerships @ Rilla | World Record Holder", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQFnNOPk0yUPFw/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1721859599929?e=1770854400&v=beta&t=oW_Hm4EhM9cWE0jA_hBT-F4iuUI-lmrRdoHvPg0HfhM"}, {"url": "https://www.linkedin.com/in/ACoAADjd6MABCzR4RgXVPGREWjFaog7YrqHnqAg", "name": "Maria Khambati", "headline": "Growth Equity @ Frontier Growth", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQFv4Tg-rzBrAg/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1676440524740?e=1773273600&v=beta&t=1hlCQnxZQuVlH_Sos0MzVXQaNdDhD0O9FaHiYEo7cqU"}, {"url": "https://www.linkedin.com/in/andrew-romano-45785823b", "name": "Andrew Romano", "headline": "Penn State University", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQE0xM4gnF6q1A/profile-displayphoto-shrink_400_400/profile-displayphoto-shrink_400_400/0/1718214136272?e=1760572800&v=beta&t=94_45nD0g_Govz9Ph5CNoTpJ1Xi7TOIzzwrSJ7TL9KQ"}, {"url": "https://www.linkedin.com/in/andrewthompson123", "name": "Andrew Thompson", "headline": "Technical Sales Professional", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQH36VfYCqpiGw/profile-displayphoto-shrink_800_800/B4EZXQUX5AHUAc-/0/1742956757862?e=1765411200&v=beta&t=k7D7GOuQtjuE6l9E9trNV8JYvqrLpdbRni9iz40wQXw"}, {"url": "https://www.linkedin.com/in/geovanny-morales-806690153", "name": "Geovanny Morales", "headline": "Founder at Abeja Coffee", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQEReSTs4X2TSw/profile-displayphoto-crop_800_800/B4EZud7B5mHoAI-/0/1767881056345?e=1771459200&v=beta&t=pzT8xWY1tWdNwADSLbkRDhXXj4J1s0mV-Ffgkei9LZ4"}, {"url": "https://www.linkedin.com/in/aditya-krishna-4505a051", "name": "Aditya Krishna", "headline": "Morgan Stanley - Columbia University", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQG3M2Dzjuxelw/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1715814390313?e=1766620800&v=beta&t=bSTyUOaDDwYxaOG0Om25zD7rTyvfIqDF1Q1mG7Pb71c"}, {"url": "https://www.linkedin.com/in/nairi-enright", "name": "Nairi Enright", "headline": "Investment Banking Leveraged Credit Analyst - TMT", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQEmbAKn1zKD9A/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1701843387708?e=1769040000&v=beta&t=6uD_doQIagEogPGloStiuZJnbivNyrr0zs_6NxT4d8M"}, {"url": "https://www.linkedin.com/in/ACoAADTBLoABomtDYVWRpmQ1r9UTEN4BtQIRQig", "name": "Tim Nguyen", "headline": "Helping CX Leaders Transform Support Operations by Orchestrating Human & AI Agents to Build Predictable, Scalable Support | GTM @ Assembled", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQHgGKi8BFHQVg/profile-displayphoto-crop_800_800/B4EZr96r7.HUAI-/0/1765196612133?e=1772064000&v=beta&t=SGxriSyFv5bQ7iqFfk7dHBVpD1JjJvlty6DsKoQ_9vk"}, {"url": "https://www.linkedin.com/in/felix-becu", "name": "Félix B.", "headline": "Strategy & Business Development Associate | ESSEC Business School & UC Berkeley", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQFgkvuHvxcApg/profile-displayphoto-shrink_400_400/B4EZQrtZOGGYAg-/0/1735900108600?e=1758758400&v=beta&t=POKoYiCuw8ubI4VNbos6xL--6VGYh7e0CF3BA7NMjJY"}, {"url": "https://www.linkedin.com/in/russellbusso", "name": "Russell Busso", "headline": "Strategy & Operations | Product & GTM Execution | Process Optimization | Analytics", "photo": "https://media.licdn.com/dms/image/v2/C4D03AQFDJ-8OOgrZbQ/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1649961430893?e=1768435200&v=beta&t=PdtKP_iF7F9gmZkz1yjqYTRi1d-B3Ig6Q87paXw7LV0"}, {"url": "https://www.linkedin.com/in/dylanoliva", "name": "Dylan Oliva", "headline": "Founder | UBS Accelerate Program | Binghamton Alum", "photo": "https://media.licdn.com/dms/image/v2/D5603AQFoTZFv0U1vxg/profile-displayphoto-shrink_800_800/B56ZSQpbkbHoAc-/0/1737593569628?e=1760572800&v=beta&t=m0R598LKSCFPoFnSPeILnkOMjDskNOdKNAwsNmlY-WQ"}, {"url": "https://www.linkedin.com/in/dhanushsivakaminathan", "name": "Dhanush Sivakaminathan", "headline": "Founding GTM Member @ Graphite (Cursor)", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQF_43MMh9e-9Q/profile-displayphoto-crop_800_800/B4EZyLyrScHMAM-/0/1771871843887?e=1773878400&v=beta&t=jbtk2Kt4HJFZLUwjQDrhjQ7xX35EbUuRb-b9Z3uJrs4"}, {"url": "https://www.linkedin.com/in/molly-smith-214b48149", "name": "Molly Smith", "headline": "gtm @ clipbook | ucla alum", "photo": "https://media.licdn.com/dms/image/v2/D5603AQFhgT3Gar6j8Q/profile-displayphoto-crop_800_800/B56ZfmSZ2zHoAI-/0/1751915275884?e=1771459200&v=beta&t=0ZYwfduTDXgZXFOa7kgC4xJDtLmOC1J93KWNCCHbq9A"}, {"url": "https://www.linkedin.com/in/niel-p", "name": "Siddharth Niel P.", "headline": "GTM @ Espresso AI | Helping Teams Optimize Snowflake and Databricks Spend ❄️ 🧱", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQFVLNhHZoJ9Nw/profile-displayphoto-crop_800_800/B4EZvPEHqBHEAI-/0/1768705522921?e=1770854400&v=beta&t=jygDnKC3SvvP23hi7hKgqcofcHB3roIxdKMqdNMjgqI"}, {"url": "https://www.linkedin.com/in/devika-vanjani", "name": "Devika P. Vanjani", "headline": "Co-Founder @ Third Culture Kids NYC 🌎 I  B2B Software Sales", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQHG7pILv3piew/profile-displayphoto-crop_800_800/B4EZr.9NM2HUAQ-/0/1765214049532?e=1769644800&v=beta&t=xPLarVPb-wpIf31zuMUDoQR7fK_KtjGU79KI1lH8YB8"}, {"url": "https://www.linkedin.com/in/rychard-tymakhovych", "name": "Rychard Tymakhovych", "headline": "Analyst, GIC Group", "photo": "https://media.licdn.com/dms/image/v2/D4D03AQGY8HvblzsujA/profile-displayphoto-scale_400_400/B4DZikHuRvHwAg-/0/1755100145188?e=1763596800&v=beta&t=cAvRAPv-90Q43zC1u6pbXwjtY_5jIUk8lfRGgarD28o"}, {"url": "https://www.linkedin.com/in/nika-volfson", "name": "Nika V.", "headline": "Strategy & Ops @ Camber", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQEds-0h-47h8g/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1698938346756?e=1770854400&v=beta&t=VzLYh4ZF_jQvGDNA1tl74EIvJEl6BbzC8tmtlEDPeU8"}, {"url": "https://www.linkedin.com/in/danielmbarrett1/", "name": "Daniel Barrett", "headline": "Graduate of Fordham Gabelli School of Business", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQHwB3c_vNzgxg/profile-displayphoto-scale_400_400/B4EZfQqcZlGwAg-/0/1751552477455?e=1761177600&v=beta&t=dMSN7aK_mw6RPUtw099jGJhgvz9uZm4yhvWGCmcxSpw"}, {"url": "https://www.linkedin.com/in/jeremiah-b-172a8218a", "name": "Jeremiah B.", "headline": "Enterprise Sales @ Navan", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQEiZVykb6Prpg/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1706552062208?e=1765411200&v=beta&t=vxkehZlK8Uf0w4DlCPPqePHaBCpxbUWW-WB8Eje9eaY"}, {"url": "https://www.linkedin.com/in/benjamin-krimm-996264196", "name": "Benjamin Krimm", "headline": "PNC Investment Banking Analyst", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQHANWqVxtf03g/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1683921523869?e=1766620800&v=beta&t=ZtBFyRF0yBvZSzZgPz9YqsscF4yrSL3OVmvltjvEyu4"}, {"url": "https://www.linkedin.com/in/ACoAAEC7mrMBAIUcTkhf4NoHPvJLWmwjH55ACwg", "name": "Kayla Alizadeh", "headline": "Sr. Mid-Market Growth Associate @ LiveFlow", "photo": "https://media.licdn.com/dms/image/v2/D5603AQGcpM8sZ2Pbvg/profile-displayphoto-shrink_800_800/B56ZcTTEOVGsAg-/0/1748375456026?e=1773273600&v=beta&t=UKlkkRHiS7SDiIakpwHCi2RzpBdf46f10ErpiuDfMC0"}, {"url": "https://www.linkedin.com/in/marisa-dellanno", "name": "Marisa Dell'Anno", "headline": "Demand Generation @ Vimeo | Full-Funnel GTM Strategy & Pipeline Growth", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQHqfbdPrmrGug/profile-displayphoto-crop_800_800/B4EZuocgD8L4AM-/0/1768057603100?e=1774483200&v=beta&t=unQWX7v1gqUCNmMgx9Muo6DrUtVTRvgQnBLrAyx1jU8"}, {"url": "https://www.linkedin.com/in/veronica-greydak-694051190", "name": "Veronica Greydak", "headline": "Global Corporate Banking at J.P. Morgan | Board Member at Second Act", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQHX65YaSTif0A/profile-displayphoto-shrink_800_800/B4EZU5WAMQG0Ac-/0/1740423826901?e=1766620800&v=beta&t=Ui0EhPX2Z4JCcjnDeI2YZZ-MNLHZHPGenkmHJLSlo68"}, {"url": "https://www.linkedin.com/in/swarajagarwal", "name": "Swaraj Agarwal", "headline": "GTM at Chalk | Brown Alum", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQExBHoZxWFGEA/profile-displayphoto-crop_800_800/B4EZrv5gnaIwAI-/0/1764961422206?e=1768435200&v=beta&t=j4Tcg8usrBlC9-tY3qHzMrQLgpKCAgq1JvkDE-gPE28"}, {"url": "https://www.linkedin.com/in/davidkeptsi", "name": "David Keptsi", "headline": "Director of Product @ Poly Platform | ex-BCG | Digital Government Expert | Crypto and AI Enthusiast", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQEWT90WfIlpfQ/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1681747020924?e=1766620800&v=beta&t=dWXZ_taYM8lHWUS_-l6Ngx9EbHetB6-AG-3nFZT1WBg"}, {"url": "https://www.linkedin.com/in/peter-bukary-bb28641b0", "name": "Peter Bukary", "headline": "Investment Banking Analyst", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQGvXsoxbrqTTw/profile-displayphoto-crop_800_800/B4EZpb8jzXHgAI-/0/1762479193918?e=1766620800&v=beta&t=drZBsSvOzhASOnjSwzQTPyfG7sRCvgrTE-ZFQKMu3r0"}, {"url": "https://www.linkedin.com/in/benjamin-austin-ab445523b", "name": "Benjamin Austin", "headline": "Boston College Class of 2025 | Hedgehog Networks", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQFiM_1ZpzvHrQ/profile-displayphoto-shrink_400_400/B4EZdhKL_hHIAg-/0/1749681750361?e=1758153600&v=beta&t=_mZ0gVhmJxtefcIDSjVXFDqlLxbKWTcee7s0zhOthOU"}, {"url": "https://www.linkedin.com/in/ha-sima", "name": "Thao Ha", "headline": "Columbia MSIS | NYU Design Alum", "photo": "https://media.licdn.com/dms/image/v2/D5603AQH4J46WugHM9A/profile-displayphoto-scale_400_400/B56ZgOaQToHQAk-/0/1752588420948?e=1757548800&v=beta&t=J8wNKf9VGoZp2AbEw50Ls22D_fMWyMI8DgrKpeLe6dU"}, {"url": "https://www.linkedin.com/in/imboywa", "name": "Gil Imboywa", "headline": "GTM @ Siro |\nAI-powered Conversation Intelligence", "photo": "https://media.licdn.com/dms/image/v2/D4D03AQFXHtn-P5Zqvg/profile-displayphoto-crop_800_800/B4DZetbdxDHAAI-/0/1750961348165?e=1760572800&v=beta&t=xqoJKHsoxFBFaefGMXnLZomDqjowjpOQT5W4X3mgokw"}, {"url": "https://www.linkedin.com/in/davidneiltraub", "name": "David Traub", "headline": "University of Chicago Graduate in Business Economics", "photo": "https://media.licdn.com/dms/image/v2/D5603AQHEUYrRlbj9_Q/profile-displayphoto-shrink_800_800/B56ZQk4dT.HoAc-/0/1735785568142?e=1772064000&v=beta&t=e59-qqq3qbFMHIqgQ-KgbM9IC7m4zkyAk40mgim_omo"}, {"url": "https://www.linkedin.com/in/awschleifer", "name": "Ami Schleifer", "headline": "Growth @Brellium", "photo": "https://media.licdn.com/dms/image/v2/D5603AQHJZIvPl8M6Ag/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1719264558698?e=1764201600&v=beta&t=TemeJZU_2Gxqw4mai99oCPG9MWsm-F7_vNqllZb4XeM"}, {"url": "https://www.linkedin.com/in/emma-naidrich-20684b263", "name": "Emma Naidrich", "headline": "Creative. Strategic. Data-Driven", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQHnvjivpbqSYQ/profile-displayphoto-shrink_800_800/B4EZd53G2BH0Ak-/0/1750096178907?e=1761177600&v=beta&t=pM14KHCzl9aev2c4iPUYPIExpkgRTt6iatmE7X3plLc"}, {"url": "https://www.linkedin.com/in/julian-davis-8a5413154", "name": "Julian Davis", "headline": "Founder & BDR | Human voice @ AI speed", "photo": "https://media.licdn.com/dms/image/v2/D5603AQH-YwmF887KyA/profile-displayphoto-shrink_800_800/B56ZvCfckvIsAg-/0/1768494584231?e=1770854400&v=beta&t=QIInwqhv3ZDFGpQYiZbQBECTCpFXvi2WpofcDs4BVr4"}, {"url": "https://www.linkedin.com/in/mike-kuklenski-708617228", "name": "Mike Kuklenski", "headline": "Growth Marketing Manager at Secco Squared", "photo": "https://media.licdn.com/dms/image/v2/D5603AQGXXd-sU3Q7FA/profile-displayphoto-shrink_400_400/profile-displayphoto-shrink_400_400/0/1724333915564?e=1750896000&v=beta&t=jxsamvf5xkw8BOYl2bJQAADfOXt6EHJFEANF42Dd-2k"}, {"url": "https://www.linkedin.com/in/steve-silverberg-656983200", "name": "Steve Silverberg", "headline": "Digital Growth Analyst | Turning data and creativity into audience systems.", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQEBRC4VyNUWUw/profile-displayphoto-shrink_400_400/profile-displayphoto-shrink_400_400/0/1690912685522?e=1762387200&v=beta&t=81yzoMsqy9YYgu_KZQ62Golwlzw9W_Vv6m4b7PV0kKE"}, {"url": "https://www.linkedin.com/in/rebekahcturner24/", "name": "Rebekah Turner", "headline": "Growth @ Clarion | Voice AI for Healthcare", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQHAdKH4HYklPw/profile-displayphoto-crop_800_800/B4EZorQtdQKYAM-/0/1761662393168?e=1769644800&v=beta&t=Z65VlwRfZZ_DjelnZ3d4K68B59fuy7VaWH-Jtd7MPug"}, {"url": "https://www.linkedin.com/in/ACoAABpRaTcBH9VoElZIdKWdH0zMbCJou7Nwuso", "name": "Stephan Ko", "headline": "Chief of Staff | Economics, Astrophysics @ Princeton", "photo": "https://media.licdn.com/dms/image/v2/C5603AQE5A9SWY1dtqQ/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1593240527996?e=1772064000&v=beta&t=W34TPn-TDspSFlVzCcEZYIWZyT0UZDLeNUI_c_MSNkU"}, {"url": "https://www.linkedin.com/in/sidney-vallery-9b1774b8", "name": "Sidney Vallery", "headline": "Using Generative AI to set new industry standards in voice automation & voice translation @ Parloa", "photo": null}, {"url": "https://www.linkedin.com/in/abbietulloch", "name": "Abbie T.", "headline": "Banking @ JPMorgan | MLT PE Fellow", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQGeC0Sl-OXgKw/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1724421816693?e=1766620800&v=beta&t=DjXBwFCu9ujprO89lxl5F7Tki-A5i9v0pslKP93XWg0"}, {"url": "https://www.linkedin.com/in/bobby-jones-a312682b0", "name": "Bobby Jones", "headline": "Growth @ Arcana -- Portfolio Intelligence & Analytics", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQHOxVAH6FM7LQ/profile-displayphoto-crop_800_800/B4EZp1xyvuIoAI-/0/1762912579384?e=1769644800&v=beta&t=crxOHoW_sDlaEj3IXrmTFZ4DMmpRNbgd5WBWgV4yank"}, {"url": "https://www.linkedin.com/in/amelia-metters-77b86b1a8", "name": "Amelia Metters", "headline": "Growth @ Squad - we’re hiring!", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQG4Zady9nzpWA/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1676844850631?e=1772064000&v=beta&t=G8kBWSsg2Ps-IhBtPzERX_bqWf71l0fAj02ypOfdqu4"}, {"url": "https://www.linkedin.com/in/amine-chajar/", "name": "Amine Chajar", "headline": "Founder & CEO @ NeuroBioLogic | Applied Mathematics & Biology @ Brown", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQHAalDbroUdoA/profile-displayphoto-crop_800_800/B4EZttkCxQHcAI-/0/1767069728544?e=1772064000&v=beta&t=-uM-46z7c0U7WcDRO1alFrs9OgP6eKkgxDbCscff-yk"}, {"url": "https://www.linkedin.com/in/jack-cb", "name": "Jack Cotogno-Buchan", "headline": "Outbound Acceleration", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQH_mF4zsbog0w/profile-displayphoto-shrink_800_800/B4EZdrikP3HgAc-/0/1749855914332?e=1770854400&v=beta&t=qeVmXr8vK_WZQpij_VWTEk9X68fESUgbrHgJIWEJnxs"}, {"url": "https://www.linkedin.com/in/alexandre-viegas-156a57196", "name": "Alexandre Viegas", "headline": "Graduate of Sargent College of Health and Rehabilitation Sciences Boston University", "photo": null}, {"url": "https://www.linkedin.com/in/ryan-young-95778a17a", "name": "Ryan Young", "headline": "Fundamental Research Analyst at Point72", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQFOfSVXYR3azQ/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1675821424245?e=1772064000&v=beta&t=-hdckH0MEbs3PcdbCKbZ3sGYI6uGP5xqPl2U028DFFw"}, {"url": "https://www.linkedin.com/in/caioteig", "name": "Caio Teig", "headline": "Analyst at Blackstone", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQHevwvc8RsDEw/profile-displayphoto-shrink_800_800/B4EZkBkXXJIUAc-/0/1756667934696?e=1765411200&v=beta&t=vIQCGxJG3gWrDPEex8NLLd5shbHtKFrrO59qfG056fs"}, {"url": "https://www.linkedin.com/in/ACoAAClnWosBORCpcC7ojmN5hCLwqpwwfvC_t14", "name": "Zachary Plotkin", "headline": "GTM & Sales | Sourced $5.8M B2B Finance Pipeline | Scaled Startup to Lowe’s & Ace Hardware | Drexel Entrepreneurship & Innovation", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQEyeOmlBFLm-Q/profile-displayphoto-crop_800_800/B4EZuy7z.NJ8AI-/0/1768233582825?e=1772668800&v=beta&t=cAMp44a0bLU2zJqrM3Z6_-1fQ6HdhaWKRKpyh83bQhA"}, {"url": "https://www.linkedin.com/in/jolinferro", "name": "Jo-Lin Ferro", "headline": "Business Development at Wunderkind", "photo": "https://media.licdn.com/dms/image/v2/D5603AQFfRKlJUBUCVA/profile-displayphoto-shrink_800_800/B56ZeEaeQ.HoAk-/0/1750273222120?e=1767830400&v=beta&t=Hcr_1pUHyX-PsR4-8BYLMzf1ATSqNaVNV4uKPF7We5E"}, {"url": "https://www.linkedin.com/in/-emilyshih", "name": "Emily Shih", "headline": "GTM @ Motion | NYU Alum", "photo": "https://media.licdn.com/dms/image/v2/D5603AQGLEHpl7JEDGA/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1710001365793?e=1767225600&v=beta&t=eRhNJopJHesSiAW4nzTGZKyrfbajvJtCqiF0skMIqMU"}, {"url": "https://www.linkedin.com/in/claremwu", "name": "Clare Wu", "headline": "Business Development Representative | Content Creator", "photo": "https://media.licdn.com/dms/image/v2/D5603AQGLtRjAwCcakQ/profile-displayphoto-shrink_400_400/profile-displayphoto-shrink_400_400/0/1698044493783?e=1758153600&v=beta&t=DQbAmIxudTJ_Uq26TEP7mS_jzjFSQcmZ4Y2SLkF3PDM"}, {"url": "https://www.linkedin.com/in/reece-kauffman-ab9a6b343", "name": "Reece Kauffman", "headline": "Integrative Physiology Graduate | Aspiring Medical Sales Representative | Passionate About Healthcare Innovation & Patient Outcomes", "photo": "https://media.licdn.com/dms/image/v2/D4D03AQEIVKPJUY4J-A/profile-displayphoto-scale_400_400/B4DZfxNARHGsAg-/0/1752098408210?e=1763596800&v=beta&t=Nb-FC-D2-hdP-QfALYpbWQh_VxP5PSwwistYMkUvVb0"}, {"url": "https://www.linkedin.com/in/james-barbato-b2a342233", "name": "James Barbato", "headline": "Co-Founder of EUDAI | Ex-Temu, Ex-Movable Ink", "photo": "https://media.licdn.com/dms/image/v2/D5603AQHBzPuA_SjCMQ/profile-displayphoto-shrink_800_800/B56ZXI.PM8GoA4-/0/1742833513607?e=1773878400&v=beta&t=gUaR5cHQCXZgLrLEBDtEkU4JUqpv0JQ0QQt1Y-VpcsY"}, {"url": "https://www.linkedin.com/in/jonathan-taylor-0a6b71293", "name": "Jonathan Taylor", "headline": "U.S Operations at Kiva", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQFrbxtPrmtuvg/profile-displayphoto-crop_800_800/B4EZmU4FajKcAI-/0/1759139356114?e=1771459200&v=beta&t=WIkqZOlUbpide_3oLhK_ieaMk_Xda5qSdF9Tk1BxiQE"}, {"url": "https://linkedin.com/in/arjunr111", "name": "Arjun Raman", "headline": "econ/political science @ kcl, prev @ deloitte", "photo": null}, {"url": "https://www.linkedin.com/in/camdentruett", "name": "Camden Truett", "headline": "Founding BDR @ Flagship", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQFW75Uruf7HFQ/profile-displayphoto-crop_800_800/B4EZqYpc9gKoAQ-/0/1763497595247?e=1769040000&v=beta&t=e391lhgySUc-Fifo5rEKfy8xmJTkBx9aUUMNjMuMVIA"}, {"url": "https://www.linkedin.com/in/ciara-benfield", "name": "Ciara Benfield", "headline": "New Business @ Plaid", "photo": "https://media.licdn.com/dms/image/v2/D4E03AQE9U9Hjb5vdiA/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1719530267710?e=1773878400&v=beta&t=NJMOMscoVy3dwDiqPyMeda2S6kzgzD7e-CmNdUhD4VY"}, {"url": "https://www.linkedin.com/in/svayam-dialani-188436198", "name": "Svayam Dialani", "headline": "Growth at Aura Intelligence", "photo": "https://media.licdn.com/dms/image/v2/C4D03AQGeLfVVnwlaig/profile-displayphoto-shrink_800_800/profile-displayphoto-shrink_800_800/0/1575156864503?e=1769644800&v=beta&t=1P_jykfrrJpYzS13WEJfCHYSWJa0rA22c_nUD8Y2rcg"}, {"url": "https://www.linkedin.com/in/lachlan-scott69345", "name": "Lachlan Scott", "headline": "Associate Underwriter at Burns & Wilcox", "photo": "https://media.licdn.com/dms/image/v2/D5603AQF5uoVcxbWDYw/profile-displayphoto-shrink_400_400/profile-displayphoto-shrink_400_400/0/1693144119816?e=1758153600&v=beta&t=dqjMkURTVJaI1NvDOWuMja_OqCYr83cDbY77YSsRSLU"}];
+// Load ALL profiles from DB
+async function init() {
+  document.getElementById('statTotal').textContent = 'Loading...';
+  try {
+    const resp = await fetch(`${API}/linkedin/database`);
+    const data = await resp.json();
+
+    profiles = [];
+    for (const item of (data.items || [])) {
+      const url = item.url;
+      if (!url || !item.name) continue;
+
+      profiles.push({
+        url: url,
+        name: item.name || 'Unknown',
+        headline: item.headline || '',
+        photo: item.photo_url || '',
+      });
+
+      if (item.photo_url && item.photo_url.includes('s3.amazonaws.com')) {
+        s3Photos[url] = item.photo_url;
+      }
+    }
+
+    console.log(`Loaded ${profiles.length} profiles from DB`);
+  } catch (e) {
+    console.error('Failed to load DB:', e);
+    document.getElementById('statTotal').textContent = 'Failed to load';
+    return;
+  }
+
+  render();
+}
 
 init();
 </script>
