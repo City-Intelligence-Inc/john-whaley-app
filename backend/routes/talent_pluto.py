@@ -128,7 +128,7 @@ async def score_candidates(body: ScoreRequest):
 
         # Load LinkedIn DB
         linkedin_db, photo_db, name_db = _load_linkedin_db()
-        yield f"data: {json.dumps({'type': 'enriched', 'count': len(linkedin_db)})}\n\n"
+        yield f"data: {json.dumps({'type': 'enriched', 'ready': True})}\n\n"
 
         scored_count = 0
         for i in range(0, len(candidates), BATCH_SIZE):
