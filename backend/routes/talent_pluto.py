@@ -221,26 +221,29 @@ async def _score_one(c: dict, idx: int, job_description: str, linkedin_db: dict,
         rubric_section = job_description[job_description.index("SCORING RUBRIC"):]
         rubric_section = rubric_section[:500]
 
-    prompt = f"""Score this candidate 0-100 for the role below.
+    prompt = f"""Score this candidate 0-100 for the role. Return ONLY valid JSON.
 
-Return ONLY valid JSON with this exact structure:
-{{"score":<total 0-100>,"reasoning":"<2-3 sentences overall assessment>","criteria":[{{"name":"<criterion>","score":<0-N where N is the weight>,"max":<weight>,"evidence":"<specific data from the candidate that supports this score>"}}],"highlights":["<strength>"],"gaps":["<gap>"]}}
+{{"score":<0-100>,"reasoning":"<2 sentences>","highlights":["<str>"],"gaps":["<str>"],"criteria":[{{"name":"<str>","score":<n>,"max":<n>,"evidence":"<str>"}}]}}
 
-{rubric_section if rubric_section else "Score holistically across: experience, industry fit, sales capability, stakeholder presence, cultural fit, location."}
+Keep evidence short (under 15 words each). Keep reasoning under 40 words.
 
-ROLE:
-{job_description[:1200]}
+{rubric_section if rubric_section else "Criteria: experience(25), industry(20), sales(20), stakeholders(15), culture(10), location(10)."}
 
-CANDIDATE:
-{candidate_text}"""
+ROLE: {job_description[:800]}
+
+CANDIDATE: {candidate_text[:2000]}"""
 
     for attempt in range(3):
         try:
-            raw = await call_ai_async("openai", api_key, "gpt-4o-mini", prompt, max_tokens=350, temperature=0.3)
+            raw = await call_ai_async("openai", api_key, "gpt-4o-mini", prompt, max_tokens=500, temperature=0.3)
             import re
             m = re.search(r'\{[\s\S]*\}', raw)
             if m:
-                p = json.loads(m.group(0))
+                json_str = m.group(0)
+                # Fix common GPT JSON issues: trailing commas, unescaped newlines
+                json_str = re.sub(r',\s*}', '}', json_str)
+                json_str = re.sub(r',\s*]', ']', json_str)
+                p = json.loads(json_str)
                 score = max(0, min(100, round(p.get("score", 0))))
                 events.append(ev({"type": "log", "index": idx, "name": name, "step": "result", "detail": f"Score: {score}/100"}))
                 events.append(ev({"type": "scored", "index": idx, "id": c.get("id", ""), "name": name, "score": score, "reasoning": p.get("reasoning", ""), "highlights": p.get("highlights", []), "gaps": p.get("gaps", []), "photo_url": photo_url, "linkedin_url": linkedin_url or c.get("linkedinUrl", ""), "evidence": evidence, "criteria": p.get("criteria", [])}))
