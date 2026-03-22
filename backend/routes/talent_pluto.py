@@ -136,6 +136,9 @@ def _update_candidate_record(name: str, linkedin_url: str, session_id: str, role
 def create_session(body: CreateSessionRequest):
     fields = body.model_dump()
     fields["results"] = [r.model_dump() if hasattr(r, "model_dump") else r for r in fields.get("results", [])]
+    # GSI requires user_id to be a non-null string
+    if not fields.get("user_id"):
+        fields["user_id"] = "anonymous"
     session = db.create_tp_session(fields)
 
     # Update candidate records + log activity
