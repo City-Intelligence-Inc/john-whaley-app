@@ -214,12 +214,22 @@ async def _score_one(c: dict, idx: int, job_description: str, linkedin_db: dict,
 
     events.append(ev({"type": "log", "index": idx, "name": name, "step": "score", "detail": f"Sending {len(candidate_text)} chars to GPT-4o-mini{'(enriched)' if enriched else ''}"}))
 
-    # Score with retry
-    prompt = f"""Score candidates 0-100. Use full range: 85-100 exceptional, 70-84 strong, 55-69 decent, 40-54 partial, 25-39 weak, 0-24 poor.
-Return ONLY JSON: {{"score":<n>,"reasoning":"<2-3 sentences>","highlights":["..."],"gaps":["..."]}}
+    # Score with retry — per-criterion breakdown
+    # Extract rubric from job description if present
+    rubric_section = ""
+    if "SCORING RUBRIC" in job_description:
+        rubric_section = job_description[job_description.index("SCORING RUBRIC"):]
+        rubric_section = rubric_section[:500]
+
+    prompt = f"""Score this candidate 0-100 for the role below.
+
+Return ONLY valid JSON with this exact structure:
+{{"score":<total 0-100>,"reasoning":"<2-3 sentences overall assessment>","criteria":[{{"name":"<criterion>","score":<0-N where N is the weight>,"max":<weight>,"evidence":"<specific data from the candidate that supports this score>"}}],"highlights":["<strength>"],"gaps":["<gap>"]}}
+
+{rubric_section if rubric_section else "Score holistically across: experience, industry fit, sales capability, stakeholder presence, cultural fit, location."}
 
 ROLE:
-{job_description[:1500]}
+{job_description[:1200]}
 
 CANDIDATE:
 {candidate_text}"""
@@ -233,7 +243,7 @@ CANDIDATE:
                 p = json.loads(m.group(0))
                 score = max(0, min(100, round(p.get("score", 0))))
                 events.append(ev({"type": "log", "index": idx, "name": name, "step": "result", "detail": f"Score: {score}/100"}))
-                events.append(ev({"type": "scored", "index": idx, "id": c.get("id", ""), "name": name, "score": score, "reasoning": p.get("reasoning", ""), "highlights": p.get("highlights", []), "gaps": p.get("gaps", []), "photo_url": photo_url, "linkedin_url": linkedin_url or c.get("linkedinUrl", ""), "evidence": evidence}))
+                events.append(ev({"type": "scored", "index": idx, "id": c.get("id", ""), "name": name, "score": score, "reasoning": p.get("reasoning", ""), "highlights": p.get("highlights", []), "gaps": p.get("gaps", []), "photo_url": photo_url, "linkedin_url": linkedin_url or c.get("linkedinUrl", ""), "evidence": evidence, "criteria": p.get("criteria", [])}))
                 return "".join(events)
             else:
                 events.append(ev({"type": "scored", "index": idx, "id": c.get("id", ""), "name": name, "score": 0, "reasoning": raw[:200], "highlights": [], "gaps": []}))
