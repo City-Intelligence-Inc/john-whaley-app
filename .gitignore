@@ -10,3 +10,4 @@ __pycache__/
 *.tfstate.backup
 .terraform/
 linkedin-scrapes/photos/
+.gstack/

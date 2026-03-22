@@ -43,6 +43,8 @@ class CreateSessionRequest(BaseModel):
     avg_score: int = 0
     results: list[ScoredCandidate] = []
     user_id: Optional[str] = None
+    user_name: Optional[str] = None
+    duration: Optional[int] = None
 
 class RoleTemplate(BaseModel):
     title: str
@@ -207,7 +209,7 @@ CANDIDATE:
                 p = json.loads(m.group(0))
                 score = max(0, min(100, round(p.get("score", 0))))
                 events.append(ev({"type": "log", "index": idx, "name": name, "step": "result", "detail": f"Score: {score}/100"}))
-                events.append(ev({"type": "scored", "index": idx, "id": c.get("id", ""), "name": name, "score": score, "reasoning": p.get("reasoning", ""), "highlights": p.get("highlights", []), "gaps": p.get("gaps", []), "photo_url": photo_url}))
+                events.append(ev({"type": "scored", "index": idx, "id": c.get("id", ""), "name": name, "score": score, "reasoning": p.get("reasoning", ""), "highlights": p.get("highlights", []), "gaps": p.get("gaps", []), "photo_url": photo_url, "linkedin_url": linkedin_url or c.get("linkedinUrl", "")}))
                 return "".join(events)
             else:
                 events.append(ev({"type": "scored", "index": idx, "id": c.get("id", ""), "name": name, "score": 0, "reasoning": raw[:200], "highlights": [], "gaps": []}))
@@ -238,7 +240,7 @@ def create_session(body: CreateSessionRequest):
 @router.get("/sessions")
 def list_sessions(user_id: Optional[str] = None):
     sessions = db.list_tp_sessions(user_id=user_id)
-    return [{"session_id": s["session_id"], "role": s.get("role", ""), "role_category": s.get("role_category", ""), "file_name": s.get("file_name", ""), "candidate_count": s.get("candidate_count", 0), "top_tier": s.get("top_tier", 0), "good_fit": s.get("good_fit", 0), "avg_score": s.get("avg_score", 0), "created_at": s.get("created_at", "")} for s in sessions]
+    return [{"session_id": s["session_id"], "role": s.get("role", ""), "role_category": s.get("role_category", ""), "file_name": s.get("file_name", ""), "candidate_count": s.get("candidate_count", 0), "top_tier": s.get("top_tier", 0), "good_fit": s.get("good_fit", 0), "avg_score": s.get("avg_score", 0), "created_at": s.get("created_at", ""), "user_name": s.get("user_name", ""), "duration": s.get("duration", 0)} for s in sessions]
 
 @router.get("/sessions/{session_id}")
 def get_session(session_id: str):
