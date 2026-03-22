@@ -404,10 +404,15 @@ CANDIDATE: {candidate_text[:2000]}"""
 
 @router.post("/sessions", status_code=201)
 def create_session(body: CreateSessionRequest):
+    from decimal import Decimal
+    import json as _json
+
     fields = body.model_dump()
     fields["results"] = [r.model_dump() if hasattr(r, "model_dump") else r for r in fields.get("results", [])]
     if not fields.get("user_id"):
         fields["user_id"] = "anonymous"
+    # DynamoDB cannot store Python floats — convert everything to Decimal
+    fields = _json.loads(_json.dumps(fields, default=str), parse_float=Decimal)
     session = db.create_tp_session(fields)
     _log_activity("scored_candidates", {"session_id": session["session_id"], "role": fields.get("role", ""), "candidate_count": fields.get("candidate_count", 0)})
     return session
