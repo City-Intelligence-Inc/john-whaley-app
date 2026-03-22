@@ -61,7 +61,8 @@ class ScoreRequest(BaseModel):
     candidates: list[dict]  # [{id, name, fullText, linkedinUrl?}]
     job_description: str
     api_key: str = ""
-    top_k: int = 100  # Max candidates to GPT-score
+    top_k: int = 100
+    ideal_candidate: str = ""  # HyDE: ideal candidate profile for embedding comparison
 
 class UpdateStageRequest(BaseModel):
     session_id: str
@@ -115,7 +116,7 @@ def _load_linkedin_db() -> tuple[dict[str, str], dict[str, str], dict[str, str]]
 
 # ── Score endpoint (SSE, runs on App Runner = no timeout) ──
 
-async def _embedding_prefilter(candidates: list[dict], job_description: str, api_key: str, top_k: int = 100) -> list[dict]:
+async def _embedding_prefilter(candidates: list[dict], job_description: str, api_key: str, top_k: int = 100, ideal_candidate: str = "") -> list[dict]:
     """Use embeddings to shortlist top_k candidates before expensive GPT scoring."""
     if len(candidates) <= top_k:
         return candidates  # No need to filter
@@ -124,8 +125,9 @@ async def _embedding_prefilter(candidates: list[dict], job_description: str, api
         import openai as openai_lib
         client = openai_lib.AsyncOpenAI(api_key=api_key)
 
-        # Embed job description
-        jd_resp = await client.embeddings.create(model="text-embedding-3-small", input=[job_description[:2000]])
+        # HyDE: embed ideal candidate profile if provided, otherwise job description
+        embed_text = ideal_candidate[:2000] if ideal_candidate else job_description[:2000]
+        jd_resp = await client.embeddings.create(model="text-embedding-3-small", input=[embed_text])
         jd_vec = jd_resp.data[0].embedding
 
         # Embed all candidates (batch of 100)
@@ -167,7 +169,7 @@ async def score_candidates(body: ScoreRequest):
         filtered = candidates
         if len(candidates) > TOP_K:
             yield f"data: {json.dumps({'type': 'log', 'index': 0, 'name': 'System', 'step': 'filter', 'detail': f'Pre-filtering {len(candidates)} candidates to top {TOP_K} using embeddings...'})}\n\n"
-            filtered = await _embedding_prefilter(candidates, job_description, api_key, TOP_K)
+            filtered = await _embedding_prefilter(candidates, job_description, api_key, TOP_K, body.ideal_candidate)
             yield f"data: {json.dumps({'type': 'log', 'index': 0, 'name': 'System', 'step': 'filter', 'detail': f'Shortlisted {len(filtered)} candidates for GPT scoring'})}\n\n"
 
         yield f"data: {json.dumps({'type': 'start', 'total': len(filtered), 'prefiltered_from': len(candidates)})}\n\n"
