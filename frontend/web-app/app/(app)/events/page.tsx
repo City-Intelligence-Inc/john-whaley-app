@@ -157,6 +157,14 @@ export default function EventsPage() {
                     </div>
                   )}
                   <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs opacity-0 group-hover:opacity-100"
+                    onClick={(e) => { e.stopPropagation(); router.push(`/events/${s.session_id}/rounds`); }}
+                  >
+                    3 Rounds
+                  </Button>
+                  <Button
                     variant="ghost"
                     size="icon"
                     className="size-8 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive"

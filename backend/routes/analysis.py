@@ -43,12 +43,12 @@ def _selection_context(prefs: SelectionPreferences | None) -> str:
         return ""
     parts: list[str] = []
     if prefs.venue_capacity:
-        parts.append(f"VENUE CAPACITY: {prefs.venue_capacity} attendees.")
+        parts.append(f"VENUE CAPACITY: {prefs.venue_capacity} candidates.")
     if prefs.attendee_mix:
         type_labels = {
-            "vc": "VCs / Investors", "founder": "Founders", "government": "Government",
-            "engineer": "Engineers", "pm": "PMs",
-            "student": "Students", "press": "Press / Media", "other": "Other",
+            "sales_leader": "Sales Leaders", "ae": "Account Executives",
+            "sdr": "SDRs / BDRs", "sales_engineer": "Sales Engineers",
+            "account_manager": "Account Managers", "other": "Other",
         }
         mix_lines = [f"  - {type_labels.get(k, k)}: {v}%" for k, v in prefs.attendee_mix.items() if v > 0]
         if mix_lines:
@@ -68,9 +68,9 @@ def _selection_context(prefs: SelectionPreferences | None) -> str:
 
 def _build_pool_summary(type_counts: dict[str, int], total: int) -> str:
     type_labels = {
-        "vc": "VCs / Investors", "founder": "Founders", "government": "Government",
-        "engineer": "Engineers", "pm": "PMs",
-        "student": "Students", "press": "Press / Media", "other": "Other",
+        "sales_leader": "Sales Leaders", "ae": "Account Executives",
+        "sdr": "SDRs / BDRs", "sales_engineer": "Sales Engineers",
+        "account_manager": "Account Managers", "other": "Other",
     }
     lines = []
     for key, label in type_labels.items():
@@ -91,24 +91,22 @@ Here is the applicant's information (self-reported registration data + pre-scrap
 
 {info}
 
-Classify this applicant AND cross-check their claimed role against any LinkedIn data provided.
+Classify this sales candidate's role and summarize their profile.
 
 Return ONLY a JSON object:
 {{
-  "attendee_type": "<MUST be one of: vc, founder, engineer, pm, student, press, government, other>",
-  "attendee_type_detail": "<specific label, e.g. 'Partner at Sequoia', 'AI Startup Founder', 'Staff Engineer at Google'>",
-  "summary": "<2-4 bullet points: current role & company, key background/experience, what makes them relevant. Use format like '- Role at Company\\n- 10 yrs AI/ML experience\\n- Stanford PhD'. Be specific, use real data from their profile.>"
+  "attendee_type": "<MUST be one of: sales_leader, ae, sdr, sales_engineer, account_manager, other>",
+  "attendee_type_detail": "<specific label, e.g. 'Enterprise AE at Salesforce', 'SDR at HubSpot', 'VP Sales at Snowflake'>",
+  "summary": "<2-4 bullet points: current role & company, years of experience, key achievements, notable skills. Use format like '- Enterprise AE at Salesforce\\n- 8 yrs SaaS sales, $500K+ deals\\n- Top 10% of team'. Be specific, use real data from their profile.>"
 }}
 
 STRICT CATEGORY RULES:
-- "vc": Venture capitalists, angel investors, LPs, investment professionals at funds
-- "founder": Startup founders, co-founders, CEOs of startups they founded
-- "engineer": Software engineers, ML engineers, research scientists, CTOs (if primarily technical)
-- "pm": Product managers, product leads, program managers, operations leads
-- "student": Current students (undergrad, grad, MBA, PhD candidates)
-- "press": Journalists, reporters, media professionals, content creators with press credentials
-- "government": Government officials, diplomats, trade representatives, public sector leaders
-- "other": Everyone else (consultants, academics/professors, biz dev, sales, marketing, designers, etc.)
+- "sales_leader": VP Sales, CRO, Head of Sales, Sales Director, or anyone managing a sales team/org
+- "ae": Account Executives, closers, enterprise/mid-market/commercial sales reps, territory managers
+- "sdr": SDRs, BDRs, Sales Development Reps, outbound/inbound prospectors, lead gen roles
+- "sales_engineer": Sales Engineers, Solutions Engineers, Pre-Sales, Solutions Architects
+- "account_manager": Account Managers, Customer Success, Renewals, Client Managers
+- "other": Everyone else (marketing, ops, non-sales roles, unclear)
 
 Return ONLY the JSON, no other text.
 """.strip()
@@ -128,13 +126,12 @@ Evaluating this applicant:
 {info}
 
 Classified as: {attendee_type} ({attendee_type_detail})
-{investor_context}
 
 Return ONLY a JSON object:
 {{"status": "accepted" or "waitlisted" or "rejected", "reasoning": "<2-3 sentences: who they are, why this decision>"}}
 
 Guidelines — default toward acceptance:
-- ACCEPT: Strong or good fit for the event.
+- ACCEPT: Strong or good fit for the role.
 - WAITLIST: Moderate fit, may accept if space allows.
 - REJECT: Weak or no fit.
 
@@ -186,57 +183,57 @@ Return ONLY: {{"summary": "<your summary>"}}
 # ── Ranking Judges ──
 
 RANKING_JUDGES = {
-    "vc_rank": {
-        "name": "VC Rank",
-        "description": "Ranks by investor quality: fund reputation, seniority, deal-making power, check size, portfolio track record",
-        "prompt": """You are a seasoned LP evaluating venture capitalists for an exclusive AI event.
+    "closer_rank": {
+        "name": "Closer Rank",
+        "description": "Ranks by closing ability: deal size, quota attainment, win rate, enterprise selling experience",
+        "prompt": """You are a VP of Sales at a top SaaS company evaluating sales candidates.
 
-Rank ALL the people below from #1 (most important VC to have at the event) to #N (least important).
+Rank ALL the people below from #1 (strongest closer) to #N (weakest).
 
 Ranking criteria (in order of importance):
-1. Fund reputation and AUM (tier 1 funds like a16z, Sequoia, Accel > unknown funds)
-2. Seniority and decision-making power (GP/Managing Partner > Associate > Analyst > Scout)
-3. Investment track record (notable portfolio companies, exits)
-4. Relevance to AI/tech (AI-focused fund > generalist > unrelated sector)
-5. Check size capability (can they actually fund startups at this event?)
+1. Deal size and complexity (enterprise $500K+ deals > mid-market > SMB)
+2. Quota attainment and consistency (top 10% of team > top 25% > average)
+3. Sales cycle sophistication (multi-stakeholder, long-cycle > transactional)
+4. Company pedigree (top SaaS companies like Salesforce, HubSpot, Snowflake > unknown)
+5. Seniority progression (AE > SDR, rapid promotions show high performance)
+6. Industry breadth and domain expertise
 
-People who are NOT investors at all should be ranked at the bottom.
-People with no verifiable fund affiliation go below verified investors.""",
+People with no closing experience (pure SDRs, marketers) rank at the bottom.""",
     },
-    "founder_rank": {
-        "name": "Founder Rank",
-        "description": "Ranks by founder quality: traction, funding raised, team, market, previous exits",
-        "prompt": """You are a top-tier VC evaluating founders for an exclusive AI event.
+    "hunter_rank": {
+        "name": "Hunter Rank",
+        "description": "Ranks by prospecting & pipeline generation: outbound skills, lead gen, SDR performance",
+        "prompt": """You are a Head of Sales Development evaluating outbound sales talent.
 
-Rank ALL the people below from #1 (strongest founder) to #N (weakest/not a founder).
+Rank ALL the people below from #1 (best pipeline builder) to #N (weakest).
 
 Ranking criteria (in order of importance):
-1. Traction (revenue, users, growth metrics, product shipped)
-2. Funding raised (Series B+ > Series A > Seed > Pre-seed > Nothing)
-3. Previous exits or successful companies
-4. Team quality (technical co-founders, team size, notable hires)
-5. Market size and relevance to AI
-6. Technical depth (can they actually build what they're claiming?)
+1. Outbound prospecting track record (meetings booked, pipeline generated)
+2. SDR/BDR grade and performance metrics (A-grade SDRs > B > C)
+3. Sales tools proficiency (Outreach, Salesloft, ZoomInfo, LinkedIn Sales Nav)
+4. Scrappiness and hustle (startup/early-stage experience, 0-to-1 building)
+5. Communication skills and call highlights quality
+6. Ability to sell into multiple personas and departments
 
-People who are NOT founders should be ranked at the bottom.
-Pre-idea, pre-team, pre-revenue solo "founders" rank below funded founders.""",
+People with no prospecting or outbound experience rank at the bottom.""",
     },
-    "engineer_rank": {
-        "name": "Engineer Rank",
-        "description": "Ranks by engineering depth: technical skills, systems built, research published, companies worked at",
-        "prompt": """You are a principal engineer at a top AI lab evaluating technical talent for an exclusive AI event.
+    "overall_rank": {
+        "name": "Overall Rank",
+        "description": "Holistic sales talent ranking: experience, performance, trajectory, culture fit",
+        "prompt": """You are a Chief Revenue Officer building a world-class sales team.
 
-Rank ALL the people below from #1 (strongest technical person) to #N (least technical).
+Rank ALL the people below from #1 (strongest overall sales hire) to #N (weakest).
 
 Ranking criteria (in order of importance):
-1. Technical depth in AI/ML (published papers, models built, systems deployed)
-2. Company pedigree (FAANG/top AI labs > startups > unknown companies)
-3. Seniority and scope (Staff/Principal > Senior > Mid > Junior)
-4. Hands-on building (actually ships code/models vs manages people)
-5. Open source contributions, patents, research citations
-6. Relevant domain expertise (AI infra, LLMs, robotics, etc.)
+1. Performance track record (team ranking, quota attainment, grades)
+2. Experience depth (years in sales, deal complexity, industry breadth)
+3. Career trajectory (promotions, increasing responsibility, notable employers)
+4. Competency scores (scrappiness, communication, organization)
+5. Company quality (well-known sales orgs, top tech companies, strong training programs)
+6. Profile completeness and engagement (detailed responses, call highlights)
 
-Non-technical people (VCs, BizDev, PMs with no eng background) rank at the bottom.""",
+Weight proven results over credentials. A top-performing SDR at a startup
+outranks a mediocre AE at a big company.""",
     },
 }
 
@@ -284,23 +281,47 @@ async def rank_applicants(body: ReviewRequest):
     for i, a in enumerate(applicants):
         aid = a["applicant_id"]
         name = get_applicant_name(a)
-        headline = a.get("linkedin_headline") or a.get("title") or ""
-        company = a.get("company") or a.get("linkedin_company") or ""
-        about = (a.get("linkedin_about") or "")[:200]
-        experience = (a.get("linkedin_experience") or "")[:200]
-        education = a.get("linkedin_education") or ""
-        summary = a.get("ai_summary") or ""
         category = a.get("attendee_type") or ""
         detail = a.get("attendee_type_detail") or ""
+        summary = a.get("ai_summary") or ""
+        years_exp = a.get("total_years_sales_experience") or ""
+        team_rank = a.get("ranking_within_team_new") or ""
+        sdr_grade = a.get("sdr_grade") or ""
+        ae_grade = a.get("ae_grade") or ""
+        industries = a.get("industries") or ""
+        kpis = a.get("sales_kpis") or ""
+        tools = a.get("sales_tool_experience") or ""
+        deal_size = a.get("deal_size") or ""
+        highlights = a.get("highlights") or ""
+        competencies = a.get("competencies") or ""
+        sales_cycle = (a.get("sales_cycle_description") or "")[:200]
+
+        # Extract crustdata for headline/employers
+        cd_raw = a.get("crustdata_enrichment_data")
+        headline, employers, schools = "", "", ""
+        try:
+            import json as _json
+            cd = _json.loads(cd_raw) if isinstance(cd_raw, str) else cd_raw
+            if isinstance(cd, list) and cd:
+                cd = cd[0]
+            if isinstance(cd, dict):
+                headline = cd.get("headline") or ""
+                employers = ", ".join(cd.get("all_employers") or [])
+                schools = ", ".join(cd.get("all_schools") or [])
+        except Exception:
+            pass
 
         profiles_text += f"""
 [{aid}] {name}
 Headline: {headline}
-Company: {company}
 Category: {category} ({detail})
-About: {about}
-Experience: {experience}
-Education: {education}
+Years Sales Exp: {years_exp} | Team Rank: top {team_rank}% | SDR Grade: {sdr_grade} | AE Grade: {ae_grade}
+Employers: {employers}
+Education: {schools}
+Industries: {industries} | KPIs: {kpis} | Tools: {tools}
+Deal Size: ${deal_size} | Sales Cycle: {sales_cycle}
+Competencies: {str(competencies)[:200]}
+Highlights: {str(highlights)[:200]}
 Summary: {summary}
 ---
 """
@@ -401,7 +422,6 @@ async def _score_one(applicant: dict, body: BulkAnalyzeRequest, pool_summary: st
             total=total, pool_summary=pool_summary,
             info=_applicant_info_text(applicant),
             attendee_type=attendee_type, attendee_type_detail=attendee_type_detail,
-            investor_context="",
         )
         try:
             raw = await call_ai_async(body.provider, body.api_key, body.model, prompt)
@@ -686,7 +706,7 @@ async def reallocate(body: ReallocateRequest):
     if not applicants:
         raise HTTPException(status_code=400, detail="No applicants")
 
-    type_labels = {"vc": "VCs", "founder": "Founders", "engineer": "Engineers", "pm": "PMs", "student": "Students", "press": "Press", "government": "Government", "other": "Other"}
+    type_labels = {"sales_leader": "Sales Leaders", "ae": "AEs", "sdr": "SDRs", "sales_engineer": "SEs", "account_manager": "AMs", "other": "Other"}
     by_type: dict[str, list] = {k: [] for k in type_labels}
 
     for a in applicants:

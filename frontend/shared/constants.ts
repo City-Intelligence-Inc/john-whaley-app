@@ -3,13 +3,11 @@
 export const APP_NAME = "Selecta";
 
 export const ATTENDEE_TYPES = [
-  { key: "vc", label: "VCs", color: "#6366f1" },
-  { key: "founder", label: "Founders", color: "#f59e0b" },
-  { key: "engineer", label: "Engineers", color: "#3b82f6" },
-  { key: "pm", label: "PMs", color: "#ec4899" },
-  { key: "student", label: "Students", color: "#8b5cf6" },
-  { key: "press", label: "Press/Media", color: "#10b981" },
-  { key: "government", label: "Government", color: "#0ea5e9" },
+  { key: "sales_leader", label: "Sales Leaders", color: "#6366f1" },
+  { key: "ae", label: "Account Executives", color: "#f59e0b" },
+  { key: "sdr", label: "SDRs", color: "#3b82f6" },
+  { key: "sales_engineer", label: "Sales Engineers", color: "#ec4899" },
+  { key: "account_manager", label: "Account Managers", color: "#10b981" },
   { key: "other", label: "Other", color: "#6b7280" },
 ] as const;
 
@@ -34,7 +32,7 @@ export const PANEL_SIZES = [3, 6, 9, 12] as const;
 export const DEFAULT_SELECTION_PREFERENCES = {
   venue_capacity: null,
   attendee_mix: {},
-  auto_accept_types: ["student", "faculty", "alumni"],
+  auto_accept_types: [],
   relevance_filter: "moderate",
   custom_priorities: "",
   custom_categories: [],

@@ -1,109 +1,163 @@
 """
-Deterministic ranker — classifies and scores applicants using LinkedIn data.
-No AI calls, no streaming, no API keys. Pure pattern matching.
+Deterministic ranker for sales candidates.
+No AI calls, no streaming, no API keys. Pure pattern matching + scoring.
 
 POST /rank/{session_id}  — Rank all applicants in a session
+
+Scoring breakdown (0–100):
+  Experience    0–20   years of sales experience
+  Performance   0–25   team ranking, grades, competency scores
+  Companies     0–20   employer quality, education, breadth
+  Skills        0–20   industries, KPIs, tools, deal size
+  Profile       0–15   data completeness
 """
 
+import json
 import re
 from fastapi import APIRouter, HTTPException
 from db import scan_all_applicants, update_applicant_fields, get_session_or_404
-from config import VC_ROLE_TAXONOMY, VC_FUND_INDICATORS
 
 router = APIRouter(prefix="/rank", tags=["rank"])
 
-# ── Title patterns for classification ──
+# ── Sales role title patterns ──
 
-FOUNDER_TITLES = [
-    "founder", "co-founder", "cofounder", "ceo", "chief executive",
-    "co-ceo", "managing director", "president",
+SALES_LEADER_TITLES = [
+    "vp sales", "vp of sales", "vice president sales", "vice president of sales",
+    "cro", "chief revenue", "head of sales", "sales director", "director of sales",
+    "svp sales", "evp sales", "general manager",
+    "vp revenue", "head of revenue", "director of revenue",
+    "vp business development", "head of business development",
+    "regional vp", "area vp", "divisional vp",
+    "director, gtm", "director of gtm", "head of gtm", "vp gtm",
+    "director of growth", "head of growth", "vp growth",
 ]
 
-ENGINEER_TITLES = [
-    "engineer", "developer", "programmer", "swe", "sde",
-    "software", "backend", "frontend", "fullstack", "full-stack",
-    "devops", "sre", "infrastructure", "platform engineer",
-    "machine learning engineer", "ml engineer", "ai engineer",
-    "data engineer", "ios developer", "android developer",
-    "cto", "chief technology", "vp engineering", "head of engineering",
-    "tech lead", "staff engineer", "principal engineer", "distinguished engineer",
+AE_TITLES = [
+    "account executive", "enterprise ae", "commercial ae", "mid-market ae",
+    "strategic ae", "senior account executive",
+    "sales representative", "sales rep", "outside sales",
+    "enterprise sales", "field sales", "inside sales representative",
+    "named account", "territory manager", "territory rep",
+    "solutions consultant", "sales consultant",
+    "founding ae", "founding account executive",
+    "technical sales", "new business",
 ]
 
-PM_TITLES = [
-    "product manager", "program manager", "project manager",
-    "product lead", "head of product", "vp product", "cpo",
-    "chief product", "product director", "director of product",
-    "product owner", "technical program manager", "tpm",
+SDR_TITLES = [
+    "sdr", "sales development", "bdr", "business development rep",
+    "business development representative", "business developer",
+    "business development associate", "business development intern",
+    "outbound rep", "inbound rep", "lead generation",
+    "prospecting", "appointment setter",
+    "sales associate", "junior sales",
+    "outbound acceleration",
 ]
 
-RESEARCHER_TITLES = [
-    "professor", "researcher", "scientist", "postdoc", "post-doc",
-    "research fellow", "phd candidate", "phd student",
-    "research engineer", "research scientist", "principal scientist",
-    "faculty", "lecturer", "assistant professor", "associate professor",
-    "research associate", "lab director", "pi ",
+# GTM / Growth roles — catch-all for go-to-market and growth titles
+GTM_TITLES = [
+    "gtm", "go-to-market", "go to market",
+    "growth associate", "growth manager", "growth lead",
+    "growth analyst", "growth equity",
+    "founding gtm", "gtm lead", "gtm strategy",
+    "partnerships", "partner manager",
 ]
 
-STUDENT_TITLES = [
-    "student", "undergraduate", "grad student", "masters student",
-    "mba candidate", "mba student", "pursuing", "studying",
-    "class of 20", "expected 20", "intern",
+SALES_ENGINEER_TITLES = [
+    "sales engineer", "solutions engineer", "pre-sales engineer",
+    "solutions architect", "technical account manager",
+    "presales", "pre-sales", "demo engineer",
 ]
 
-# ── Seniority scoring within each category ──
-
-FOUNDER_SENIORITY = [
-    (100, ["ceo", "chief executive", "co-ceo"]),
-    (95, ["co-founder", "cofounder", "founder"]),
-    (85, ["cto", "chief technology", "cpo", "chief product"]),
-    (80, ["managing director", "president"]),
-    (70, ["vp", "vice president", "head of"]),
-    (60, ["director"]),
+ACCOUNT_MANAGER_TITLES = [
+    "account manager", "customer success", "client success",
+    "relationship manager", "client manager",
+    "csm", "customer account", "renewals",
+    "client partner", "client services",
 ]
 
-ENGINEER_SENIORITY = [
-    (100, ["cto", "chief technology"]),
-    (95, ["distinguished engineer", "fellow"]),
-    (90, ["vp engineering", "head of engineering"]),
-    (85, ["principal engineer", "staff engineer"]),
-    (75, ["senior staff", "tech lead", "engineering manager"]),
-    (65, ["senior engineer", "senior developer", "senior swe", "sr."]),
-    (50, ["engineer", "developer", "swe", "sde"]),
-    (35, ["junior", "associate engineer", "new grad"]),
-    (20, ["intern"]),
+# ── Seniority tiers within each role ──
+
+SALES_LEADER_SENIORITY = [
+    (100, ["cro", "chief revenue"]),
+    (95,  ["svp sales", "evp sales"]),
+    (90,  ["vp sales", "vice president sales", "vp of sales", "vp revenue"]),
+    (85,  ["head of sales", "head of revenue", "head of business development"]),
+    (75,  ["sales director", "director of sales", "director of revenue"]),
+    (65,  ["regional vp", "area vp"]),
+    (55,  ["general manager"]),
 ]
 
-PM_SENIORITY = [
-    (100, ["cpo", "chief product"]),
-    (90, ["vp product", "head of product"]),
-    (80, ["director of product", "product director", "senior director"]),
-    (70, ["senior product manager", "senior pm", "group pm", "lead pm"]),
-    (55, ["product manager", "program manager", "project manager", "tpm"]),
-    (40, ["associate product manager", "apm", "associate pm"]),
-    (20, ["intern"]),
+AE_SENIORITY = [
+    (90, ["enterprise ae", "strategic ae", "enterprise sales", "named account"]),
+    (80, ["senior account executive", "field sales"]),
+    (70, ["mid-market ae", "commercial ae"]),
+    (60, ["account executive", "territory manager"]),
+    (50, ["sales representative", "sales rep", "inside sales"]),
+    (40, ["sales consultant"]),
+    (25, ["junior"]),
 ]
 
-RESEARCHER_SENIORITY = [
-    (100, ["full professor", "professor emeritus"]),
-    (90, ["associate professor", "professor"]),
-    (80, ["assistant professor"]),
-    (75, ["principal scientist", "lab director", "pi "]),
-    (65, ["research scientist", "senior researcher"]),
-    (55, ["postdoc", "post-doc", "research fellow"]),
-    (45, ["research associate", "researcher"]),
-    (35, ["phd candidate", "phd student"]),
-    (20, ["research intern"]),
+SDR_SENIORITY = [
+    (85, ["senior sdr", "lead sdr", "sdr manager", "sdr lead"]),
+    (70, ["senior bdr", "lead bdr"]),
+    (55, ["sdr", "sales development"]),
+    (45, ["bdr", "business development"]),
+    (35, ["outbound rep", "lead generation"]),
+    (20, ["sales associate", "junior sales"]),
 ]
 
-STUDENT_SENIORITY = [
-    (80, ["phd", "doctoral"]),
-    (65, ["mba"]),
-    (55, ["masters", "ms ", "m.s.", "graduate student"]),
-    (40, ["undergraduate", "bachelors", "bs ", "b.s."]),
-    (30, ["student"]),
-    (15, ["high school"]),
+SE_SENIORITY = [
+    (90, ["solutions architect", "senior solutions engineer"]),
+    (75, ["sales engineer", "solutions engineer"]),
+    (60, ["pre-sales engineer", "presales"]),
+    (40, ["demo engineer"]),
 ]
 
+AM_SENIORITY = [
+    (85, ["senior account manager", "client partner"]),
+    (70, ["account manager", "relationship manager"]),
+    (60, ["customer success manager", "csm", "customer success"]),
+    (45, ["renewals"]),
+    (30, ["junior account manager"]),
+]
+
+GTM_SENIORITY = [
+    (90, ["head of gtm", "vp gtm", "director of growth", "head of growth"]),
+    (80, ["director, gtm", "gtm strategy", "growth lead"]),
+    (70, ["gtm lead", "founding gtm", "growth manager"]),
+    (60, ["gtm", "go-to-market", "partnerships"]),
+    (50, ["growth associate", "growth analyst"]),
+    (40, ["growth equity"]),
+    (30, ["partner manager"]),
+]
+
+# ── Known strong employers & schools ──
+
+TOP_COMPANIES = {
+    # Tech giants
+    "google", "meta", "facebook", "amazon", "apple", "microsoft", "salesforce",
+    "oracle", "ibm", "cisco", "dell", "hp", "intel", "nvidia",
+    # Top SaaS / sales orgs
+    "hubspot", "snowflake", "datadog", "cloudflare", "twilio", "stripe",
+    "mongodb", "atlassian", "zendesk", "servicenow", "workday",
+    "crowdstrike", "palo alto", "zscaler", "okta", "splunk",
+    "gong", "outreach", "salesloft", "clari", "6sense", "zoominfo",
+    # Finance (strong sales culture)
+    "goldman sachs", "jp morgan", "jpmorgan", "morgan stanley", "citi",
+    "deutsche bank", "ubs", "barclays", "credit suisse",
+    # Consulting
+    "mckinsey", "bain", "bcg", "deloitte", "accenture", "pwc", "kpmg", "ey",
+}
+
+TOP_SCHOOLS = {
+    "stanford", "harvard", "mit", "wharton", "columbia", "yale", "princeton",
+    "uchicago", "chicago booth", "kellogg", "berkeley", "nyu", "cornell",
+    "duke", "michigan", "virginia", "dartmouth", "brown", "upenn",
+    "carnegie mellon", "georgetown", "northwestern",
+}
+
+
+# ── Helpers ──
 
 def _normalize(text: str) -> str:
     return text.lower().strip()
@@ -119,134 +173,245 @@ def _get_seniority(text: str, tiers: list[tuple[int, list[str]]]) -> int:
     for score, patterns in tiers:
         if any(p in t for p in patterns):
             return score
-    return 50  # default mid-tier
+    return 50
 
 
-def _is_vc(title: str, company: str, experience: str) -> tuple[bool, int, str]:
-    """Check if someone is a VC. Returns (is_vc, score, role_name)."""
-    combined = _normalize(f"{title} {company} {experience}")
+def _parse_json_field(value) -> list | dict | None:
+    """Parse a JSON string, or return as-is if already parsed."""
+    if isinstance(value, (list, dict)):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, ValueError):
+            return None
+    return None
 
-    # Check if they work at a fund-like company
-    has_fund = any(ind in _normalize(company) for ind in VC_FUND_INDICATORS) if company else False
 
-    # Match against VC taxonomy
-    best_score = 0
-    best_role = ""
-    for role_id, info in VC_ROLE_TAXONOMY.items():
-        for t in info["titles"]:
-            if t in _normalize(title) or t in combined[:200]:
-                if info["seniority_score"] > best_score:
-                    best_score = info["seniority_score"]
-                    best_role = t.title()
-                break
+def _extract_crustdata(applicant: dict) -> dict:
+    """Pull the first object out of crustdata_enrichment_data."""
+    cd = _parse_json_field(applicant.get("crustdata_enrichment_data"))
+    if isinstance(cd, list) and len(cd) > 0:
+        return cd[0]
+    if isinstance(cd, dict):
+        return cd
+    return {}
 
-    if best_score > 0:
-        # Bonus for being at a real fund
-        if has_fund:
-            best_score = min(100, best_score + 5)
-        return True, best_score, best_role
 
-    # Check for "investor" in title even without taxonomy match
-    if "investor" in _normalize(title) or "venture" in _normalize(title):
-        return True, 45, "Investor"
+# ── Scoring functions (each returns 0–max) ──
 
-    return False, 0, ""
+def _score_experience(applicant: dict) -> int:
+    """Years of sales experience → 0-20 pts."""
+    try:
+        years = int(applicant.get("total_years_sales_experience", 0) or 0)
+    except (ValueError, TypeError):
+        years = 0
 
+    if years >= 10: return 20
+    if years >= 7:  return 16
+    if years >= 5:  return 12
+    if years >= 3:  return 8
+    if years >= 1:  return 4
+    return 0
+
+
+def _score_performance(applicant: dict) -> int:
+    """Team ranking + grades + competency scores → 0-25 pts."""
+    score = 0
+
+    # Team ranking (0-10): lower percentile = better
+    try:
+        rank_pct = int(applicant.get("ranking_within_team_new", 0) or 0)
+        if rank_pct > 0:
+            if   rank_pct <= 5:  score += 10
+            elif rank_pct <= 10: score += 8
+            elif rank_pct <= 25: score += 6
+            elif rank_pct <= 50: score += 3
+            else:                score += 1
+    except (ValueError, TypeError):
+        pass
+
+    # Best of SDR / AE grade (0-8)
+    grade_pts = {"S": 8, "A": 7, "B": 5, "C": 3, "D": 1, "F": 0}
+    sdr_g = grade_pts.get(str(applicant.get("sdr_grade", "")).strip().upper(), -1)
+    ae_g  = grade_pts.get(str(applicant.get("ae_grade", "")).strip().upper(), -1)
+    score += max(sdr_g, ae_g, 0)
+
+    # Competency average (0-7)
+    comps = _parse_json_field(applicant.get("competencies"))
+    if isinstance(comps, list) and comps:
+        nums = []
+        for c in comps:
+            try:
+                nums.append(float(c["score"]))
+            except (KeyError, ValueError, TypeError):
+                pass
+        if nums:
+            avg = sum(nums) / len(nums)          # 1–5 scale
+            score += min(7, round(avg * 1.4))     # maps 5 → 7
+
+    return min(25, score)
+
+
+def _score_companies(applicant: dict) -> int:
+    """Employer quality + education → 0-20 pts."""
+    score = 0
+    cd = _extract_crustdata(applicant)
+
+    employers = cd.get("all_employers") or []
+    if isinstance(employers, str):
+        employers = [employers]
+
+    top_hits = 0
+    for emp in employers:
+        emp_l = _normalize(str(emp))
+        if any(t in emp_l for t in TOP_COMPANIES):
+            top_hits += 1
+
+    if   top_hits >= 3: score += 12
+    elif top_hits >= 2: score += 10
+    elif top_hits >= 1: score += 7
+
+    # Breadth: number of distinct employers (0-4)
+    unique_emp = len(set(_normalize(str(e)) for e in employers))
+    if   unique_emp >= 5: score += 4
+    elif unique_emp >= 3: score += 3
+    elif unique_emp >= 2: score += 2
+    elif unique_emp >= 1: score += 1
+
+    # Education bonus (0-4)
+    schools = cd.get("all_schools") or []
+    for school in schools:
+        if any(t in _normalize(str(school)) for t in TOP_SCHOOLS):
+            score += 4
+            break
+
+    return min(20, score)
+
+
+def _score_skills(applicant: dict) -> int:
+    """Industries, KPIs, tools, deal size, LinkedIn skills → 0-20 pts."""
+    score = 0
+
+    # Industries (0-5)
+    industries = _parse_json_field(applicant.get("industries"))
+    if isinstance(industries, list) and industries:
+        score += min(5, len(industries) + 1)
+
+    # KPIs (0-4)
+    kpis = _parse_json_field(applicant.get("sales_kpis"))
+    if isinstance(kpis, list):
+        score += min(4, len(kpis))
+
+    # Tools (0-4)
+    tools = _parse_json_field(applicant.get("sales_tool_experience"))
+    if isinstance(tools, list):
+        score += min(4, len(tools))
+
+    # Deal size (0-4)
+    try:
+        deal = int(applicant.get("deal_size", 0) or 0)
+        if   deal >= 500_000: score += 4
+        elif deal >= 100_000: score += 3
+        elif deal >= 25_000:  score += 2
+        elif deal >= 5_000:   score += 1
+    except (ValueError, TypeError):
+        pass
+
+    # LinkedIn skills breadth (0-3)
+    cd = _extract_crustdata(applicant)
+    skills = cd.get("skills") or []
+    if isinstance(skills, list):
+        if   len(skills) >= 10: score += 3
+        elif len(skills) >= 5:  score += 2
+        elif len(skills) >= 1:  score += 1
+
+    return min(20, score)
+
+
+def _score_completeness(applicant: dict) -> int:
+    """How much profile data is filled → 0-15 pts (1 pt per filled field)."""
+    fields = [
+        "total_years_sales_experience", "industries", "sales_kpis",
+        "sales_tool_experience", "company_experience_new", "buyer_personas",
+        "departments_sold_to", "products_sold", "sales_cycle_description",
+        "highlights", "competencies", "ranking_within_team_new",
+        "resume_text", "current_location", "preferred_working_style_new",
+    ]
+    filled = sum(
+        1 for f in fields
+        if applicant.get(f) and str(applicant[f]).strip() not in ("", "[]", "null", "0")
+    )
+    return min(15, filled)
+
+
+# ── Main classify + score ──
 
 def classify_and_score(applicant: dict) -> dict:
-    """Classify and score one applicant using their LinkedIn data."""
-    title = str(applicant.get("title") or applicant.get("linkedin_headline") or "")
-    company = str(applicant.get("company") or applicant.get("linkedin_company") or "")
-    experience = str(applicant.get("experience") or applicant.get("linkedin_experience") or "")
-    education = str(applicant.get("education") or applicant.get("linkedin_education") or "")
-    headline = str(applicant.get("linkedin_headline") or title)
-    combined = f"{title} {headline} {company} {experience}"
+    """Classify a sales candidate by role and compute a 0–100 score."""
+    cd = _extract_crustdata(applicant)
 
-    # 1. Check VC first (highest priority detection)
-    is_vc, vc_score, vc_role = _is_vc(title, company, experience)
-    if is_vc and vc_score >= 30:
-        detail = vc_role
-        if company:
-            detail = f"{vc_role} @ {company}"
-        return {
-            "attendee_type": "vc",
-            "attendee_type_detail": detail,
-            "rank_score": vc_score,
-            "rank_reason": f"VC: {vc_role} (score {vc_score}/100). {company}",
-        }
+    headline = str(cd.get("headline") or applicant.get("linkedin_headline") or "")
+    all_titles = cd.get("all_titles") or []
+    if isinstance(all_titles, list):
+        title_text = " ".join(str(t) for t in all_titles)
+    else:
+        title_text = str(all_titles)
+    combined = f"{headline} {title_text}"
 
-    # 2. Founder
-    if _match_any(combined, FOUNDER_TITLES):
-        score = _get_seniority(combined, FOUNDER_SENIORITY)
-        detail = title[:60] if title else "Founder"
-        return {
-            "attendee_type": "founder",
-            "attendee_type_detail": detail,
-            "rank_score": score,
-            "rank_reason": f"Founder: {title or 'founder role detected'} (score {score}/100). {company}",
-        }
+    # Current employer for detail string
+    current_employer = ""
+    cur_emps = cd.get("current_employers") or []
+    if isinstance(cur_emps, list) and cur_emps:
+        current_employer = str(cur_emps[0].get("employer_name", ""))
 
-    # 3. PM
-    if _match_any(combined, PM_TITLES):
-        score = _get_seniority(combined, PM_SENIORITY)
-        detail = title[:60] if title else "PM"
-        return {
-            "attendee_type": "pm",
-            "attendee_type_detail": detail,
-            "rank_score": score,
-            "rank_reason": f"PM: {title} (score {score}/100). {company}",
-        }
+    # Classify by role (order matters — check more specific roles first)
+    if _match_any(combined, SALES_LEADER_TITLES):
+        role, seniority, label = "sales_leader", _get_seniority(combined, SALES_LEADER_SENIORITY), "Sales Leader"
+    elif _match_any(combined, SALES_ENGINEER_TITLES):
+        role, seniority, label = "sales_engineer", _get_seniority(combined, SE_SENIORITY), "Sales Engineer"
+    elif _match_any(combined, AE_TITLES):
+        role, seniority, label = "ae", _get_seniority(combined, AE_SENIORITY), "Account Executive"
+    elif _match_any(combined, ACCOUNT_MANAGER_TITLES):
+        role, seniority, label = "account_manager", _get_seniority(combined, AM_SENIORITY), "Account Manager"
+    elif _match_any(combined, SDR_TITLES):
+        role, seniority, label = "sdr", _get_seniority(combined, SDR_SENIORITY), "SDR"
+    elif _match_any(combined, GTM_TITLES):
+        role, seniority, label = "ae", _get_seniority(combined, GTM_SENIORITY), "GTM / Growth"
+    else:
+        role, seniority, label = "other", 30, headline[:60] or "Other"
 
-    # 4. Engineer
-    if _match_any(combined, ENGINEER_TITLES):
-        score = _get_seniority(combined, ENGINEER_SENIORITY)
-        detail = title[:60] if title else "Engineer"
-        return {
-            "attendee_type": "engineer",
-            "attendee_type_detail": detail,
-            "rank_score": score,
-            "rank_reason": f"Engineer: {title} (score {score}/100). {company}",
-        }
+    detail = headline[:60] if headline else label
+    if current_employer:
+        detail = f"{detail} @ {current_employer}"
 
-    # 5. Researcher
-    if _match_any(combined, RESEARCHER_TITLES):
-        score = _get_seniority(combined, RESEARCHER_SENIORITY)
-        detail = title[:60] if title else "Researcher"
-        return {
-            "attendee_type": "researcher",
-            "attendee_type_detail": detail,
-            "rank_score": score,
-            "rank_reason": f"Researcher: {title} (score {score}/100).",
-        }
+    # Score
+    exp   = _score_experience(applicant)
+    perf  = _score_performance(applicant)
+    comp  = _score_companies(applicant)
+    skill = _score_skills(applicant)
+    prof  = _score_completeness(applicant)
+    total = exp + perf + comp + skill + prof
 
-    # 6. Student
-    if _match_any(f"{combined} {education}", STUDENT_TITLES):
-        score = _get_seniority(f"{combined} {education}", STUDENT_SENIORITY)
-        detail = title[:60] if title else "Student"
-        return {
-            "attendee_type": "student",
-            "attendee_type_detail": detail,
-            "rank_score": score,
-            "rank_reason": f"Student: {title or education[:60]} (score {score}/100).",
-        }
+    reason = (
+        f"Role: {label} (seniority {seniority}/100) | "
+        f"Exp: {exp}/20 | Perf: {perf}/25 | "
+        f"Companies: {comp}/20 | Skills: {skill}/20 | Profile: {prof}/15"
+    )
 
-    # 7. Other — still give a score based on whether they have data
-    data_completeness = sum([
-        bool(title), bool(company), bool(experience),
-        bool(education), bool(applicant.get("about") or applicant.get("linkedin_about")),
-    ])
-    score = data_completeness * 10  # 0-50 based on data quality
     return {
-        "attendee_type": "other",
-        "attendee_type_detail": title[:60] if title else "Unknown",
-        "rank_score": score,
-        "rank_reason": f"Could not classify. Title: {title or 'none'}. Company: {company or 'none'}.",
+        "attendee_type": role,
+        "attendee_type_detail": detail[:80],
+        "rank_score": total,
+        "rank_reason": reason,
     }
 
 
+# ── Route ──
+
 @router.post("/{session_id}")
 def rank_session(session_id: str):
-    """Classify and rank all applicants in a session using LinkedIn data."""
+    """Classify and rank all applicants in a session."""
     session = get_session_or_404(session_id)
     applicants = scan_all_applicants(session_id)
 
@@ -257,15 +422,13 @@ def rank_session(session_id: str):
 
     for a in applicants:
         classification = classify_and_score(a)
-        # Only update if not user-overridden
         if not a.get("user_override_attendee_type"):
             update_applicant_fields(a["applicant_id"], classification)
             results["classified"] += 1
             t = classification["attendee_type"]
             results["by_type"][t] = results["by_type"].get(t, 0) + 1
 
-    # Now assign ranks within each category
-    # Re-fetch to get updated scores
+    # Assign ranks within each category
     applicants = scan_all_applicants(session_id)
     by_type: dict[str, list] = {}
     for a in applicants:

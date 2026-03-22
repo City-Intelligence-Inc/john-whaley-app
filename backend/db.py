@@ -287,8 +287,11 @@ def save_linkedin_scrape(result: dict) -> None:
 def upload_photo_to_s3(linkedin_url: str, photo_bytes: bytes, content_type: str = "image/jpeg") -> str:
     """Upload a profile photo to S3 and return the public URL."""
     import re
-    slug = re.search(r"/in/([^/?&#\s]+)", linkedin_url)
-    key = f"photos/{slug.group(1) if slug else uuid.uuid4()}.jpg"
+    slug_match = re.search(r"/in/([^/?&#\s]+)", linkedin_url)
+    slug = slug_match.group(1) if slug_match else str(uuid.uuid4())
+    # Use slug + short uuid to avoid collisions on special-char slugs
+    short_id = str(uuid.uuid4())[:8]
+    key = f"photos/{slug}-{short_id}.jpg"
     s3.put_object(
         Bucket=S3_BUCKET,
         Key=key,
