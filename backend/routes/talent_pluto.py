@@ -1,31 +1,18 @@
 """
-Talent Pluto Take-Home — sessions, roles, candidates, activity API.
-
-Sessions:
-  POST   /talent-pluto/sessions              Create (with results)
-  GET    /talent-pluto/sessions              List
-  GET    /talent-pluto/sessions/{id}         Get one
-  DELETE /talent-pluto/sessions/{id}         Delete
-
-Roles:
-  GET    /talent-pluto/roles                 Get custom roles
-  PUT    /talent-pluto/roles                 Save custom roles
-
-Candidates:
-  GET    /talent-pluto/candidates            List all candidates (across all sessions)
-  GET    /talent-pluto/candidates/{key}      Get one candidate's full history
-  PUT    /talent-pluto/candidates/{key}/stage  Update pipeline stage for a session
-
-Activity:
-  GET    /talent-pluto/activity              Recent activity feed
+Talent Pluto Take-Home — sessions, roles, candidates, scoring API.
 """
 
 from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone
+import json, asyncio, os
 import db
-from config import settings_table, talent_pluto_table
+from config import settings_table, talent_pluto_table, linkedin_scrapes_table
+from ai import call_ai_async
+
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
 router = APIRouter(prefix="/talent-pluto", tags=["talent-pluto"])
 
@@ -45,7 +32,6 @@ class ScoredCandidate(BaseModel):
     highlights: list[str] = []
     gaps: list[str] = []
 
-
 class CreateSessionRequest(BaseModel):
     role: str
     role_category: str = ""
@@ -58,7 +44,6 @@ class CreateSessionRequest(BaseModel):
     results: list[ScoredCandidate] = []
     user_id: Optional[str] = None
 
-
 class RoleTemplate(BaseModel):
     title: str
     description: str
@@ -67,67 +52,154 @@ class RoleTemplate(BaseModel):
     remote: bool = False
     experience: str = "1-3yr"
 
-
 class SaveRolesRequest(BaseModel):
     roles: list[RoleTemplate]
 
+class ScoreRequest(BaseModel):
+    candidates: list[dict]  # [{id, name, fullText, linkedinUrl?}]
+    job_description: str
+    api_key: str = ""
 
 class UpdateStageRequest(BaseModel):
     session_id: str
-    stage: str  # new, reviewed, interview, offer, hired, passed
+    stage: str
 
 
 # ── Helpers ──
 
 def _log_activity(action: str, metadata: dict):
-    """Append an activity entry to the activity log."""
     try:
-        entry = {
-            "action": action,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            **metadata,
-        }
-        # Get existing log
+        entry = {"action": action, "timestamp": datetime.now(timezone.utc).isoformat(), **metadata}
         item = settings_table.get_item(Key={"setting_id": ACTIVITY_SETTING_ID}).get("Item", {})
         log = item.get("entries", [])
         log.insert(0, entry)
-        if len(log) > 200:
-            log = log[:200]
+        if len(log) > 200: log = log[:200]
         settings_table.put_item(Item={"setting_id": ACTIVITY_SETTING_ID, "entries": log})
     except Exception:
-        pass  # activity logging is best-effort
+        pass
 
 
-def _update_candidate_record(name: str, linkedin_url: str, session_id: str, role: str, score: int, stage: str = "new"):
-    """Update the global candidate record with a new scoring/stage event."""
+def _load_linkedin_db() -> dict[str, str]:
+    """Load all LinkedIn profiles and return url->enrichment_text map."""
+    enrichments = {}
     try:
-        item = settings_table.get_item(Key={"setting_id": CANDIDATES_SETTING_ID}).get("Item", {})
-        candidates = item.get("candidates", {})
-
-        key = (linkedin_url or name).lower().strip()
-        if not key:
-            return
-
-        if key not in candidates:
-            candidates[key] = {
-                "name": name,
-                "linkedin_url": linkedin_url,
-                "roles": {},
-                "first_seen": datetime.now(timezone.utc).isoformat(),
-            }
-
-        candidates[key]["name"] = name  # update to latest
-        candidates[key]["last_seen"] = datetime.now(timezone.utc).isoformat()
-        candidates[key]["roles"][session_id] = {
-            "role": role,
-            "score": score,
-            "stage": stage,
-            "scored_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-        settings_table.put_item(Item={"setting_id": CANDIDATES_SETTING_ID, "candidates": candidates})
+        resp = linkedin_scrapes_table.scan()
+        items = resp.get("Items", [])
+        while "LastEvaluatedKey" in resp:
+            resp = linkedin_scrapes_table.scan(ExclusiveStartKey=resp["LastEvaluatedKey"])
+            items.extend(resp.get("Items", []))
+        for p in items:
+            url = (p.get("url") or "").rstrip("/").lower()
+            if not url: continue
+            parts = []
+            if p.get("name"): parts.append(f"Name: {p['name']}")
+            if p.get("headline"): parts.append(f"Headline: {p['headline']}")
+            if p.get("company"): parts.append(f"Company: {p['company']}")
+            if p.get("experience"): parts.append(f"Experience: {str(p['experience'])[:500]}")
+            if p.get("education"): parts.append(f"Education: {p['education']}")
+            if p.get("skills"): parts.append(f"Skills: {str(p['skills'])[:300]}")
+            if p.get("resume_text"): parts.append(f"Resume: {str(p['resume_text'])[:600]}")
+            if parts:
+                enrichments[url] = "\n--- LinkedIn ---\n" + "\n".join(parts)
     except Exception:
         pass
+    return enrichments
+
+
+# ── Score endpoint (SSE, runs on App Runner = no timeout) ──
+
+@router.post("/score")
+async def score_candidates(body: ScoreRequest):
+    api_key = body.api_key or OPENAI_API_KEY
+    candidates = body.candidates
+    job_description = body.job_description
+
+    async def generate():
+        yield f"data: {json.dumps({'type': 'start', 'total': len(candidates)})}\n\n"
+
+        # Load LinkedIn DB
+        linkedin_db = _load_linkedin_db()
+        yield f"data: {json.dumps({'type': 'enriched', 'count': len(linkedin_db)})}\n\n"
+
+        for i in range(0, len(candidates), 3):
+            batch = candidates[i:min(i+3, len(candidates))]
+            tasks = []
+            for bi, c in enumerate(batch):
+                idx = i + bi
+                tasks.append(_score_one(c, idx, job_description, linkedin_db, api_key))
+
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for r in results:
+                if isinstance(r, str):
+                    yield r
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+async def _score_one(c: dict, idx: int, job_description: str, linkedin_db: dict, api_key: str) -> str:
+    events = []
+    name = c.get("name", f"Candidate {idx}")
+
+    def ev(data: dict) -> str:
+        return f"data: {json.dumps(data)}\n\n"
+
+    # Parse
+    field_count = len(c.get("fullText", "").split("\n"))
+    events.append(ev({"type": "log", "index": idx, "name": name, "step": "parse", "detail": f"{field_count} fields extracted from CSV"}))
+
+    candidate_text = c.get("fullText", "")[:3000]
+    enriched = False
+
+    # Enrich
+    linkedin_url = (c.get("linkedinUrl") or "").rstrip("/").lower()
+    if linkedin_url and linkedin_url in linkedin_db:
+        candidate_text = candidate_text[:2200] + linkedin_db[linkedin_url]
+        enriched = True
+        events.append(ev({"type": "log", "index": idx, "name": name, "step": "enrich", "detail": "LinkedIn profile found"}))
+    elif not linkedin_url:
+        name_lower = name.lower()
+        for url, data in linkedin_db.items():
+            if name_lower.replace(" ", "") in url or name_lower.split(" ")[0] in url:
+                candidate_text = candidate_text[:2200] + data
+                enriched = True
+                events.append(ev({"type": "log", "index": idx, "name": name, "step": "enrich", "detail": "Fuzzy matched LinkedIn profile"}))
+                break
+
+    events.append(ev({"type": "log", "index": idx, "name": name, "step": "score", "detail": f"Sending {len(candidate_text)} chars to GPT-4o-mini{'(enriched)' if enriched else ''}"}))
+
+    # Score with retry
+    prompt = f"""Score candidates 0-100. Use full range: 85-100 exceptional, 70-84 strong, 55-69 decent, 40-54 partial, 25-39 weak, 0-24 poor.
+Return ONLY JSON: {{"score":<n>,"reasoning":"<2-3 sentences>","highlights":["..."],"gaps":["..."]}}
+
+ROLE:
+{job_description[:1500]}
+
+CANDIDATE:
+{candidate_text}"""
+
+    for attempt in range(3):
+        try:
+            raw = await call_ai_async("openai", api_key, "gpt-4o-mini", prompt, max_tokens=350, temperature=0.3)
+            import re
+            m = re.search(r'\{[\s\S]*\}', raw)
+            if m:
+                p = json.loads(m.group(0))
+                score = max(0, min(100, round(p.get("score", 0))))
+                events.append(ev({"type": "log", "index": idx, "name": name, "step": "result", "detail": f"Score: {score}/100"}))
+                events.append(ev({"type": "scored", "index": idx, "id": c.get("id", ""), "name": name, "score": score, "reasoning": p.get("reasoning", ""), "highlights": p.get("highlights", []), "gaps": p.get("gaps", [])}))
+                return "".join(events)
+            else:
+                events.append(ev({"type": "scored", "index": idx, "id": c.get("id", ""), "name": name, "score": 0, "reasoning": raw[:200], "highlights": [], "gaps": []}))
+                return "".join(events)
+        except Exception as e:
+            if attempt < 2:
+                events.append(ev({"type": "log", "index": idx, "name": name, "step": "retry", "detail": f"Attempt {attempt+1} failed, retrying..."}))
+                await asyncio.sleep(1 * (attempt + 1))
+            else:
+                events.append(ev({"type": "error", "index": idx, "id": c.get("id", ""), "name": name, "error": str(e)[:100]}))
+                return "".join(events)
+
+    return "".join(events)
 
 
 # ── Sessions ──
@@ -136,60 +208,24 @@ def _update_candidate_record(name: str, linkedin_url: str, session_id: str, role
 def create_session(body: CreateSessionRequest):
     fields = body.model_dump()
     fields["results"] = [r.model_dump() if hasattr(r, "model_dump") else r for r in fields.get("results", [])]
-    # GSI requires user_id to be a non-null string
     if not fields.get("user_id"):
         fields["user_id"] = "anonymous"
     session = db.create_tp_session(fields)
-
-    # Update candidate records + log activity
-    for r in fields.get("results", []):
-        _update_candidate_record(
-            name=r.get("name", ""),
-            linkedin_url=r.get("id", ""),
-            session_id=session["session_id"],
-            role=fields.get("role", ""),
-            score=r.get("score", 0),
-        )
-
-    _log_activity("scored_candidates", {
-        "session_id": session["session_id"],
-        "role": fields.get("role", ""),
-        "candidate_count": fields.get("candidate_count", 0),
-        "avg_score": fields.get("avg_score", 0),
-        "file_name": fields.get("file_name", ""),
-    })
-
+    _log_activity("scored_candidates", {"session_id": session["session_id"], "role": fields.get("role", ""), "candidate_count": fields.get("candidate_count", 0)})
     return session
-
 
 @router.get("/sessions")
 def list_sessions(user_id: Optional[str] = None):
     sessions = db.list_tp_sessions(user_id=user_id)
-    return [
-        {
-            "session_id": s["session_id"],
-            "role": s.get("role", ""),
-            "role_category": s.get("role_category", ""),
-            "file_name": s.get("file_name", ""),
-            "candidate_count": s.get("candidate_count", 0),
-            "top_tier": s.get("top_tier", 0),
-            "good_fit": s.get("good_fit", 0),
-            "avg_score": s.get("avg_score", 0),
-            "created_at": s.get("created_at", ""),
-        }
-        for s in sessions
-    ]
-
+    return [{"session_id": s["session_id"], "role": s.get("role", ""), "role_category": s.get("role_category", ""), "file_name": s.get("file_name", ""), "candidate_count": s.get("candidate_count", 0), "top_tier": s.get("top_tier", 0), "good_fit": s.get("good_fit", 0), "avg_score": s.get("avg_score", 0), "created_at": s.get("created_at", "")} for s in sessions]
 
 @router.get("/sessions/{session_id}")
 def get_session(session_id: str):
     return db.get_tp_session(session_id)
 
-
 @router.delete("/sessions/{session_id}")
 def delete_session(session_id: str):
     db.delete_tp_session(session_id)
-    _log_activity("deleted_session", {"session_id": session_id})
     return {"detail": "Deleted"}
 
 
@@ -199,18 +235,14 @@ def delete_session(session_id: str):
 def get_roles():
     try:
         item = settings_table.get_item(Key={"setting_id": ROLES_SETTING_ID}).get("Item")
-        if item and "roles" in item:
-            return {"roles": item["roles"], "custom": True}
-    except Exception:
-        pass
+        if item and "roles" in item: return {"roles": item["roles"], "custom": True}
+    except Exception: pass
     return {"roles": [], "custom": False}
-
 
 @router.put("/roles")
 def save_roles(body: SaveRolesRequest):
     roles_data = [r.model_dump() for r in body.roles]
     settings_table.put_item(Item={"setting_id": ROLES_SETTING_ID, "roles": roles_data})
-    _log_activity("updated_roles", {"count": len(roles_data)})
     return {"roles": roles_data, "count": len(roles_data)}
 
 
@@ -218,77 +250,19 @@ def save_roles(body: SaveRolesRequest):
 
 @router.get("/candidates")
 def list_candidates():
-    """Get all candidates across all sessions with their history."""
     try:
         item = settings_table.get_item(Key={"setting_id": CANDIDATES_SETTING_ID}).get("Item", {})
         candidates = item.get("candidates", {})
-        # Convert to list sorted by last_seen
-        result = []
-        for key, data in candidates.items():
-            result.append({
-                "key": key,
-                "name": data.get("name", ""),
-                "linkedin_url": data.get("linkedin_url", ""),
-                "first_seen": data.get("first_seen", ""),
-                "last_seen": data.get("last_seen", ""),
-                "roles_count": len(data.get("roles", {})),
-                "roles": data.get("roles", {}),
-            })
-        result.sort(key=lambda x: x.get("last_seen", ""), reverse=True)
+        result = [{"key": k, "name": d.get("name", ""), "linkedin_url": d.get("linkedin_url", ""), "roles_count": len(d.get("roles", {})), "roles": d.get("roles", {})} for k, d in candidates.items()]
+        result.sort(key=lambda x: x.get("name", ""))
         return {"candidates": result, "count": len(result)}
     except Exception:
         return {"candidates": [], "count": 0}
 
-
-@router.get("/candidates/{key:path}")
-def get_candidate(key: str):
-    """Get a single candidate's full history."""
-    try:
-        item = settings_table.get_item(Key={"setting_id": CANDIDATES_SETTING_ID}).get("Item", {})
-        candidates = item.get("candidates", {})
-        data = candidates.get(key.lower().strip())
-        if not data:
-            return {"error": "Candidate not found"}
-        return data
-    except Exception:
-        return {"error": "Failed to fetch candidate"}
-
-
-@router.put("/candidates/{key:path}/stage")
-def update_candidate_stage(key: str, body: UpdateStageRequest):
-    """Update a candidate's pipeline stage for a specific session."""
-    try:
-        item = settings_table.get_item(Key={"setting_id": CANDIDATES_SETTING_ID}).get("Item", {})
-        candidates = item.get("candidates", {})
-        k = key.lower().strip()
-        if k not in candidates:
-            return {"error": "Candidate not found"}
-
-        if body.session_id in candidates[k].get("roles", {}):
-            candidates[k]["roles"][body.session_id]["stage"] = body.stage
-            candidates[k]["roles"][body.session_id]["stage_updated_at"] = datetime.now(timezone.utc).isoformat()
-
-        settings_table.put_item(Item={"setting_id": CANDIDATES_SETTING_ID, "candidates": candidates})
-
-        _log_activity("changed_stage", {
-            "candidate": candidates[k].get("name", key),
-            "stage": body.stage,
-            "session_id": body.session_id,
-        })
-
-        return {"detail": "Stage updated", "stage": body.stage}
-    except Exception as e:
-        return {"error": str(e)}
-
-
-# ── Activity ──
-
 @router.get("/activity")
 def get_activity(limit: int = 50):
-    """Get recent activity feed."""
     try:
         item = settings_table.get_item(Key={"setting_id": ACTIVITY_SETTING_ID}).get("Item", {})
-        entries = item.get("entries", [])
-        return {"entries": entries[:limit], "count": len(entries)}
+        return {"entries": item.get("entries", [])[:limit]}
     except Exception:
-        return {"entries": [], "count": 0}
+        return {"entries": []}
