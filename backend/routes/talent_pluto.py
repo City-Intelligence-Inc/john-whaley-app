@@ -114,6 +114,43 @@ def _load_linkedin_db() -> tuple[dict[str, str], dict[str, str], dict[str, str]]
 
 # ── Score endpoint (SSE, runs on App Runner = no timeout) ──
 
+async def _embedding_prefilter(candidates: list[dict], job_description: str, api_key: str, top_k: int = 100) -> list[dict]:
+    """Use embeddings to shortlist top_k candidates before expensive GPT scoring."""
+    if len(candidates) <= top_k:
+        return candidates  # No need to filter
+
+    try:
+        import openai as openai_lib
+        client = openai_lib.AsyncOpenAI(api_key=api_key)
+
+        # Embed job description
+        jd_resp = await client.embeddings.create(model="text-embedding-3-small", input=[job_description[:2000]])
+        jd_vec = jd_resp.data[0].embedding
+
+        # Embed all candidates (batch of 100)
+        all_texts = [c.get("fullText", "")[:500] for c in candidates]
+        all_vecs = []
+        for i in range(0, len(all_texts), 100):
+            batch = all_texts[i:i+100]
+            resp = await client.embeddings.create(model="text-embedding-3-small", input=batch)
+            all_vecs.extend([d.embedding for d in resp.data])
+
+        # Cosine similarity
+        import math
+        def cosine(a, b):
+            dot = sum(x*y for x,y in zip(a,b))
+            na = math.sqrt(sum(x*x for x in a))
+            nb = math.sqrt(sum(x*x for x in b))
+            return dot / (na * nb) if na and nb else 0
+
+        scored = [(cosine(jd_vec, v), i) for i, v in enumerate(all_vecs)]
+        scored.sort(reverse=True)
+        top_indices = set(idx for _, idx in scored[:top_k])
+        return [c for i, c in enumerate(candidates) if i in top_indices]
+    except Exception:
+        return candidates  # Fallback: no filtering
+
+
 @router.post("/score")
 async def score_candidates(body: ScoreRequest):
     api_key = body.api_key or OPENAI_API_KEY
@@ -122,17 +159,25 @@ async def score_candidates(body: ScoreRequest):
 
     # Concurrency: 10 at a time (OpenAI rate limit safe)
     BATCH_SIZE = 10
+    TOP_K = 100  # Max candidates to GPT-score
 
     async def generate():
-        yield f"data: {json.dumps({'type': 'start', 'total': len(candidates)})}\n\n"
+        # Pre-filter with embeddings if > TOP_K candidates
+        filtered = candidates
+        if len(candidates) > TOP_K:
+            yield f"data: {json.dumps({'type': 'log', 'index': 0, 'name': 'System', 'step': 'filter', 'detail': f'Pre-filtering {len(candidates)} candidates to top {TOP_K} using embeddings...'})}\n\n"
+            filtered = await _embedding_prefilter(candidates, job_description, api_key, TOP_K)
+            yield f"data: {json.dumps({'type': 'log', 'index': 0, 'name': 'System', 'step': 'filter', 'detail': f'Shortlisted {len(filtered)} candidates for GPT scoring'})}\n\n"
+
+        yield f"data: {json.dumps({'type': 'start', 'total': len(filtered), 'prefiltered_from': len(candidates)})}\n\n"
 
         # Load LinkedIn DB
         linkedin_db, photo_db, name_db = _load_linkedin_db()
         yield f"data: {json.dumps({'type': 'enriched', 'ready': True})}\n\n"
 
         scored_count = 0
-        for i in range(0, len(candidates), BATCH_SIZE):
-            batch = candidates[i:min(i + BATCH_SIZE, len(candidates))]
+        for i in range(0, len(filtered), BATCH_SIZE):
+            batch = filtered[i:min(i + BATCH_SIZE, len(filtered))]
             tasks = [_score_one(c, i + bi, job_description, linkedin_db, photo_db, name_db, api_key) for bi, c in enumerate(batch)]
 
             results = await asyncio.gather(*tasks, return_exceptions=True)
