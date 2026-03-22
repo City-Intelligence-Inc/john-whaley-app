@@ -1,21 +1,29 @@
 """
-Talent Pluto Take-Home — match session CRUD.
+Talent Pluto Take-Home — sessions + roles API.
 
-Stores CSV uploads, role configs, and AI scoring results in DynamoDB.
-Each session = one CSV upload matched against one role.
+Sessions: CSV uploads matched against roles, stored in DynamoDB.
+Roles: Custom role templates, stored in settings table.
 
-POST   /talent-pluto/sessions              Create a session (with results)
-GET    /talent-pluto/sessions              List all sessions
-GET    /talent-pluto/sessions/{id}         Get one session
-DELETE /talent-pluto/sessions/{id}         Delete a session
+Sessions:
+  POST   /talent-pluto/sessions              Create
+  GET    /talent-pluto/sessions              List
+  GET    /talent-pluto/sessions/{id}         Get one
+  DELETE /talent-pluto/sessions/{id}         Delete
+
+Roles:
+  GET    /talent-pluto/roles                 Get all custom roles
+  PUT    /talent-pluto/roles                 Save all custom roles
 """
 
 from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional
 import db
+from config import settings_table
 
 router = APIRouter(prefix="/talent-pluto", tags=["talent-pluto"])
+
+ROLES_SETTING_ID = "talent-pluto-custom-roles"
 
 
 class ScoredCandidate(BaseModel):
@@ -78,3 +86,41 @@ def get_session(session_id: str):
 def delete_session(session_id: str):
     db.delete_tp_session(session_id)
     return {"detail": "Deleted"}
+
+
+# ── Roles ──
+
+class RoleTemplate(BaseModel):
+    title: str
+    description: str
+    category: str = "Sales"
+    locations: list[str] = []
+    remote: bool = False
+    experience: str = "1-3yr"
+
+
+class SaveRolesRequest(BaseModel):
+    roles: list[RoleTemplate]
+
+
+@router.get("/roles")
+def get_roles():
+    """Get custom roles. Returns empty list if none saved (frontend uses defaults)."""
+    try:
+        item = settings_table.get_item(Key={"setting_id": ROLES_SETTING_ID}).get("Item")
+        if item and "roles" in item:
+            return {"roles": item["roles"], "custom": True}
+    except Exception:
+        pass
+    return {"roles": [], "custom": False}
+
+
+@router.put("/roles")
+def save_roles(body: SaveRolesRequest):
+    """Save custom roles. Overwrites all roles."""
+    roles_data = [r.model_dump() for r in body.roles]
+    settings_table.put_item(Item={
+        "setting_id": ROLES_SETTING_ID,
+        "roles": roles_data,
+    })
+    return {"roles": roles_data, "count": len(roles_data)}
