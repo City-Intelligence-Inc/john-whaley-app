@@ -124,23 +124,31 @@ async def score_candidates(body: ScoreRequest):
     async def generate():
         yield f"data: {json.dumps({'type': 'start', 'total': len(candidates)})}\n\n"
 
-        # Load LinkedIn DB (sync but fast — DynamoDB scan)
+        # Load LinkedIn DB
         linkedin_db, photo_db, name_db = _load_linkedin_db()
         yield f"data: {json.dumps({'type': 'enriched', 'count': len(linkedin_db)})}\n\n"
 
+        scored_count = 0
         for i in range(0, len(candidates), BATCH_SIZE):
             batch = candidates[i:min(i + BATCH_SIZE, len(candidates))]
-            tasks = []
-            for bi, c in enumerate(batch):
-                idx = i + bi
-                tasks.append(_score_one(c, idx, job_description, linkedin_db, photo_db, name_db, api_key))
+            tasks = [_score_one(c, i + bi, job_description, linkedin_db, photo_db, name_db, api_key) for bi, c in enumerate(batch)]
 
             results = await asyncio.gather(*tasks, return_exceptions=True)
             for r in results:
                 if isinstance(r, str):
                     yield r
+                    scored_count += 1
 
-    return StreamingResponse(generate(), media_type="text/event-stream")
+            # Keepalive ping between batches
+            yield f"data: {json.dumps({'type': 'ping', 'scored': scored_count})}\n\n"
+
+        yield f"data: {json.dumps({'type': 'done', 'total_scored': scored_count})}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
 
 
 async def _score_one(c: dict, idx: int, job_description: str, linkedin_db: dict, photo_db: dict, name_db: dict, api_key: str) -> str:
