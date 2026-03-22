@@ -322,7 +322,8 @@ async def _score_one(c: dict, idx: int, job_description: str, linkedin_db: dict,
                 events.append(ev({"type": "log", "index": idx, "name": name, "step": "enrich", "detail": f"Fuzzy matched — {name}"}))
                 break
 
-    events.append(ev({"type": "log", "index": idx, "name": name, "step": "score", "detail": f"Sending {len(candidate_text)} chars to GPT-4o-mini{'(enriched)' if enriched else ''}"}))
+    sim_str = f" | sim={similarity:.3f}" if similarity is not None else ""
+    events.append(ev({"type": "log", "index": idx, "name": name, "step": "score", "detail": f"Sending {len(candidate_text)} chars to GPT-4o-mini{'(enriched)' if enriched else ''}{sim_str}"}))
 
     # Score with retry — per-criterion breakdown
     # Extract rubric from job description if present
@@ -378,7 +379,8 @@ CANDIDATE: {candidate_text[:2000]}"""
                 # Calculate cost (gpt-4o-mini: $0.15/1M input, $0.60/1M output)
                 cost = (tokens_used["prompt"] * 0.15 + tokens_used["completion"] * 0.60) / 1_000_000
 
-                events.append(ev({"type": "log", "index": idx, "name": name, "step": "result", "detail": f"Score: {score}/100 | {tokens_used['prompt']+tokens_used['completion']} tokens | ${cost:.4f}"}))
+                sim_tag = f" | sim={similarity:.3f}" if similarity is not None else ""
+                events.append(ev({"type": "log", "index": idx, "name": name, "step": "result", "detail": f"Score: {score}/100 | {tokens_used['prompt']+tokens_used['completion']} tokens | ${cost:.4f}{sim_tag}"}))
                 scored_ev = {"type": "scored", "index": idx, "id": c.get("id", ""), "name": name, "score": score, "reasoning": p.get("reasoning", ""), "highlights": p.get("highlights", []), "gaps": p.get("gaps", []), "photo_url": photo_url, "linkedin_url": linkedin_url or c.get("linkedinUrl", ""), "evidence": evidence, "criteria": criteria_list, "tokens": tokens_used, "cost": round(cost, 6)}
                 if similarity is not None:
                     scored_ev["similarity"] = similarity
