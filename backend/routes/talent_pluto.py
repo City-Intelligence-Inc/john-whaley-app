@@ -79,9 +79,10 @@ def _log_activity(action: str, metadata: dict):
         pass
 
 
-def _load_linkedin_db() -> dict[str, str]:
-    """Load all LinkedIn profiles and return url->enrichment_text map."""
+def _load_linkedin_db() -> tuple[dict[str, str], dict[str, str]]:
+    """Load all LinkedIn profiles. Returns (url->enrichment_text, url->photo_url)."""
     enrichments = {}
+    photos = {}
     try:
         resp = linkedin_scrapes_table.scan()
         items = resp.get("Items", [])
@@ -91,6 +92,7 @@ def _load_linkedin_db() -> dict[str, str]:
         for p in items:
             url = (p.get("url") or "").rstrip("/").lower()
             if not url: continue
+            if p.get("photo_url"): photos[url] = p["photo_url"]
             parts = []
             if p.get("name"): parts.append(f"Name: {p['name']}")
             if p.get("headline"): parts.append(f"Headline: {p['headline']}")
@@ -103,7 +105,7 @@ def _load_linkedin_db() -> dict[str, str]:
                 enrichments[url] = "\n--- LinkedIn ---\n" + "\n".join(parts)
     except Exception:
         pass
-    return enrichments
+    return enrichments, photos
 
 
 # ── Score endpoint (SSE, runs on App Runner = no timeout) ──
@@ -118,7 +120,7 @@ async def score_candidates(body: ScoreRequest):
         yield f"data: {json.dumps({'type': 'start', 'total': len(candidates)})}\n\n"
 
         # Load LinkedIn DB
-        linkedin_db = _load_linkedin_db()
+        linkedin_db, photo_db = _load_linkedin_db()
         yield f"data: {json.dumps({'type': 'enriched', 'count': len(linkedin_db)})}\n\n"
 
         for i in range(0, len(candidates), 3):
@@ -126,7 +128,7 @@ async def score_candidates(body: ScoreRequest):
             tasks = []
             for bi, c in enumerate(batch):
                 idx = i + bi
-                tasks.append(_score_one(c, idx, job_description, linkedin_db, api_key))
+                tasks.append(_score_one(c, idx, job_description, linkedin_db, photo_db, api_key))
 
             results = await asyncio.gather(*tasks, return_exceptions=True)
             for r in results:
@@ -136,7 +138,7 @@ async def score_candidates(body: ScoreRequest):
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
-async def _score_one(c: dict, idx: int, job_description: str, linkedin_db: dict, api_key: str) -> str:
+async def _score_one(c: dict, idx: int, job_description: str, linkedin_db: dict, photo_db: dict, api_key: str) -> str:
     events = []
     name = c.get("name", f"Candidate {idx}")
 
@@ -150,8 +152,9 @@ async def _score_one(c: dict, idx: int, job_description: str, linkedin_db: dict,
     candidate_text = c.get("fullText", "")[:3000]
     enriched = False
 
-    # Enrich
+    # Enrich + find photo
     linkedin_url = (c.get("linkedinUrl") or "").rstrip("/").lower()
+    photo_url = photo_db.get(linkedin_url, "")
     if linkedin_url and linkedin_url in linkedin_db:
         candidate_text = candidate_text[:2200] + linkedin_db[linkedin_url]
         enriched = True
@@ -162,6 +165,7 @@ async def _score_one(c: dict, idx: int, job_description: str, linkedin_db: dict,
             if name_lower.replace(" ", "") in url or name_lower.split(" ")[0] in url:
                 candidate_text = candidate_text[:2200] + data
                 enriched = True
+                if not photo_url: photo_url = photo_db.get(url, "")
                 events.append(ev({"type": "log", "index": idx, "name": name, "step": "enrich", "detail": "Fuzzy matched LinkedIn profile"}))
                 break
 
@@ -186,7 +190,7 @@ CANDIDATE:
                 p = json.loads(m.group(0))
                 score = max(0, min(100, round(p.get("score", 0))))
                 events.append(ev({"type": "log", "index": idx, "name": name, "step": "result", "detail": f"Score: {score}/100"}))
-                events.append(ev({"type": "scored", "index": idx, "id": c.get("id", ""), "name": name, "score": score, "reasoning": p.get("reasoning", ""), "highlights": p.get("highlights", []), "gaps": p.get("gaps", [])}))
+                events.append(ev({"type": "scored", "index": idx, "id": c.get("id", ""), "name": name, "score": score, "reasoning": p.get("reasoning", ""), "highlights": p.get("highlights", []), "gaps": p.get("gaps", []), "photo_url": photo_url}))
                 return "".join(events)
             else:
                 events.append(ev({"type": "scored", "index": idx, "id": c.get("id", ""), "name": name, "score": 0, "reasoning": raw[:200], "highlights": [], "gaps": []}))
