@@ -160,11 +160,34 @@ async def _score_one(c: dict, idx: int, job_description: str, linkedin_db: dict,
     def ev(data: dict) -> str:
         return f"data: {json.dumps(data)}\n\n"
 
-    # Parse
-    field_count = len(c.get("fullText", "").split("\n"))
+    # Parse — extract key evidence from CSV fields
+    full_text = c.get("fullText", "")
+    field_count = len(full_text.split("\n"))
     events.append(ev({"type": "log", "index": idx, "name": name, "step": "parse", "detail": f"{field_count} fields extracted from CSV"}))
 
-    candidate_text = c.get("fullText", "")[:3000]
+    # Collect evidence from the raw CSV data
+    evidence = {}
+    for line in full_text.split("\n"):
+        if ":" in line:
+            key, _, val = line.partition(":")
+            key = key.strip().lower()
+            val = val.strip()[:200]
+            if not val or val in ("null", "[]", "{}"): continue
+            # Pick out the important fields
+            if any(k in key for k in ["experience", "years", "total_years"]): evidence["experience"] = val
+            elif any(k in key for k in ["industries", "industry"]): evidence["industries"] = val
+            elif any(k in key for k in ["departments_sold", "departments"]): evidence["departments"] = val
+            elif any(k in key for k in ["buyer_persona"]): evidence["buyers"] = val
+            elif any(k in key for k in ["sales_focus", "focus"]): evidence["focus"] = val
+            elif any(k in key for k in ["ranking_within", "ranking"]): evidence["ranking"] = val
+            elif any(k in key for k in ["sdr_grade"]) and "reasoning" not in key: evidence["sdr_grade"] = val
+            elif any(k in key for k in ["ae_grade"]) and "reasoning" not in key: evidence["ae_grade"] = val
+            elif any(k in key for k in ["current_location", "location"]): evidence["location"] = val
+            elif any(k in key for k in ["job_title", "title", "headline"]): evidence["title"] = val
+            elif any(k in key for k in ["company_experience", "company"]): evidence["companies"] = val
+            elif any(k in key for k in ["products_sold"]): evidence["products"] = val
+
+    candidate_text = full_text[:3000]
     enriched = False
 
     # Enrich + find photo + resolve name
@@ -175,6 +198,7 @@ async def _score_one(c: dict, idx: int, job_description: str, linkedin_db: dict,
         name = name_db[linkedin_url]
     if linkedin_url and linkedin_url in linkedin_db:
         candidate_text = candidate_text[:2200] + linkedin_db[linkedin_url]
+        evidence["linkedin_enriched"] = "true"
         enriched = True
         events.append(ev({"type": "log", "index": idx, "name": name, "step": "enrich", "detail": f"LinkedIn profile found — {name}"}))
     elif not linkedin_url:
@@ -209,7 +233,7 @@ CANDIDATE:
                 p = json.loads(m.group(0))
                 score = max(0, min(100, round(p.get("score", 0))))
                 events.append(ev({"type": "log", "index": idx, "name": name, "step": "result", "detail": f"Score: {score}/100"}))
-                events.append(ev({"type": "scored", "index": idx, "id": c.get("id", ""), "name": name, "score": score, "reasoning": p.get("reasoning", ""), "highlights": p.get("highlights", []), "gaps": p.get("gaps", []), "photo_url": photo_url, "linkedin_url": linkedin_url or c.get("linkedinUrl", "")}))
+                events.append(ev({"type": "scored", "index": idx, "id": c.get("id", ""), "name": name, "score": score, "reasoning": p.get("reasoning", ""), "highlights": p.get("highlights", []), "gaps": p.get("gaps", []), "photo_url": photo_url, "linkedin_url": linkedin_url or c.get("linkedinUrl", ""), "evidence": evidence}))
                 return "".join(events)
             else:
                 events.append(ev({"type": "scored", "index": idx, "id": c.get("id", ""), "name": name, "score": 0, "reasoning": raw[:200], "highlights": [], "gaps": []}))
